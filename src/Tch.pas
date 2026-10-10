@@ -140,6 +140,10 @@ type
     function ShallowClone: TTensor;
     { New storage with a copy of the data (zeros_like + copy_). }
     function Copy: TTensor;
+    { In-place copy of Src's data into this tensor (at_copy_; broadcasts and
+      converts like PyTorch's copy_). Run under NoGradGuard on a leaf that
+      requires grad. }
+    procedure CopyFrom(const Src: TTensor);
 
     { Data in: a 1-d tensor of the array's length. [1.0, 2.0] picks Single
       (kFloat), [1, 2] Int64 (kInt64), as PyTorch's defaults (H2). Int32
@@ -644,6 +648,14 @@ function TTensor.Copy: TTensor;
 begin
   Result := zeros_like;
   at_copy_(Result.Raw, Raw);
+  TchCheck;
+end;
+
+procedure TTensor.CopyFrom(const Src: TTensor);
+begin
+  TchCheckArg(Self, 'self', 'CopyFrom');
+  TchCheckArg(Src, 'src', 'CopyFrom');
+  at_copy_(Raw, Src.Raw);
   TchCheck;
 end;
 

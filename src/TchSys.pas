@@ -59,6 +59,50 @@ function ats_int(v: Int64): PTorchScalar; cdecl; external LibTch;
 function ats_float(v: Double): PTorchScalar; cdecl; external LibTch;
 procedure ats_free(s: PTorchScalar); cdecl; external LibTch;
 
+{ Serialization (DESIGN.md 4.6.3). The callback receives a new tensor it
+  must own and a name borrowed for the duration of the call. It must never
+  raise: a Pascal exception may not cross the C++ frames. }
+type
+  TTorchLoadCallback = procedure(data: Pointer; name: PChar; t: PTorchTensor);
+    cdecl;
+
+procedure at_save_multi(tensors: PPTorchTensor; tensor_names: PPChar;
+  ntensors: cint; filename: PChar); cdecl; external LibTch;
+procedure at_load_callback_with_device(filename: PChar; data: Pointer;
+  f: TTorchLoadCallback; device_id: cint); cdecl; external LibTch;
+procedure at_loadz_callback_with_device(filename: PChar; data: Pointer;
+  f: TTorchLoadCallback; device_id: cint); cdecl; external LibTch;
+
+{ Optimizers (DESIGN.md 4.6.4). The constructors return nil on error. }
+type
+  PTorchOptimizer = Pointer;
+
+function ato_sgd(learning_rate, momentum, dampening, weight_decay: Double;
+  nesterov: cint): PTorchOptimizer; cdecl; external LibTch;
+function ato_adam(learning_rate, beta1, beta2, weight_decay, eps: Double;
+  amsgrad: Boolean): PTorchOptimizer; cdecl; external LibTch;
+function ato_adamw(learning_rate, beta1, beta2, weight_decay, eps: Double;
+  amsgrad: Boolean): PTorchOptimizer; cdecl; external LibTch;
+function ato_rms_prop(learning_rate, alpha, eps, weight_decay,
+  momentum: Double; centered: cint): PTorchOptimizer; cdecl; external LibTch;
+procedure ato_add_parameters(opt: PTorchOptimizer; t: PTorchTensor;
+  group: csize_t); cdecl; external LibTch;
+procedure ato_set_learning_rate(opt: PTorchOptimizer;
+  learning_rate: Double); cdecl; external LibTch;
+procedure ato_set_learning_rate_group(opt: PTorchOptimizer; group: csize_t;
+  learning_rate: Double); cdecl; external LibTch;
+procedure ato_set_momentum(opt: PTorchOptimizer; momentum: Double); cdecl;
+  external LibTch;
+procedure ato_set_momentum_group(opt: PTorchOptimizer; group: csize_t;
+  momentum: Double); cdecl; external LibTch;
+procedure ato_set_weight_decay(opt: PTorchOptimizer;
+  weight_decay: Double); cdecl; external LibTch;
+procedure ato_set_weight_decay_group(opt: PTorchOptimizer; group: csize_t;
+  weight_decay: Double); cdecl; external LibTch;
+procedure ato_zero_grad(opt: PTorchOptimizer); cdecl; external LibTch;
+procedure ato_step(opt: PTorchOptimizer); cdecl; external LibTch;
+procedure ato_free(opt: PTorchOptimizer); cdecl; external LibTch;
+
 implementation
 
 end.

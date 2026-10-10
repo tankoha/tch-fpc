@@ -20,6 +20,10 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 - License: MIT OR Apache-2.0, same as tch-rs (`LICENSE-MIT`,
   `LICENSE-APACHE` at the repo root). Vendored tch-rs files keep tch-rs's own
   license copies next to them.
+- OCaml: `gen/gen.ml` is vendored as source (part of the fork). The OCaml
+  compiler and opam packages (`yaml`, `base`, `stdio`, `dune`) are installed
+  on the local machine to run it; they are a maintainer tool, needed only
+  when regenerating for a new libtorch, never to build tch-fpc.
 - Session 2 reviewed section 4 against tch-rs's sources and added 4.6 (nn /
   VarStore / optimizers / JIT as classes + `TVarPath` record, single
   `Forward(X, Train = False)`) and 4.7 (grad mode). Unverified FPC 3.2.2
@@ -97,11 +101,6 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 
 ## Open questions
 
-- **OCaml toolchain.** `gen/gen.ml` is vendored as source either way (it is
-  part of the fork). The question is whether to install the OCaml compiler
-  and opam packages (`yaml`, `base`, `stdio`) on the local machine to *run*
-  it. Only needed when bumping libtorch, never for building tch-fpc.
-  Alternative: run gen.ml only in cloud sessions and commit `ops.tsv`.
 - **Multi-output ops**: `out` parameters (decided) — revisit whether a few
   hand-written result records (`max_dim`, `sort`, `topk`, `lstm`) are worth
   adding after writing real code. Also whether `var` instead of `out` is

@@ -379,6 +379,14 @@ Semantics:
   int64), and the set `Single, Double, Int64, Byte, Boolean` resolves every
   literal tried. So: no `array of Int32` overload of `FromArray`; int32
   data goes through a named function (e.g. `FromInt32Array`) or `FromBytes`.
+  **(H2) addendum** (local session 3, measured on 3.2.2): the open-array
+  constructor takes its element type from the **first** element. A first
+  element that is exact in `Single` (`1.0`, `0.5`, an integer) makes the
+  whole literal `Single`, so `[1.0, 0.1]` picks `Single` and rounds `0.1`
+  silently; a first element that is not (`0.9`, `3.14`, `1e-3`) makes the
+  call **ambiguous** (`[0.9, 1.0]`, `[3.14]` do not compile). Workaround:
+  type the first element (`[Double(0.9), -1.9]` picks `Double`,
+  `[Single(0.9)]` picks `Single`). Open question in HANDOFF.
 
 Operators (hand-written; map to generated ops):
 
@@ -1157,6 +1165,9 @@ Decisions and rationale (overall shape):
   requested shape, so `Make` ends with `.view(Dims)` (a no-op for 2-D
   dims, where the two agree). **(H14)**: `Q·Qᵀ = I` for `[3, 5]` and
   `Qᵀ·Q = I` for `[5, 3]` with `allclose(…, 1e-5)` on real libtorch.
+  **(H14) resolved** (local session 3): both hold to 1e-5 (max abs
+  difference to `eye`), the shape is `Dims`, and `[2, 3, 2]` with gain 2
+  keeps its shape with rows of norm 2.
 - **No `NoGradGuard` in `Make`:** every tensor is created inside it with
   `requires_grad = False`, so no history is recorded (tch-rs's `f_init` has
   no `no_grad` either, except a redundant one around the gain multiply).
@@ -1169,6 +1180,10 @@ Decisions and rationale (overall shape):
   such a leaf raises in libtorch; tch-rs leaves the `no_grad` to the caller
   (its tests wrap `init` in `no_grad`), the Pascal version does it itself.
   **(H17)**: confirm the failure without the guard and success with it.
+  **(H17) resolved** (local session 3): `fill_` on a trainable leaf without
+  the guard raises `ETorchNativeError` "a leaf Variable that requires grad
+  is being used in an in-place operation."; `Apply` succeeds for every
+  `TInit` kind and the variable still requires grad afterwards.
   Hand-written `TTensor.CopyFrom(const Src: TTensor)` over `at_copy_` is
   added to `Tch.pas` for this (there is no generated `copy_`; `_copy_from`
   is a different identifier, so tchgen's name check passes).
@@ -1224,7 +1239,9 @@ Decisions and rationale (overall shape):
   `FTrainable` entry; the entries stay trainable and stay in the optimizer
   (libtorch's optimizers skip a parameter whose `grad` is undefined,
   **(H18)**: `Freeze; Step` leaves the values unchanged and raises nothing).
-  In place: no handle changes.
+  In place: no handle changes. **(H18) resolved** (local session 3): after
+  `ZeroGrad; Freeze`, a backward through `A * E` (E an unfrozen tensor)
+  leaves `A.grad` undefined and `Step` leaves `A` unchanged without raising.
 - **`SetDevice(D)`** (`set_device`): for every entry
   `T.set_data(T.&to(D))` (generated `set_data` and `&to`), then `FDevice :=
   D`. `set_data` swaps the storage behind the *same* C++ tensor object, so
@@ -1234,6 +1251,11 @@ Decisions and rationale (overall shape):
   moved, so create optimizers after `SetDevice`. **(H13)**: a layer's
   `Weight` and the store's entry show the new device after `SetDevice`, and
   an optimizer created before a `SetKind(kDouble)` still steps the variable.
+  **(H13) resolved** (local session 3, CPU only): after `SetKind(kDouble)` a
+  `TLinear`'s `Weight` (same handle) is `kDouble`, and an SGD optimizer
+  created before the conversion steps it to the hand-computed `[0.9, 0.8]`
+  and leaves it `kDouble`. `SetDevice(Cpu)` keeps the handles usable; a real
+  device move awaits a GPU build.
 - **`SetKind(K)`** (`set_kind` → `Path::set_kind` on the root): every entry
   `T.set_data(T.totype(K))`, then `FKind := K`. **`SetFloatKind(K)`**
   (tch-rs `half` / `bfloat16` / `float` / `double`): only entries whose
@@ -1323,6 +1345,9 @@ Decisions and rationale (overall shape):
   the first pass; the missing names are returned in insertion order
   (tch-rs's `save_and_load_partial_var_store_incomplete_file` expects
   `['a.b.t2']`). **(H15)**: the precision update on real libtorch.
+  **(H15) resolved** (local session 3): after `SetFloatKind(kHalf)`, save,
+  and `Load` into a fresh `kFloat` store, both variables are `kHalf` with
+  means 42 and 2, as in tch-rs's `save_and_load_var_store`.
 
 #### 4.6.4 Optimizers, from `nn/optimizer.rs`, `wrappers/optimizer.rs` and `torch_api.cpp`
 
@@ -1397,6 +1422,9 @@ Decisions and rationale (overall shape):
   (one token, `torch_api.cpp` line 564); **(H16)**: the unpatched build
   raises `ETorchNativeError('unexpected optimizer')` from
   `SetMomentumGroup(0, …)` on an Adam optimizer, the patched one does not.
+  **(H16) resolved** (local session 3): `build/nn_test h16` against a build
+  of the unpatched source fails with "unexpected optimizer"; against the
+  patched `build/libtch` it passes.
 - **`BackwardStep(Loss)`**: lazy add, `ato_zero_grad`, `Loss.Backward`,
   `ato_step`. `BackwardStepClip` / `BackwardStepClipNorm` insert the
   clipping between backward and step. `TrainableVariables` returns the
@@ -1486,7 +1514,10 @@ so `.ot` files interchange.
      `b = 0.08974` (`∂/∂w = -2/14·Σx·y = -80.955`, `∂/∂b = -2/14·Σy =
      -8.974`), to 1e-3 in float32. After 49 `BackwardStep`s loss < 0.25;
      `Apply(Constant(0))` on both resets the loss to the initial value;
-     `SetLearningRate(1e-10)` and 49 more steps change it by < 1e-5.
+     `SetLearningRate(1e-10)` and 49 more steps: tch-rs checks
+     `final - initial < 1e-5` (**signed**). An absolute bound of 1e-5 does
+     not hold: the loss drops by `49 · 1e-10 · (80.955² + 8.974²) =
+     3.25e-5`, measured `-3.24e-5` (local session 3); the test checks both.
   4. Adam: parameter `p = [1, -2]`, `loss = sum(p²)`, `Adam(VS, 0.1)`, one
      `BackwardStep` → `p = [0.9, -1.9]` to 1e-6: Adam's first step is
      `-lr·g/(|g| + eps)`, i.e. `lr·sign(g)`.
@@ -1665,3 +1696,9 @@ next, in that order.
 `TLinear`, `TConv2D`, `TBatchNorm`, `TLayerNorm`, `TEmbedding`,
 `TFuncModule`, `TSequential` — with the acceptance test of 4.6.7. Order
 of implementation and the new hypotheses H13–H18 are in HANDOFF.md.
+
+**Status (local session 3, 2026-10-10): milestone 2 done.** `src/TchNN.pas`
+implements 4.6 except JIT; `tests/nn/nn_test.pas` (real libtorch) passes
+with every number of 4.6.7 and H13–H18 resolved (results next to each
+hypothesis above); `tests/mock/nn_mock_test.pas` covers the plumbing.
+Next: JIT (`TchJit`), then CUDA.

@@ -376,6 +376,13 @@ type
   試したすべてのリテラルが解決しました。したがって `FromArray` に `array of Int32` の
   オーバーロードは置きません。int32 のデータは名前付きの関数（例：`FromInt32Array`）か
   `FromBytes` を使います。
+  **(H2) 追記**（ローカルセッション3、3.2.2 で計測）：オープン配列コンストラクタの要素型は
+  **先頭**の要素で決まります。先頭が `Single` で正確に表せる値（`1.0`、`0.5`、整数）なら
+  全体が `Single` になるので、`[1.0, 0.1]` は `Single` を選び `0.1` を黙って丸めます。
+  先頭がそうでない値（`0.9`、`3.14`、`1e-3`）だと呼び出しが**曖昧**になります
+  （`[0.9, 1.0]`、`[3.14]` はコンパイルできない）。回避策は先頭の要素に型を付けること
+  （`[Double(0.9), -1.9]` は `Double`、`[Single(0.9)]` は `Single`）。HANDOFF の
+  未解決の論点に記載。
 
 演算子（手書き。生成された op に対応付ける）：
 
@@ -1116,6 +1123,8 @@ type
   形を保つので、`Make` は最後に `.view(Dims)` を付けます（2-D なら何もせず、両者は一致）。
   **(H14)**：本物の libtorch で `[3, 5]` なら `Q·Qᵀ = I`、`[5, 3]` なら `Qᵀ·Q = I`
   （`allclose(…, 1e-5)`）。
+  **(H14) 解決**（ローカルセッション3）：どちらも 1e-5 以内（`eye` との差の最大絶対値）、
+  形は `Dims` のまま。`[2, 3, 2]` で gain 2 なら形を保ち、各行のノルムは 2。
 - **`Make` に `NoGradGuard` は不要：** 中で作るテンソルはすべて `requires_grad = False`
   なので履歴は記録されません（tch-rs の `f_init` にも `no_grad` はなく、gain の乗算を
   囲む冗長なものがあるだけ）。`requires_grad` はあとで `TVarPath.Add` が設定します。
@@ -1128,6 +1137,9 @@ type
   **(H17)**：ガードなしで失敗し、ありで成功することを確認。このために `at_copy_` を包む
   手書きの `TTensor.CopyFrom(const Src: TTensor)` を `Tch.pas` に足します（生成 op に
   `copy_` はなく、`_copy_from` は別の識別子なので tchgen の名前チェックは通る）。
+  **(H17) 解決**（ローカルセッション3）：ガードなしで学習対象のリーフに `fill_` すると
+  `ETorchNativeError`「a leaf Variable that requires grad is being used in an in-place
+  operation.」。`Apply` はすべての `TInit` で成功し、その後も変数は勾配を要求する。
 - **Kind。** `TVarPath.Variable` などはストアの `Kind` を渡します（tch-rs の `f_var` は
   `self.kind()`）。tch-rs は `zeros_no_train`、`ones_no_train`、`Entry::or_var` で
   `Kind::Float` を直書きしていますが、Pascal 版はどこでもストアの kind を使います
@@ -1172,7 +1184,9 @@ type
 - **`Freeze` / `Unfreeze`：** `FTrainable` の全要素に `set_requires_grad(False / True)`。
   要素は学習対象のままで、オプティマイザにも残ります（libtorch のオプティマイザは `grad`
   が未定義のパラメータを飛ばす。**(H18)**：`Freeze; Step` は値を変えず、例外も出ない）。
-  その場で行い、ハンドルは変わりません。
+  その場で行い、ハンドルは変わりません。**(H18) 解決**（ローカルセッション3）：
+  `ZeroGrad; Freeze` のあと `A * E`（E は凍結していないテンソル）を逆伝播すると
+  `A.grad` は未定義のまま。`Step` は `A` を変えず、例外も出ない。
 - **`SetDevice(D)`**（`set_device`）：全要素に `T.set_data(T.&to(D))`（生成 op の
   `set_data` と `&to`）、その後 `FDevice := D`。`set_data` は *同じ* C++ テンソル
   オブジェクトの裏のストレージを差し替えるので、ハンドルを共有するすべての `TTensor`
@@ -1181,6 +1195,10 @@ type
   状態バッファは移動しないので、オプティマイザは `SetDevice` のあとで作ること。
   **(H13)**：`SetDevice` のあとレイヤーの `Weight` とストアの要素が新しいデバイスを示し、
   `SetKind(kDouble)` より前に作ったオプティマイザがその変数をまだ更新できる。
+  **(H13) 解決**（ローカルセッション3、CPU のみ）：`SetKind(kDouble)` のあと `TLinear`
+  の `Weight`（同じハンドル）は `kDouble` になり、変換前に作った SGD がそれを手計算どおり
+  `[0.9, 0.8]` に更新し、`kDouble` のまま。`SetDevice(Cpu)` 後もハンドルは使える。実際の
+  デバイス移動は GPU 版で確認する。
 - **`SetKind(K)`**（`set_kind` → ルートの `Path::set_kind`）：全要素に
   `T.set_data(T.totype(K))`、その後 `FKind := K`。**`SetFloatKind(K)`**（tch-rs の
   `half` / `bfloat16` / `float` / `double`）：`is_floating_point` が真の要素のみ。
@@ -1263,6 +1281,9 @@ type
   パスなしで同じことをし、欠けていた名前を登録順に返します（tch-rs の
   `save_and_load_partial_var_store_incomplete_file` は `['a.b.t2']` を期待）。
   **(H15)**：本物の libtorch での精度の更新。
+  **(H15) 解決**（ローカルセッション3）：`SetFloatKind(kHalf)` して保存し、新しい
+  `kFloat` のストアに `Load` すると、両変数とも `kHalf` で平均は 42 と 2（tch-rs の
+  `save_and_load_var_store` と同じ）。
 
 #### 4.6.4 オプティマイザ、`nn/optimizer.rs`、`wrappers/optimizer.rs`、`torch_api.cpp` より
 
@@ -1330,6 +1351,8 @@ type
   `torch_api.cpp` の 564 行目）。**(H16)**：パッチ前のビルドでは Adam のオプティマイザへの
   `SetMomentumGroup(0, …)` が `ETorchNativeError('unexpected optimizer')` を投げ、
   パッチ後は投げない。
+  **(H16) 解決**（ローカルセッション3）：パッチ前のソースのビルドに対して
+  `build/nn_test h16` は「unexpected optimizer」で失敗し、パッチ後の `build/libtch` では通る。
 - **`BackwardStep(Loss)`**：遅延追加、`ato_zero_grad`、`Loss.Backward`、`ato_step`。
   `BackwardStepClip` / `BackwardStepClipNorm` は backward と step の間にクリッピングを
   挟みます。`TrainableVariables` はストアのものを返します。`Destroy` は `ato_free` を
@@ -1407,7 +1430,10 @@ type
      **1回** のステップ後：`w = 0.80955`、`b = 0.08974`（`∂/∂w = -2/14·Σx·y = -80.955`、
      `∂/∂b = -2/14·Σy = -8.974`）、float32 で 1e-3 以内。49回の `BackwardStep` の後は
      loss < 0.25。両方に `Apply(Constant(0))` すると loss は初期値に戻る。
-     `SetLearningRate(1e-10)` でさらに49ステップしても変化は 1e-5 未満。
+     `SetLearningRate(1e-10)` でさらに49ステップ：tch-rs の判定は
+     `final - initial < 1e-5`（**符号付き**）。絶対値で 1e-5 未満は成り立たない：loss は
+     `49 · 1e-10 · (80.955² + 8.974²) = 3.25e-5` 下がり、実測は `-3.24e-5`
+     （ローカルセッション3）。テストは両方を確認する。
   4. Adam：パラメータ `p = [1, -2]`、`loss = sum(p²)`、`Adam(VS, 0.1)`、1回の
      `BackwardStep` → `p = [0.9, -1.9]`、1e-6 以内：Adam の最初のステップは
      `-lr·g/(|g| + eps)`、すなわち `lr·sign(g)`。
@@ -1574,3 +1600,8 @@ Pascal の配列からテンソルを作る、データを読み戻す、表示�
 `TConv2D`、`TBatchNorm`、`TLayerNorm`、`TEmbedding`、`TFuncModule`、`TSequential` —
 と 4.6.7 の受け入れテスト。実装の順序と新しい仮説 H13〜H18 は HANDOFF_jp.md に
 あります。
+
+**状況（ローカルセッション3、2026-10-10）：マイルストーン2完了。** `src/TchNN.pas` が
+JIT を除く 4.6 を実装。`tests/nn/nn_test.pas`（本物の libtorch）は 4.6.7 の数値すべてで
+通り、H13〜H18 は解決（結果は上の各仮説の横）。配線は `tests/mock/nn_mock_test.pas` が
+確認する。次は JIT（`TchJit`）、その後 CUDA。

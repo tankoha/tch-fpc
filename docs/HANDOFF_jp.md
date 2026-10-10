@@ -4,7 +4,71 @@
 
 再開するときは最初にこれを読んでください。決定事項と理由は [DESIGN_jp.md](DESIGN_jp.md) にあります。
 
-## クラウドセッション4（2026-10-10）：DESIGN 4.6 を確定
+## ローカルセッション3（2026-10-10）：マイルストーン2を実装
+
+下のクラウドセッション4の一覧の手順1〜5を完了し、すべてのテストが通ります。
+
+1. **フォークのパッチ** `ato_set_momentum_group`：`} if` → `} else if`
+   （`csrc/libtch/torch_api.cpp`）。libtch を再ビルドし、`tests/abi` と
+   `tests/mock/run.sh` が通る。*パッチ前*のソースのビルドを H16 の計測専用に
+   `build/libtch-unpatched/`（git 管理外）に残してある。
+2. **L2/L3 の追加：** `src/TchSys.pas` に `TTorchLoadCallback`、`at_save_multi`、
+   `at_load_callback_with_device`、`at_loadz_callback_with_device`、`PTorchOptimizer`
+   と 14 個の `ato_*`（13 個 + `ato_free`）。`src/Tch.pas` に `TTensor.CopyFrom`
+   （`at_copy_`）。
+3. **`src/TchNN.pas`** は DESIGN 4.6 のスケッチどおり。小さな追加：`TVarPath.Group`。
+   `TVarPath.FullName` が名前を検査するので `TryGet` も `.`/`|` を拒否する。`AddEntry` は
+   nil テンソルで例外。private の `TOptimizer.CreateRaw` に FPC が「Constructor should be
+   public」と警告する（無害。設計どおり private のまま）。参照に使った tch-rs のソースは
+   4227b89b の `src/nn` と `tests` のスパースクローンで、セッションのスクラッチパッドに
+   置いた（コミットしていない）。
+4. **`tests/nn/nn_test.pas`**（ビルド方法はヘッダ）：4.6.7 の10グループすべてが通る。
+   加えて AdamW の1ステップ目（`[0.899, -1.898]`、減衰が更新より先）、存在しないファイルの
+   Load（`ETorchNativeError`）、`CopyFrom`、部分木への `TVarPath.SetKind`、`TSequential` の
+   MLP、`AddFn` へのメソッドポインタも確認。**H13〜H18 はすべて解決**（結果は DESIGN.md の
+   各仮説の横）。4.6.7 の訂正が2点：(a) `LoadPartial → ['a.b.t2']` は tch-rs の
+   `add_partial` の構成（`t123` は1回）が必要。完全な構成だと `a.b.ccc.t123__3` も欠ける。
+   (b) lr 1e-10 の判定は tch-rs では符号付き。loss は実際に 3.25e-5（手計算）／3.24e-5
+   （実測）下がるので、絶対値 1e-5 の上限は成り立たない。`build/nn_test h16` は H16 だけを
+   実行する（`LD_LIBRARY_PATH=build/libtch-unpatched` 用）。
+5. **モック：** `tests/mock/mock_tch.c` に 4.6.7 のスタブ（オプティマイザのカウンタ、
+   保存した名前、`err_after_first` / `nil_tensor` というファイル名で挙動が変わる load
+   コールバック、`set_requires_grad`、`set_data`、`fill_`、`uniform_`、`copy_`、勾配
+   モード）。`tests/mock/nn_mock_test.pas` を追加し、`run.sh` は両方を実行する。モックの
+   インプレース op は2つ目のハンドルではなくコピーを返す（配線の確認のみ）。
+
+- 回帰：`tests/api`、`tests/generated`、`tests/ownership`、`tests/compiler/run.sh` が通る。
+- **新しい計測、(H2) 追記**（DESIGN 4.3）：オープン配列リテラルの要素型は先頭の要素で
+  決まる。`[0.9, -1.9]`、`[3.14]`、`[1e-3]` は `FromArray` の `Single` と `Double` の
+  オーバーロードの間で**曖昧**。`[1.0, 0.1]` は黙って `Single` を選ぶ。テストでの回避策は
+  `[Double(0.9), -1.9]`。
+
+## クラウドへの引き継ぎ（2026-10-10、ローカルセッション3の終了時点）
+
+**設計のみ**（CLAUDE.md）。本物の libtorch で確認が必要なことは H19 以降として記す。
+
+1. **JIT マイルストーン（`TchJit`）。** 形は DESIGN 4.6 で決まっている（`TJitModule`
+   クラス、`TIValue` タグ付きレコード、H10 解決済み、`TTrainableJitModule =
+   class(TModule)`）。まだ機械的に進められない点：`torch_api.h`（201〜264 行）の
+   `atm_*` / `ati_*` のどれをどう宣言するか（`atm_forward` と `ivalue` を返す
+   `atm_forward_`、`atm_method[_]`、`atm_named_parameters` のコールバック — 4.6.3 と同じ
+   トランポリン方式か）。`TIValue` ↔ `ivalue` の変換と所有権（`ati_free`、タプル、汎用
+   リスト／辞書、マイルストーン3でどのタグまで）。`atm_to`/`atm_eval`/`atm_train`。
+   `TTrainableJitModule` がパラメータを `TVarPath` に登録する方法（名前、学習対象フラグ）。
+   **Python なしのテスト資材：** tch-rs のテストは `create_jit_models.py` で作った
+   `tests/foo*.pt` を読む。それらを取り込む（ライセンスは tch-rs と同じ MIT/Apache）か、
+   Pascal から `atm_create_for_tracing` / `atm_end_tracing` / `atm_save` でモジュールを
+   作るか。4.6.7 のように手で確かめられる数値で。
+2. **`FromArray` のリテラル（H2 追記）。** 先頭要素の規則を文書化するだけか、名前付きの
+   `FromSingles`/`FromDoubles` を足すか、オーバーロードの組を変えるか（例：`Single` を
+   外して実数リテラルを `Double` にする。PyTorch の既定 float32 とはずれる）を決める。
+   `[1.0, 0.1]` が黙って丸められる点も考慮。
+3. **任意、後で：** マイルストーン3のレイヤー（DESIGN 4.6.5 の先送り一覧）、CUDA/ROCm
+   （H13 の実際のデバイス移動は未確認。ここまで CPU のみ）。
+
+最後にいつもどおり DESIGN/HANDOFF（英日）を更新すること。
+
+## クラウドセッション4（2026-10-10）：DESIGN 4.6 を確定 — 上のローカルセッション3で実装済み
 
 下の依頼（「クラウドへの引き継ぎ、ローカルセッション2の終了時点」）に回答しました：
 DESIGN.md 4.6 にインターフェースのスケッチと小節 4.6.1〜4.6.7 を書き、それぞれ
@@ -88,7 +152,7 @@ DESIGN.md 4.6 にインターフェースのスケッチと小節 4.6.1〜4.6.7 
 - **(H18)** `Freeze; Step` は値を変えず、例外も出ない（libtorch は grad が未定義の
   パラメータを飛ばす）。
 
-**ローカルセッション、この順に（機械的）：**
+**ローカルセッション、この順に（機械的）：**（手順1〜6はローカルセッション3で完了）
 1. フォークのパッチ：`csrc/libtch/torch_api.cpp` の `ato_set_momentum_group`：
    `} if (auto sgd` → `} else if (auto sgd`。libtch を再ビルド。`tests/abi`、
    `tests/mock/run.sh`。
@@ -547,6 +611,9 @@ DESIGN_jp.md の各 (Hn) の横）。手順8のための OCaml の環境はロ�
   ローカルセッション2：`zeros`、`ones`、`empty`、`rand`、`randn` のオーバーロードを
   追加。`objfpc` では `overload` 指示子は不要（実測）だが、tchgen は意図した
   オーバーロードの目印に `overload;` を使う（DESIGN_jp.md の 4.4）。未決：out 引数の op に `topk(k)` 型のデフォルト。
+- **実数リテラルの `FromArray`**（ローカルセッション3、DESIGN 4.3 の H2 追記）：要素型は
+  先頭の要素で決まる。`[0.9, …]` は曖昧、`[1.0, 0.1]` は `Single` に丸められる。上でクラウドに
+  引き継いだ。
 - **等価性とコンテナ：決定**（クラウドセッション4）。`TTensor` の `=` は
   オーバーロードしないまま。`TchNN` に必要なのは追加のみの `array of TVarEntry`、
   `TDictionary<String, Integer>` の名前の索引、`TObjectList<TModule>` だけで、

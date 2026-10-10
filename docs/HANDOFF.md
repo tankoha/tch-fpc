@@ -4,7 +4,79 @@ Japanese version: [HANDOFF_jp.md](HANDOFF_jp.md)
 
 Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 
-## Cloud session 4 (2026-10-10): DESIGN 4.6 settled
+## Local session 3 (2026-10-10): milestone 2 implemented
+
+Steps 1–5 of cloud session 4's list (below) are done; every test passes.
+
+1. **Fork patch** `ato_set_momentum_group`: `} if` → `} else if`
+   (`csrc/libtch/torch_api.cpp`); libtch rebuilt; `tests/abi` and
+   `tests/mock/run.sh` pass. A build of the *unpatched* source is kept in
+   `build/libtch-unpatched/` (git-ignored) only to measure H16.
+2. **L2/L3 additions:** `src/TchSys.pas` has `TTorchLoadCallback`,
+   `at_save_multi`, `at_load_callback_with_device`,
+   `at_loadz_callback_with_device`, `PTorchOptimizer` and the 14 `ato_*`
+   (13 + `ato_free`); `src/Tch.pas` has `TTensor.CopyFrom` (`at_copy_`).
+3. **`src/TchNN.pas`** as sketched in DESIGN 4.6, with these small
+   additions: `TVarPath.Group`; `TVarPath.FullName` validates the name, so
+   `TryGet` rejects `.`/`|` too; `AddEntry` raises on a nil tensor. FPC
+   warns "Constructor should be public" for the private
+   `TOptimizer.CreateRaw` (harmless, kept private as designed). tch-rs
+   sources used for reference: a sparse clone of `src/nn` and `tests` at
+   4227b89b in the session scratchpad (not committed).
+4. **`tests/nn/nn_test.pas`** (build line in its header): all ten groups of
+   4.6.7 pass, plus AdamW's first step (`[0.899, -1.898]`, decay before the
+   update), Load of a missing file (`ETorchNativeError`), `CopyFrom`,
+   `TVarPath.SetKind` on a sub-tree, an MLP in `TSequential`, method
+   pointers in `AddFn`. **H13–H18 all resolved** (results in DESIGN.md next
+   to each). Two corrections to 4.6.7: (a) the `LoadPartial →
+   ['a.b.t2']` case needs tch-rs's `add_partial` layout (`t123` once), the
+   full layout also misses `a.b.ccc.t123__3`; (b) the lr 1e-10 check is
+   signed in tch-rs: the loss really drops by 3.25e-5 (hand) / 3.24e-5
+   (measured), so an absolute 1e-5 bound fails. `build/nn_test h16` runs
+   only the H16 check (for `LD_LIBRARY_PATH=build/libtch-unpatched`).
+5. **Mock:** `tests/mock/mock_tch.c` got the 4.6.7 stubs (optimizer
+   counters, save names, load callback with `err_after_first` /
+   `nil_tensor` file names, `set_requires_grad`, `set_data`, `fill_`,
+   `uniform_`, `copy_`, grad mode); `tests/mock/nn_mock_test.pas`; `run.sh`
+   runs both programs. In the mock an in-place op returns a copy, not a
+   second handle (plumbing only).
+
+- Regression: `tests/api`, `tests/generated`, `tests/ownership`,
+  `tests/compiler/run.sh` pass.
+- **New measurement, (H2) addendum** (DESIGN 4.3): an open-array literal
+  takes its element type from its first element. `[0.9, -1.9]`, `[3.14]`,
+  `[1e-3]` are **ambiguous** between the `Single` and `Double` overloads of
+  `FromArray`; `[1.0, 0.1]` silently picks `Single`. Workaround in the
+  tests: `[Double(0.9), -1.9]`.
+
+## Handing back to the cloud (2026-10-10, end of local session 3)
+
+**Design only** (CLAUDE.md). Mark what needs real libtorch as H19, ...
+
+1. **JIT milestone (`TchJit`).** DESIGN 4.6 fixes the shape (`TJitModule`
+   class, `TIValue` tagged record, H10 resolved, `TTrainableJitModule =
+   class(TModule)`). Not yet mechanical: which `atm_*` / `ati_*` entry
+   points of `torch_api.h` (lines 201–264) are declared and how
+   (`atm_forward` vs `atm_forward_` with `ivalue`, `atm_method[_]`,
+   `atm_named_parameters` callback — same trampoline pattern as 4.6.3?);
+   `TIValue` ↔ `ivalue` conversion and ownership (`ati_free`, tuples,
+   generic lists/dicts, which tags in milestone 3); `atm_to`/`atm_eval`/
+   `atm_train`; how `TTrainableJitModule` registers parameters into a
+   `TVarPath` (names, trainable flag). **Test assets without Python:**
+   tch-rs's tests load `tests/foo*.pt` made by `create_jit_models.py`;
+   either vendor those files (license: same MIT/Apache as tch-rs) or create
+   modules in Pascal through `atm_create_for_tracing` / `atm_end_tracing` /
+   `atm_save`. Hand-checkable numbers as in 4.6.7.
+2. **`FromArray` literals (H2 addendum).** Decide: document the first-element
+   rule only, add named `FromSingles`/`FromDoubles`, or change the overload
+   set (e.g. drop `Single` so real literals pick `Double`, which breaks
+   PyTorch's float32 default). Consider also `[1.0, 0.1]` rounding silently.
+3. **Optional, later:** milestone 3 layers (DESIGN 4.6.5 deferred list),
+   CUDA/ROCm (H13's real device move is untested; CPU only so far).
+
+Keep DESIGN/HANDOFF (en + jp) current at the end, as usual.
+
+## Cloud session 4 (2026-10-10): DESIGN 4.6 settled — implemented in local session 3 above
 
 The request below ("Handing back to the cloud, end of local session 2") is
 answered: DESIGN.md 4.6 now has the interface sketch plus subsections
@@ -98,7 +170,7 @@ decisions:
 - **(H18)** `Freeze; Step` leaves the values unchanged and raises nothing
   (libtorch skips parameters with an undefined grad).
 
-**Local session, in this order (mechanical):**
+**Local session, in this order (mechanical):** (steps 1–6 done in local session 3)
 1. Fork patch: `csrc/libtch/torch_api.cpp` `ato_set_momentum_group`:
    `} if (auto sgd` → `} else if (auto sgd`; rebuild libtch; `tests/abi`,
    `tests/mock/run.sh`.
@@ -590,6 +662,9 @@ build commands in each test's header and in "Local progress".
   added; no `overload` directive is needed in `objfpc` (measured), but
   tchgen uses `overload;` as the marker for deliberate overloads
   (DESIGN.md 4.4). Still open: `topk(k)`-style defaults for out-param ops.
+- **`FromArray` with real literals** (local session 3, H2 addendum in
+  DESIGN 4.3): the first element decides the element type; `[0.9, …]` is
+  ambiguous, `[1.0, 0.1]` rounds to `Single`. Handed to the cloud above.
 - **Equality and containers: decided** (cloud session 4). `=` stays
   un-overloaded for `TTensor`. `TchNN` needs only an append-only
   `array of TVarEntry`, a `TDictionary<String, Integer>` name index and

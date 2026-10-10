@@ -3,10 +3,12 @@
 Free Pascal bindings for the C++ API of PyTorch (libtorch), inspired by
 [tch-rs](https://github.com/LaurentMazare/tch-rs).
 
-**Status:** early implementation. The C wrapper builds against libtorch
-2.13.0, the core design has been verified on FPC 3.2.2, and the 2,657
-generated tensor ops compile; they have been run against a mock libtch
-only, not yet against libtorch. Nothing usable yet.
+**Status:** early implementation, CPU only (Linux x86-64, libtorch 2.13.0,
+FPC 3.2.2). Tensors with the 2,657 generated ops and a hand-written core
+API, autograd, and `TchNN` (initialisation, var store with save/load,
+SGD/Adam/AdamW/RmsProp, Linear, Conv2D, BatchNorm, LayerNorm, Embedding,
+Sequential) work against the real libtorch. TorchScript (JIT) and CUDA are
+not there yet; the API may still change.
 
 ## Naming, and how it differs from tch-rs
 

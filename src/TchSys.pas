@@ -103,6 +103,108 @@ procedure ato_zero_grad(opt: PTorchOptimizer); cdecl; external LibTch;
 procedure ato_step(opt: PTorchOptimizer); cdecl; external LibTch;
 procedure ato_free(opt: PTorchOptimizer); cdecl; external LibTch;
 
+{ TorchScript modules and ivalues (DESIGN.md 4.6.8). All are PROTECTed
+  except atm_free, ati_free and at_set_graph_executor_optimize; the
+  constructors return nil on error. atm_named_parameters calls back with
+  the load callback's signature. ati_to_string returns a strdup'd string
+  (tchf_free). Not declared: TorchScript objects (atm_create_class_,
+  ati_object_*, ati_clone) and atm_fuser_cuda_*. }
+type
+  PTorchModule = Pointer;
+  PTorchIValue = Pointer;
+  PPTorchIValue = ^PTorchIValue;
+
+function atm_load(filename: PChar): PTorchModule; cdecl; external LibTch;
+function atm_load_on_device(filename: PChar; device: cint): PTorchModule;
+  cdecl; external LibTch;
+function atm_load_str(data: PChar; sz: csize_t): PTorchModule; cdecl;
+  external LibTch;
+function atm_load_str_on_device(data: PChar; sz: csize_t;
+  device: cint): PTorchModule; cdecl; external LibTch;
+function atm_forward(m: PTorchModule; tensors: PPTorchTensor;
+  ntensors: cint): PTorchTensor; cdecl; external LibTch;
+function atm_forward_(m: PTorchModule; ivalues: PPTorchIValue;
+  nivalues: cint): PTorchIValue; cdecl; external LibTch;
+function atm_method(m: PTorchModule; method_name: PChar;
+  tensors: PPTorchTensor; ntensors: cint): PTorchTensor; cdecl;
+  external LibTch;
+function atm_method_(m: PTorchModule; method_name: PChar;
+  ivalues: PPTorchIValue; nivalues: cint): PTorchIValue; cdecl;
+  external LibTch;
+procedure atm_eval(m: PTorchModule); cdecl; external LibTch;
+procedure atm_train(m: PTorchModule); cdecl; external LibTch;
+procedure atm_free(m: PTorchModule); cdecl; external LibTch;
+procedure atm_to(m: PTorchModule; device, dtype: cint;
+  non_blocking: Boolean); cdecl; external LibTch;
+procedure atm_save(m: PTorchModule; filename: PChar); cdecl; external LibTch;
+function atm_get_profiling_mode: cint; cdecl; external LibTch;
+procedure atm_set_profiling_mode(b: cint); cdecl; external LibTch;
+procedure atm_set_tensor_expr_fuser_enabled(b: cint); cdecl; external LibTch;
+function atm_get_tensor_expr_fuser_enabled: Boolean; cdecl; external LibTch;
+procedure at_set_graph_executor_optimize(b: Boolean); cdecl; external LibTch;
+procedure atm_named_parameters(m: PTorchModule; data: Pointer;
+  f: TTorchLoadCallback); cdecl; external LibTch;
+function atm_create_for_tracing(modl_name: PChar; inputs: PPTorchTensor;
+  ninputs: cint): PTorchModule; cdecl; external LibTch;
+procedure atm_end_tracing(m: PTorchModule; fn_name: PChar;
+  outputs: PPTorchTensor; noutputs: cint); cdecl; external LibTch;
+{ fork additions: a scripted module from TorchScript source }
+function atm_create(modl_name: PChar): PTorchModule; cdecl; external LibTch;
+procedure atm_register_parameter(m: PTorchModule; name: PChar;
+  t: PTorchTensor; is_buffer: Boolean); cdecl; external LibTch;
+procedure atm_define(m: PTorchModule; src: PChar); cdecl; external LibTch;
+
+function ati_none: PTorchIValue; cdecl; external LibTch;
+function ati_tensor(t: PTorchTensor): PTorchIValue; cdecl; external LibTch;
+function ati_int(v: Int64): PTorchIValue; cdecl; external LibTch;
+function ati_double(v: Double): PTorchIValue; cdecl; external LibTch;
+function ati_bool(v: cint): PTorchIValue; cdecl; external LibTch;
+function ati_string(s: PChar): PTorchIValue; cdecl; external LibTch;
+function ati_tuple(ivalues: PPTorchIValue; n: cint): PTorchIValue; cdecl;
+  external LibTch;
+function ati_generic_list(ivalues: PPTorchIValue; n: cint): PTorchIValue;
+  cdecl; external LibTch;
+{ 2*npairs ivalues: k0, v0, k1, v1, ... }
+function ati_generic_dict(ivalues: PPTorchIValue;
+  npairs: cint): PTorchIValue; cdecl; external LibTch;
+function ati_int_list(v: PInt64; n: cint): PTorchIValue; cdecl;
+  external LibTch;
+function ati_double_list(v: PDouble; n: cint): PTorchIValue; cdecl;
+  external LibTch;
+{ bytes 0/1 }
+function ati_bool_list(v: PChar; n: cint): PTorchIValue; cdecl;
+  external LibTch;
+function ati_string_list(v: PPChar; n: cint): PTorchIValue; cdecl;
+  external LibTch;
+function ati_tensor_list(v: PPTorchTensor; n: cint): PTorchIValue; cdecl;
+  external LibTch;
+function ati_device(device: cint): PTorchIValue; cdecl; external LibTch;
+function ati_tag(i: PTorchIValue): cint; cdecl; external LibTch;
+function ati_to_tensor(i: PTorchIValue): PTorchTensor; cdecl;
+  external LibTch;
+function ati_to_int(i: PTorchIValue): Int64; cdecl; external LibTch;
+function ati_to_double(i: PTorchIValue): Double; cdecl; external LibTch;
+function ati_to_string(i: PTorchIValue): PChar; cdecl; external LibTch;
+function ati_to_bool(i: PTorchIValue): cint; cdecl; external LibTch;
+function ati_length(i: PTorchIValue): cint; cdecl; external LibTch;
+function ati_tuple_length(i: PTorchIValue): cint; cdecl; external LibTch;
+procedure ati_to_tuple(i: PTorchIValue; outputs: PPTorchIValue; n: cint);
+  cdecl; external LibTch;
+procedure ati_to_generic_list(i: PTorchIValue; outputs: PPTorchIValue;
+  n: cint); cdecl; external LibTch;
+{ writes 2*npairs }
+procedure ati_to_generic_dict(i: PTorchIValue; outputs: PPTorchIValue;
+  npairs: cint); cdecl; external LibTch;
+procedure ati_to_int_list(i: PTorchIValue; outputs: PInt64; n: cint);
+  cdecl; external LibTch;
+procedure ati_to_double_list(i: PTorchIValue; outputs: PDouble; n: cint);
+  cdecl; external LibTch;
+procedure ati_to_bool_list(i: PTorchIValue; outputs: PChar; n: cint);
+  cdecl; external LibTch;
+procedure ati_to_tensor_list(i: PTorchIValue; outputs: PPTorchTensor;
+  n: cint); cdecl; external LibTch;
+procedure ati_free(i: PTorchIValue); cdecl; external LibTch;
+
 implementation
 
 end.

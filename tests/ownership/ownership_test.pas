@@ -10,9 +10,6 @@ program ownership_test;
 uses
   SysUtils, Tch;
 
-const
-  CpuDevice = -1;
-
 var
   Failures: Integer = 0;
 
@@ -41,7 +38,7 @@ end;
 
 function Ones23: TTensor;
 begin
-  Result := TTensor.ones([2, 3], kFloat, CpuDevice);
+  Result := TTensor.ones([2, 3], kFloat, TDevice.Cpu);
 end;
 
 procedure TestAliasing;

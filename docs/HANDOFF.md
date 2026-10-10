@@ -44,9 +44,63 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
   `tests/ownership/ownership_test.pas` (`V.Dim`). The ownership test needs
   libtorch and was **not** re-run in the cloud; run it locally once
   (`Tch.pas` itself compiles).
-- Still open from the hand-back below: items 1 (ops.tsv schema, tchgen.pas
-  output per op shape) and 2 (error message format, `TKind` 27-45,
-  `TORCH_WARN`, default-argument scope, `FromArray` Int32).
+## Cloud session 3, part 2: step 8 implemented in the cloud
+
+The generator was designed *and built* here, because the design could be
+measured: FPC 3.2.2 was installed in the container, OCaml came from apt
+(`yaml` could not: opam's repository is unreachable through the proxy, so
+gen.ml ran against a 150-line stand-in `Yaml` module kept in the session's
+scratchpad, not committed). Everything in DESIGN.md section 5 is what the
+committed code does.
+
+- **gen.ml** writes `gen/ops.tsv` (`gen.exe <yaml> <csrc/libtch> <ops.tsv>`;
+  no arguments = upstream behaviour). The regenerated
+  `torch_api_generated.{h,cpp}` were byte-identical to the committed ones.
+  `gen/ops.tsv` is committed (2,657 ops).
+- **gen/tchgen.pas** (Pascal emitter) generates `src/TchSysGenerated.pas`,
+  `src/TchTensorGenerated_intf.inc`, `src/TchTensorGenerated_impl.inc`
+  (committed). `src/Tch.pas` now includes them, has the full `TKind`
+  (`kNone`, 0..45), `TLayout`, `TDevice`, `TScalar`, `TOptInt64`,
+  `TOptDouble`, `TOptIntList`, the nested `TTensorArray`, the helpers the
+  generated bodies use, and `ETorchNativeError.Detail`; the stand-in ops
+  are gone. `Tch.pas` with all ops compiles in 2.7 s.
+- **Decisions** (details in DESIGN.md): error message split at
+  `Exception raised from` (4.2); `TKind` extended to 45 with `kNone` for
+  optional dtypes, no `TOptKind` (4.3); autocast functions in the fork
+  patched to the device-taking API, warning handler deferred because c10's
+  handler is thread-local (4.2); default-parameter rule and its numbers
+  (4.4); results-that-are-inputs ops have no out parameters (4.4);
+  `FromArray` overloads without `Int32` (4.3).
+- **tests/mock**: a mock `libtch.so` (C, no libtorch) and `mock_test.pas`
+  exercising every generated op shape; 45 checks pass (`tests/mock/run.sh`).
+  `tests/compiler/run.sh` still passes. `tests/ownership/ownership_test.pas`
+  compiles (not linked here; `ones` now takes `TDevice.Cpu`).
+
+Local session, in this order (all mechanical):
+
+1. **Build libtch** again: `csrc/libtch/torch_api.cpp` has the autocast
+   patch (`is_autocast_enabled(at::kCUDA)` / `set_autocast_enabled`), not
+   compiled in the cloud. Then `tests/abi` and `tests/fpu` as before.
+2. **Reproduce `gen/ops.tsv`** with the real toolchain:
+   `(cd gen && dune build ./gen.exe)` then
+   `gen/_build/default/gen.exe <tch-rs>/third_party/pytorch/Declarations-v2.13.0.yaml csrc/libtch gen/ops.tsv`;
+   `git diff` should be empty (ops.tsv and the C files). If a default
+   string differs, the stand-in YAML parser typed a scalar differently:
+   fix `default_text` in gen.ml, rerun tchgen, commit the real output.
+3. **Run tchgen** (`fpc -FUbuild/gen -obuild/gen/tchgen gen/tchgen.pas &&
+   build/gen/tchgen gen/ops.tsv src`), expect no diff.
+4. **Run the ownership test** against real libtorch (build line in its
+   header), then `tests/mock/run.sh` (needs only gcc + fpc).
+5. **First real-libtorch test of generated ops** (new, small):
+   `split`, `max_dim`, `sort_values`, `cat`, `add_scalar(1.5)`,
+   `sum_dim_intlist(IntList([]))` vs `NoIntList`, `pad(..., 'constant',
+   NoDouble)`, `linalg_norm` (Scalar + IntListOption + defaults), one
+   `LayoutOption` op (`to_sparse`), and an error whose `Message` has no
+   backtrace while `Detail` has one. Compare with tch-rs/PyTorch results.
+6. Then the hand-written API of milestone 1 (DESIGN section 6):
+   `FromArray` overloads, `ToDoubles`/`CopyData`, scalar operators
+   (`+ 1`, `* 2.5`), `Zeros/Ones` convenience overloads (check whether
+   overloading a generated name needs `overload`), autograd.
 
 ## Handing back to the cloud (2026-10-10, end of local session 1)
 
@@ -245,31 +299,27 @@ build commands in each test's header and in "Local progress".
      lets a method parameter share a member's name in `objfpc`; `&out` as
      a parameter name compiles; `result` as a function parameter and a
      local variable named like a member are still rejected.
-8. **Generator.** Add `ops.tsv` output to gen.ml (exported name, kind,
-   receiver, result shape, args with defaults, return names); write
-   `gen/tchgen.pas`; generate `TchSysGenerated.pas` and the `.inc` files;
-   compile everything. Include the case-insensitive collision check against
-   hand-written names (`data`, `grad`, `detach`, `to_device`, `clone`, ...).
-   Parameter and out-names need no collision handling (H12); escape
-   reserved words with `&` and rename `result` to `result_` (DESIGN.md 4.4).
+8. **Generator. Done in cloud session 3** (see the top of this file):
+   gen.ml writes `ops.tsv`, `gen/tchgen.pas` writes `TchSysGenerated.pas`
+   and the `.inc` files, everything compiles, and `tests/mock` runs the
+   generated layer. Local: reproduce `ops.tsv` with the real `yaml`
+   library, run the ownership test, then the first real-libtorch test of
+   generated ops.
 
 ## Open questions
 
-- **Native error message format.** libtorch's message is the text plus a
-  multi-line C++ origin/backtrace (`Exception raised from ...`). tch-rs
-  passes it through unchanged. Option for `ETorchNativeError`: `Message` =
-  text before `Exception raised from`, full text in a `Detail` property.
-  Decide when writing `TchRaiseNative` (step 4+).
-- **`TKind` beyond 26.** libtorch 2.13 has ScalarType 27-45 and they are
-  creatable on CPU (step 4). DESIGN's `TKind` stops at 26 and raises on
-  unknown kinds. Decide: extend `TKind` to 45 (at least UInt16/32/64 and
-  Float8_e8m0fnu look useful), or keep 0-26 and let `Kind` raise.
-- **libtorch warnings.** `TORCH_WARN` goes to stderr unconditionally, and
-  the upstream `at_autocast_*` functions warn on every call (deprecated
-  `at::autocast::is_enabled`/`set_enabled`). Options: patch those two
-  functions in the fork to the non-deprecated device-taking API, and/or
-  install a `c10::WarningHandler` from libtch that forwards to a Pascal
-  callback.
+- **Native error message format: decided** (cloud session 3). `Message`
+  = text before `#10'Exception raised from '`, `Detail` = full text
+  (DESIGN.md 4.2, implemented in `ETorchNativeError.Create`). Verify the
+  split once against a real libtorch message (step 5 above).
+- **`TKind` beyond 26: decided** (cloud session 3). Extended to all 46
+  values of 2.13 plus `kNone = -1` for optional dtypes (DESIGN.md 4.3).
+  Open: which kinds `FromArray`/`CopyData` support (element sizes), to be
+  decided with the hand-written API.
+- **libtorch warnings: decided** (cloud session 3). Fork patch of the two
+  autocast functions only (not yet compiled locally); c10's warning
+  handler is thread-local, so a Pascal callback is deferred until needed
+  (DESIGN.md 4.2).
 - **Parameter names vs `TTensor` members: decided, then revised**
   (2026-10-10, user). First decision (local session 1): append `_` until
   unique, rename `Dim` → `NumDims`. Revised in cloud session 3 (H12):
@@ -288,14 +338,17 @@ build commands in each test's header and in "Local progress".
   prefix for `add`, `mul`, `div`, `sub`, ... whose plain names go to
   hand-written versions). These only rename the Rust wrappers; the
   `atg_*` names our generator reads are unaffected. Also in README.
-- **Multi-output ops**: `out` parameters (decided) — revisit whether a few
-  hand-written result records (`max_dim`, `sort`, `topk`, `lstm`) are worth
-  adding after writing real code. Also whether `var` instead of `out` is
-  preferable if (H8) shows the aliasing hazard bites in practice.
-- **Default arguments.** The generator emits defaults for trailing
-  Bool/Int64/Double/String runs. How many ops benefit, and which
-  hand-written convenience overloads (e.g. `TTensor.zeros([2, 3])` with
-  `kFloat`/CPU) are worth adding in the first milestone.
+- **Multi-output ops**: `out` parameters (decided; 149 ops), and no out
+  parameters for the 97 ops whose results are the tensors passed in
+  (cloud session 3, DESIGN.md 4.4). Still open: whether a few hand-written
+  result records (`max_dim`, `sort`, `topk`, `lstm`) are worth adding
+  after writing real code, and `var` instead of `out` if (H8) bites.
+- **Default arguments: decided** (cloud session 3, DESIGN.md 4.4): 479 ops
+  get defaults; ops with out parameters none (107 would have had some).
+  Open: which hand-written convenience overloads (`TTensor.zeros([2, 3])`
+  with `kFloat`/CPU, `topk(k)` with defaults) go into the first milestone,
+  and whether overloading a generated name needs the `overload` directive
+  in `objfpc` mode (not measured).
 - **Equality and containers.** `=` is deliberately not overloaded for
   `TTensor`, which rules out FGL (`TFPGList<TTensor>`). Confirm
   `Generics.Collections.TList<TTensor>` and plain `TTensorArray` cover the

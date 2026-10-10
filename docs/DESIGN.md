@@ -149,7 +149,7 @@ From reading tch-rs (to be **verified by building**, per CLAUDE.md):
   | ScalarType | `int` | `c10::ScalarType` value |
   | ScalarTypeOption | `int` | `<0` = none |
   | Device | `int` | `-1` CPU, `-2` MPS, `-3` Vulkan, `>=0` CUDA index |
-  | Layout / LayoutOption | `int8_t` | `-1` = none (no generated op uses it at 2.13) |
+  | Layout / LayoutOption | `int8_t` | `-1` = none (7 ops at 2.13: `to_sparse`, `_to_sparse`, `_spdiags`, ... ) |
 
 - The hand-written `torch_api.h` mixes `int` and C++ `bool` for flags
   (e.g. `at_autocast_is_enabled` returns `bool`). Pascal must declare each
@@ -424,6 +424,29 @@ management-operator variant is the escape hatch).
   same thread immediately, so threads do not interfere. Helpers used by
   generated bodies are prefixed `Tch` so that no op parameter name
   (`self`, `&out`, `data`, `index`, ...) can shadow them.
+- **Native message format (decided, cloud session 3).** libtorch's
+  `c10::Error::what()` is the message, then the context lines, then
+  `"\nException raised from <function> at <file>:<line> (most recent call
+  first):\n<backtrace>"` (`Error::compute_what` in `c10/util/Exception.cpp`).
+  `ETorchNativeError.Create` splits at the first `#10'Exception raised
+  from '`: `Message` is the text before it, the `Detail` property keeps the
+  full text. No change on the C side (`what_without_backtrace()` would need
+  a `c10::Error` catch clause and would lose the backtrace entirely).
+  Checked against the mock in `tests/mock`; the real text was seen in step 3.
+- **libtorch warnings (decided, cloud session 3).** `TORCH_WARN` goes to
+  stderr through c10's default `WarningHandler`. Two findings from
+  `c10/util/Exception.cpp` (2.13): the handler is **thread-local**
+  (`ThreadWarningHandler::warning_handler_`), so a handler installed from
+  Pascal would cover only the installing thread, not libtorch's worker
+  threads or other `TThread`s; and the deprecation warnings seen in step 4
+  come from `at::autocast::is_enabled()`/`set_enabled()`, which the fork
+  now replaces with `is_autocast_enabled(at::kCUDA)` /
+  `set_autocast_enabled(at::kCUDA, b)` in `torch_api.cpp` (same semantics,
+  no warning; **not yet compiled**, the cloud has no libtorch). Decision:
+  that patch only for the first milestone; libtorch's own warnings stay on
+  stderr, as in C++. A per-thread `tch_set_warning_handler(callback, data)`
+  in libtch forwarding `Warning::msg()` and `source_location()` to Pascal
+  is the follow-up if a program ever needs to capture them.
 - Before a call, every non-optional `Tensor` argument (including the
   receiver) is checked for `IsNil`; a nil handle raises
   `ETorchError('undefined tensor passed as <param> to <op>')`. This is the
@@ -476,15 +499,25 @@ management-operator variant is the escape hatch).
 
 ```pascal
 type
-  TKind = (kUInt8 = 0, kInt8 = 1, kInt16 = 2, kInt = 3, kInt64 = 4,
+  { every c10::ScalarType of libtorch 2.13 (torch/headeronly/core/ScalarType.h),
+    decided in cloud session 3: 0-26 were verified in step 4, 27-45 exist and
+    are creatable on CPU. kNone = -1 is "no dtype" for optional dtype
+    parameters only; TTensor.Kind raises ETorchError outside 0..45. }
+  TKind = (kNone = -1,
+           kUInt8 = 0, kInt8 = 1, kInt16 = 2, kInt = 3, kInt64 = 4,
            kHalf = 5, kFloat = 6, kDouble = 7, kComplexHalf = 8,
            kComplexFloat = 9, kComplexDouble = 10, kBool = 11,
            kQInt8 = 12, kQUInt8 = 13, kQInt32 = 14, kBFloat16 = 15,
+           kQUInt4x2 = 16, kQUInt2x4 = 17, kBits1x8 = 18, kBits2x4 = 19,
+           kBits4x2 = 20, kBits8 = 21, kBits16 = 22,
            kFloat8e5m2 = 23, kFloat8e4m3fn = 24, kFloat8e5m2fnuz = 25,
-           kFloat8e4m3fnuz = 26);
-           // values = c10::ScalarType as tch-rs kind.rs lists them; verify
-           // against c10/core/ScalarType.h. `TTensor.Kind` raises
-           // ETorchError on a value outside this set (unknown kind).
+           kFloat8e4m3fnuz = 26, kUInt16 = 27, kUInt32 = 28, kUInt64 = 29,
+           kUInt1 = 30, ..., kUInt7 = 36, kInt1 = 37, ..., kInt7 = 43,
+           kFloat8e8m0fnu = 44, kFloat4e2m1fnx2 = 45);
+
+  { c10::Layout; ltNone = -1 for optional layout parameters only }
+  TLayout = (ltNone = -1, ltStrided = 0, ltSparse, ltSparseCsr, ltMkldnn,
+             ltSparseCsc, ltSparseBsr, ltSparseBsc, ltJagged);
 
   TDeviceType = (dtCpu, dtCuda, dtMps, dtVulkan);
   TDevice = record
@@ -501,7 +534,7 @@ type
   TInt64Array  = array of Int64;
   TDoubleArray = array of Double;
   TSingleArray = array of Single;
-  TTensorArray = array of TTensor;
+  TTensorPtrArray = array of PTorchTensor;   // generated bodies: tensor-list arguments
 
   TScalar = record                // converted to a temporary ats_* handle per call
     IsFloat: Boolean;
@@ -512,23 +545,45 @@ type
 
   TOptInt64  = record HasValue: Boolean; Value: Int64;  class operator :=(V: Int64): TOptInt64;  end;
   TOptDouble = record HasValue: Boolean; Value: Double; class operator :=(V: Double): TOptDouble; end;
-  TOptKind   = record HasValue: Boolean; Value: TKind;  class operator :=(V: TKind): TOptKind;   end;
   TOptIntList = record HasValue: Boolean; Value: TInt64Array; end;
+
+  TTensor = record
+  public type
+    TTensorArray = array of TTensor;   // nested: cannot be declared before TTensor
+  ...
+  end;
+  TTensorArray = TTensor.TTensorArray; // alias for user code
 
 const
   NoInt64:   TOptInt64   = (HasValue: False; Value: 0);
   NoDouble:  TOptDouble  = (HasValue: False; Value: 0);
-  NoKind:    TOptKind    = (HasValue: False; Value: kFloat);
   NoIntList: TOptIntList = (HasValue: False; Value: nil);
 
 function IntList(const A: array of Int64): TOptIntList;  // present, possibly empty
 ```
 
 - `Default(TOptXxx)` is also "none"; the `NoXxx` constants are just more
-  readable at call sites (`t.sum_dim_intlist(IntList([0]), False, NoKind)`).
+  readable at call sites (`t.sum_dim_intlist(IntList([0]))`).
 - Hand-written, not generic (`TOpt<T>`): implicit `:=` operators inside
   generic records are an area with known 3.2.x bug reports, and there are
-  only four of them.
+  only three of them. Measured (cloud session 3): `t.argmax(1)`,
+  `t.clamp_min_(0.5)` and `t.add_scalar(1)` convert literals and variables
+  through the `:=` operators without a cast.
+- **No `TOptKind` (revised, cloud session 3).** A record parameter cannot
+  have a Pascal default (measured: "It is not possible to define a default
+  value for a parameter of type TOptInt64"), and `dtype: ScalarType? =
+  None` is the most common trailing optional argument (54 ops: `sum`,
+  `mean`, `cumsum`, `softmax`, ...). `ScalarTypeOption` is therefore
+  `TKind` with `kNone` meaning "none", exactly the C encoding (`-1`), so
+  those parameters get `= kNone` defaults. Same for `LayoutOption` with
+  `ltNone`. `Int64Option`/`DoubleOption` keep the records: there is no
+  spare value in `Int64`/`Double` to mean "none".
+- **`FromArray` overloads (decided, H2 follow-up).** `array of Single`,
+  `array of Double`, `array of Int64`, `array of Byte` and
+  `array of Boolean`: measured, `[1, 2]` picks `Int64`, `[1.0, 2.0]`
+  `Single`, `[True, False]` `Boolean`, no ambiguity. `Int32` is dropped
+  (ambiguous with `Int64`, H2); `Int32`/`Int16`/`Int8` data go through
+  `FromInt32s` etc. Hand-written, first milestone.
 - `IntListOption` (103 uses) was an open question: open arrays and dynamic
   arrays cannot distinguish "none" from "empty" (both are nil/zero-length),
   so a record with `HasValue` it is, built with `IntList([...])`.
@@ -549,14 +604,15 @@ Parameter mapping used by the generator:
 | IntListOption | `const X: TOptIntList` (`IntList([..])` / `NoIntList`) |
 | DoubleList | `const X: array of Double` |
 | TensorList / TensorOptList | `const X: array of TTensor` |
-| String | `const X: AnsiString` |
-| TensorOptions | `AKind: TKind; const ADevice: TDevice` |
-| ScalarType / ScalarTypeOption | `TKind` / `TOptKind` |
+| String | `const X: AnsiString` (passed as pointer + length; `None` reaches C as an empty string, as in tch-rs) |
+| TensorOptions | `X_kind: TKind; const X_device: TDevice` (the YAML name is `options` in all 80 ops) |
+| ScalarType / ScalarTypeOption | `X: TKind` (`kNone` = none for the option) |
 | Device | `const X: TDevice` |
+| Layout / LayoutOption | `X: TLayout` (`ltNone` = none for the option) |
 
 Results: one tensor → `TTensor`; dynamic → `TTensorArray`; N fixed tensors
-→ `out` parameters (see 4.4); `bool`/`int64_t`/`double` → `Boolean`/`Int64`/
-`Double`.
+→ `out` parameters, or none when the results are the tensors passed in
+(see 4.4); `bool`/`int64_t`/`double` → `Boolean`/`Int64`/`Double`.
 
 **(H6) resolved** (step 6): `TTensor.cat([A, B], 0)` and
 `TTensor.cat([A + B, B, A * B], 1)` give the right shapes; 200,000 calls
@@ -654,17 +710,50 @@ temporaries (H1).
   `ETorchError` rather than crashing. Document it; do not try to be clever.
   Also confirmed: a variable holding a previous value passed as `out`
   releases that value (handle count unchanged across the call).
-- Default arguments. gen.ml already parses each argument's `default`; the
-  manifest carries it (section 5) and the Pascal emitter turns the maximal
-  *trailing* run of `Bool` / `Int64` / `Double` / `String` parameters that
-  have a default into Pascal default parameters (`keepdim: Boolean = False`,
-  `dim: Int64 = -1`, `mode: AnsiString = 'constant'`). Record-typed
-  parameters (`TOpt*`, `TScalar`) and open arrays cannot carry defaults in
-  Pascal, so the run stops at the first of those. This is free and removes
-  most of the noise; convenience overloads beyond it are hand-written.
-- `TensorOptions` arguments stay explicit (`AKind, ADevice`); a hand-written
+- **Results that are the tensors passed in (decided, cloud session 3).**
+  97 of the 246 multi-result ops are "out=" variants (`max_dim_out`,
+  `sort_values`, `topk_values`, `qr_q`, `linalg_solve_ex_out`, ...): every
+  result name is also an argument name, and libtorch returns handles to
+  those very tensors. Measured on ops.tsv: in all 97 ops *every* result
+  collides, in none only some. Rule: such an op is a `procedure` **without
+  out parameters**; the generated body frees the N result handles after
+  the call (`TchFreeSlots`), the caller already holds the tensors
+  (`t.sort_values(V, I)` fills `V` and `I`). A partial overlap would be a
+  generator error. Single-result "out=" ops (`add_out`, 800+) keep
+  returning the `TTensor`, a new handle to `out`, like C++'s `Tensor&`.
+- Default arguments (revised, cloud session 3). gen.ml writes each
+  argument's `default` to ops.tsv in canonical text (section 5); tchgen
+  turns the maximal *trailing* run of defaultable parameters into Pascal
+  defaults. Defaultable: `Bool`, `Int64`, `Double`, `String`,
+  `ScalarType`, `ScalarTypeOption` (`= kNone`), `Layout`, `LayoutOption`
+  (`= ltNone`). Not defaultable, so the run stops there: records
+  (`TOptInt64`, `TOptDouble`, `TOptIntList`, `TScalar`, `TDevice`), open
+  arrays and `TTensor` (measured: FPC rejects a default on a record
+  parameter). `::std::nullopt` on a kind whose Pascal type cannot say
+  "none" (`bool?` 23 ops, `str?` 50 ops: C receives a plain bool / an
+  empty string) gets **no** default, the caller chooses, as in tch-rs.
+  `at::Reduction::Mean` → `1`; `"constant"` → `'constant'` (C escapes
+  decoded). Ops with `out` parameters get no defaults (defaults must be
+  the last parameters); ops that fill tensors passed in may. Measured on
+  2.13: 479 ops get at least one default; 107 of the 149 ops with out
+  parameters would have had some (`topk`, `sort`, ...), hand-written
+  wrappers can add them later.
+- `TensorOptions` arguments stay explicit (`options_kind: TKind; const
+  options_device: TDevice`, the C names); a hand-written
   `TTensor.zeros([2, 3])` overload defaulting to `kFloat`/CPU is cheap and
   mirrors tch-rs's `FLOAT_CPU`.
+- **Generated bodies (cloud session 3).** Every local is suffixed `__`
+  (`Outs__`, `P__`, `R__`, `<arg>__` for Scalar handles and tensor-list
+  pointer arrays); no YAML argument name ends in `__` (checked by tchgen).
+  The receiver is always written `Self.Raw`, and intrinsics are qualified
+  (`System.Ord`, `System.Length`, `System.PInt64`, `TchSys.PPTorchTensor`)
+  because parameters named `ord` and `length` exist and, under
+  `duplicatelocals`, would shadow the intrinsic (found when `linalg_norm`
+  failed to compile). Scalar handles are created inside `try` and freed in
+  `finally`; tensor lists are copied into a `TTensorPtrArray` after the
+  nil checks (`TchTensorPtrs`, `TchTensorOptPtrs`); a present-but-empty
+  `IntListOption` passes a non-nil pointer with length 0
+  (`TchOptIntListPtr`). All of this is exercised by `tests/mock`.
 
 ### 4.5 Unit layout
 
@@ -679,7 +768,12 @@ src/
   TchNN.pas                  TInit, TVarStore, TVarPath, TModule, layers,
                              TSequential, TOptimizer (4.6)
   TchJit.pas                 TJitModule, TIValue, TTrainableJitModule (4.6)
+gen/
+  gen.ml, dune, dune-project  forked tch-rs generator (+ ops.tsv output)
+  ops.tsv                    manifest read by tchgen             (generated)
+  tchgen.pas                 Pascal emitter (section 5)
 csrc/libtch/                 forked C wrapper + CMakeLists.txt
+tests/mock/                  mock libtch + test of the generated layer (no libtorch)
 gen/                         gen.ml (forked) + Pascal emitter
 ```
 
@@ -902,32 +996,89 @@ in the API comment.
 
 ## 5. Code generation (decision)
 
+Implemented in cloud session 3; everything below is what the code does
+(`gen/gen.ml`, `gen/tchgen.pas`), measured on libtorch 2.13.0's
+`Declarations.yaml` (2,657 ops).
+
 - gen.ml (OCaml) already parses `Declarations-v2.13.0.yaml` and knows the
-  real argument kinds. We fork it and add one more output: a line-oriented
-  manifest `gen/ops.tsv`, one op per line, e.g.
+  real argument kinds. The fork adds one output, the manifest `gen/ops.tsv`,
+  written when run as `gen.exe <Declarations.yaml> <csrc/libtch dir>
+  <ops.tsv>` (no Rust files in that mode; without arguments it behaves as
+  upstream, for the byte-for-byte check). One op per line, TAB separated,
+  `#` lines are comments:
 
   ```
-  add	method	self	fixed1	self:Tensor	other:Tensor
-  max_dim	method	self	fixed2	self:Tensor	dim:Int64	keepdim:Bool=False	->values,indices
-  conv2d	method	input	fixed1	input:Tensor	weight:Tensor	bias:TensorOption	stride:IntList=1	...
-  zeros	function	-	fixed1	size:IntList	options:TensorOptions
-  split	method	self	dynamic	self:Tensor	split_size:Int64	dim:Int64=0
+  name  receiver  result  arg:Type[=default]...  [->ret,ret,...]
   ```
 
-  Columns: exported name, kind, receiver (`self` / `input` / `-`), result
-  shape, arguments as `name:Type[=default]` (the YAML `default` string,
-  verbatim), optional `->` return names from `returns[].name`. gen.ml
-  already has the defaults; reading return names is a small addition.
-- The Pascal emitter is an FPC program (`gen/tchgen.pas`, runnable with
-  `instantfpc`) that reads `ops.tsv` and writes `TchSysGenerated.pas` and the
-  two `.inc` files. It owns all Pascal-specific policy: the `&` escaping
-  of reserved words (op and parameter names alike, `result` → `result_`),
-  default-parameter runs, the nil-handle checks, and the case-insensitive
-  collision check of *op names* against a list of hand-written member
-  names (parameter names need no check: 4.4, H12). No Python/Node
-  (CLAUDE.md).
-- Generated files are committed, so OCaml is only needed when bumping
-  libtorch, not to build tch-fpc.
+  | column | values |
+  |---|---|
+  | name | exported name; the C function is `atg_<name>` |
+  | receiver | `self`, `input` (the Tensor argument that becomes the Pascal receiver, tch-rs's rule) or `-` (static class function) |
+  | result | `nothing`, `fixed<N>` (N = 1..7), `dynamic`, `bool`, `int64`, `double` |
+  | args | every argument in C order, receiver included; `Type` is gen.ml's constructor name (`Tensor`, `TensorOption`, `Int64Option`, `IntList`, ..., `LayoutOption`); `=default` only when the YAML has one |
+  | `->` | only for `fixed<N>` with N ≥ 2: the N result names from `returns[].name` (`result0..` when the YAML has none) |
+
+  Default text is canonical (`default_text` in gen.ml), because the yaml
+  library types plain scalars (`1` becomes `Float 1.`): `true`/`false`,
+  integral numbers without a point (`-1`, `0`), other numbers as `%.16g`
+  (`1e-05`), strings verbatim including a C++ literal's quotes
+  (`"constant"`, `::std::nullopt`, `at::Reduction::Mean`, `{}`). Names
+  contain no `:`, `=` or TAB, defaults no TAB or newline (asserted).
+  Examples:
+
+  ```
+  add	self	fixed1	self:Tensor	other:Tensor
+  max_dim	self	fixed2	self:Tensor	dim:Int64	keepdim:Bool=false	->values,indices
+  conv2d	input	fixed1	input:Tensor	weight:Tensor	bias:TensorOption={}	stride:IntList=1	...	groups:Int64=1
+  zeros	-	fixed1	size:IntList	options:TensorOptions={}
+  split	self	dynamic	self:Tensor	split_size:Int64	dim:Int64=0
+  sort_values	self	fixed2	values:Tensor	indices:Tensor	self:Tensor	dim:Int64=-1	descending:Bool=false	->values,indices
+  ```
+
+- The Pascal emitter `gen/tchgen.pas` (FPC program; `fpc gen/tchgen.pas`
+  or `instantfpc`) reads `gen/ops.tsv` and `src/Tch.pas` and writes
+  `src/TchSysGenerated.pas`, `src/TchTensorGenerated_intf.inc` and
+  `src/TchTensorGenerated_impl.inc`. It owns all Pascal-specific policy
+  (4.3, 4.4): the parameter type per argument kind, `&` escaping of
+  reserved words for op and parameter names (a table of FPC keywords and
+  modifiers; `result` → `result_`; `self` is only ever the receiver),
+  default-parameter runs, out parameters or none, nil-handle checks,
+  Scalar and tensor-list temporaries. It scans the `TTensor = record`
+  declaration in `Tch.pas` for the hand-written member names and stops
+  with an error on: an op name equal to a member (case-insensitive), a
+  generated local (`<arg>__`, `Outs__`, `P__`, `R__`) equal to a member, a
+  parameter named `system`/`tch*`/`ttensor`/`self`, a partial overlap of
+  result and argument names, a default it cannot translate, an unknown
+  argument kind. Nothing is skipped silently. No Python/Node (CLAUDE.md).
+- Regeneration (only when bumping libtorch; OCaml is a maintainer tool):
+
+  ```
+  eval $(opam env --switch=tch-fpc)
+  (cd gen && dune build ./gen.exe)
+  gen/_build/default/gen.exe path/to/Declarations-v2.XX.yaml csrc/libtch gen/ops.tsv
+  fpc -FUbuild/gen -obuild/gen/tchgen gen/tchgen.pas && build/gen/tchgen gen/ops.tsv src
+  ```
+
+  The cloud session had no `yaml` opam package (proxy); it ran the same
+  gen.ml against a 150-line stand-in `Yaml` module that parses this file's
+  block subset with ocaml-yaml's plain-scalar typing, and the resulting
+  `torch_api_generated.{h,cpp}` were byte-identical to the committed ones.
+  The committed `ops.tsv` comes from that run; the local session should
+  reproduce it with the real library once (expected identical).
+- Generated files (`ops.tsv`, `torch_api_generated.*`,
+  `TchSysGenerated.pas`, the `.inc` files) are committed, so OCaml is only
+  needed when bumping libtorch, not to build tch-fpc. `Tch.pas` with all
+  2,657 ops compiles in 2.7 s (48,691 lines).
+- `tests/mock` (cloud session 3): a mock `libtch.so` in C (every `atg_*`
+  stubbed via `gen_stubs.sh` to report "mock: not implemented", a dozen
+  implemented on a tiny double-array tensor) plus `mock_test.pas`, which
+  runs the generated layer without libtorch: fixed-1, out parameters,
+  results-are-inputs, dynamic, scalar results, Scalar temporaries freed,
+  tensor lists (nil element rejected in Pascal, empty list rejected in C),
+  `IntListOption` nil-vs-empty, String + `DoubleOption`, defaults, the
+  error split, leak counters. 45 checks, `tests/mock/run.sh`. It is a
+  plumbing test, not a numerical one.
 - Rejected: parsing `torch_api_generated.h` directly — it loses the type
   distinctions listed in section 2. Rejected for now: a YAML parser in Pascal
   — doable, but duplicates gen.ml's accumulated special cases.

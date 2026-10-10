@@ -151,7 +151,7 @@ tch-rs を読んで得た内容です（CLAUDE.md に従い、**ビルドして�
   | ScalarType | `int` | `c10::ScalarType` の値 |
   | ScalarTypeOption | `int` | `<0` = なし |
   | Device | `int` | `-1` CPU、`-2` MPS、`-3` Vulkan、`>=0` CUDA の番号 |
-  | Layout / LayoutOption | `int8_t` | `-1` = なし（2.13 では生成された op に使用例なし） |
+  | Layout / LayoutOption | `int8_t` | `-1` = なし（2.13 では 7 op：`to_sparse`、`_to_sparse`、`_spdiags` など） |
 
 - 手書きの `torch_api.h` では、フラグに `int` と C++ の `bool` が混在しています
   （例：`at_autocast_is_enabled` は `bool` を返す）。Pascal 側は1つずつ正確に
@@ -420,6 +420,28 @@ type
   エラーの格納場所は C 側でスレッドローカルで、同じスレッドの直後に読むので、
   スレッド同士が干渉しません。生成されたコードが使う補助関数には `Tch` を付け、
   op の引数名（`self`、`&out`、`data`、`index` など）に隠されないようにします。
+- **ネイティブのメッセージの形（決定、クラウドセッション3）。** libtorch の
+  `c10::Error::what()` は、メッセージ、文脈の行、そして
+  `"\nException raised from <関数> at <ファイル>:<行> (most recent call
+  first):\n<バックトレース>"` の順です（`c10/util/Exception.cpp` の
+  `Error::compute_what`）。`ETorchNativeError.Create` は最初の
+  `#10'Exception raised from '` で分割し、`Message` はその前の本文、`Detail`
+  プロパティに全文を残します。C 側は変えません（`what_without_backtrace()` を
+  使うには `c10::Error` を捕まえる節が要り、しかもバックトレースが完全に失われる）。
+  `tests/mock` のモックで確認。実際の文面は手順3で見たとおり。
+- **libtorch の警告（決定、クラウドセッション3）。** `TORCH_WARN` は c10 の既定の
+  `WarningHandler` を通して stderr に出ます。`c10/util/Exception.cpp`（2.13）で
+  分かったこと2点：ハンドラーは **スレッドローカル**
+  （`ThreadWarningHandler::warning_handler_`）なので、Pascal から入れたハンドラーは
+  入れたスレッドにしか効かず、libtorch のワーカースレッドやほかの `TThread` には
+  効かない。手順4で見た非推奨の警告は `at::autocast::is_enabled()`/`set_enabled()`
+  が出すもので、フォークの `torch_api.cpp` ではこれを
+  `is_autocast_enabled(at::kCUDA)` / `set_autocast_enabled(at::kCUDA, b)` に
+  置き換えた（意味は同じ、警告なし。**まだコンパイルしていない**。クラウドには
+  libtorch がない）。決定：最初のマイルストーンではこのパッチだけ。libtorch 自身の
+  警告は C++ と同じく stderr のまま。プログラムが警告を捕まえる必要が出たら、
+  `Warning::msg()` と `source_location()` を Pascal に渡すスレッドごとの
+  `tch_set_warning_handler(callback, data)` を libtch に足すのが次の手。
 - 呼び出し前に、省略不可の `Tensor` 引数（レシーバーを含む）すべてについて
   `IsNil` を確認し、nil なら
   `ETorchError('undefined tensor passed as <param> to <op>')` を投げます。
@@ -469,15 +491,25 @@ type
 
 ```pascal
 type
-  TKind = (kUInt8 = 0, kInt8 = 1, kInt16 = 2, kInt = 3, kInt64 = 4,
+  { libtorch 2.13 の c10::ScalarType 全部（torch/headeronly/core/ScalarType.h）。
+    クラウドセッション3で決定：0〜26 は手順4で検証済み、27〜45 も存在し CPU で
+    作れる。kNone = -1 は省略可能な dtype 引数のための「dtype なし」で、
+    TTensor.Kind は 0..45 の外では ETorchError を投げる。 }
+  TKind = (kNone = -1,
+           kUInt8 = 0, kInt8 = 1, kInt16 = 2, kInt = 3, kInt64 = 4,
            kHalf = 5, kFloat = 6, kDouble = 7, kComplexHalf = 8,
            kComplexFloat = 9, kComplexDouble = 10, kBool = 11,
            kQInt8 = 12, kQUInt8 = 13, kQInt32 = 14, kBFloat16 = 15,
+           kQUInt4x2 = 16, kQUInt2x4 = 17, kBits1x8 = 18, kBits2x4 = 19,
+           kBits4x2 = 20, kBits8 = 21, kBits16 = 22,
            kFloat8e5m2 = 23, kFloat8e4m3fn = 24, kFloat8e5m2fnuz = 25,
-           kFloat8e4m3fnuz = 26);
-           // 値は tch-rs の kind.rs が挙げる c10::ScalarType。
-           // c10/core/ScalarType.h と照合すること。`TTensor.Kind` は
-           // この集合にない値（未知の型）なら ETorchError を投げる。
+           kFloat8e4m3fnuz = 26, kUInt16 = 27, kUInt32 = 28, kUInt64 = 29,
+           kUInt1 = 30, ..., kUInt7 = 36, kInt1 = 37, ..., kInt7 = 43,
+           kFloat8e8m0fnu = 44, kFloat4e2m1fnx2 = 45);
+
+  { c10::Layout。ltNone = -1 は省略可能な layout 引数のためだけ }
+  TLayout = (ltNone = -1, ltStrided = 0, ltSparse, ltSparseCsr, ltMkldnn,
+             ltSparseCsc, ltSparseBsr, ltSparseBsc, ltJagged);
 
   TDeviceType = (dtCpu, dtCuda, dtMps, dtVulkan);
   TDevice = record
@@ -494,7 +526,7 @@ type
   TInt64Array  = array of Int64;
   TDoubleArray = array of Double;
   TSingleArray = array of Single;
-  TTensorArray = array of TTensor;
+  TTensorPtrArray = array of PTorchTensor;   // 生成した本体用：テンソルのリスト引数
 
   TScalar = record                // 呼び出しごとに一時的な ats_* ハンドルに変換する
     IsFloat: Boolean;
@@ -505,22 +537,42 @@ type
 
   TOptInt64  = record HasValue: Boolean; Value: Int64;  class operator :=(V: Int64): TOptInt64;  end;
   TOptDouble = record HasValue: Boolean; Value: Double; class operator :=(V: Double): TOptDouble; end;
-  TOptKind   = record HasValue: Boolean; Value: TKind;  class operator :=(V: TKind): TOptKind;   end;
   TOptIntList = record HasValue: Boolean; Value: TInt64Array; end;
+
+  TTensor = record
+  public type
+    TTensorArray = array of TTensor;   // 入れ子：TTensor より前には宣言できない
+  ...
+  end;
+  TTensorArray = TTensor.TTensorArray; // 利用側向けの別名
 
 const
   NoInt64:   TOptInt64   = (HasValue: False; Value: 0);
   NoDouble:  TOptDouble  = (HasValue: False; Value: 0);
-  NoKind:    TOptKind    = (HasValue: False; Value: kFloat);
   NoIntList: TOptIntList = (HasValue: False; Value: nil);
 
 function IntList(const A: array of Int64): TOptIntList;  // 値あり（空でもよい）
 ```
 
 - `Default(TOptXxx)` も「なし」です。`NoXxx` 定数は呼び出し箇所で読みやすいだけです
-  （`t.sum_dim_intlist(IntList([0]), False, NoKind)`）。
+  （`t.sum_dim_intlist(IntList([0]))`）。
 - ジェネリクス（`TOpt<T>`）にせず手書きにします。ジェネリックな record の中の
-  暗黙変換演算子 `:=` は 3.2.x でバグ報告がある分野で、しかも必要なのは4つだけです。
+  暗黙変換演算子 `:=` は 3.2.x でバグ報告がある分野で、しかも必要なのは3つだけです。
+  実測（クラウドセッション3）：`t.argmax(1)`、`t.clamp_min_(0.5)`、`t.add_scalar(1)` は
+  リテラルも変数もキャストなしで `:=` 演算子を通ります。
+- **`TOptKind` はなし（クラウドセッション3で改訂）。** record 型の引数には Pascal の
+  デフォルト値を付けられず（実測：「It is not possible to define a default value
+  for a parameter of type TOptInt64」）、`dtype: ScalarType? = None` は末尾の
+  省略可能引数として最も多い（54 op：`sum`、`mean`、`cumsum`、`softmax` など）。
+  そこで `ScalarTypeOption` は `TKind` にし、`kNone` を「なし」とします。C の
+  エンコード（`-1`）そのままで、こうすると `= kNone` のデフォルトが付きます。
+  `LayoutOption` も `ltNone` で同じ。`Int64Option`/`DoubleOption` は record の
+  まま：`Int64`/`Double` には「なし」に使える余りの値がありません。
+- **`FromArray` のオーバーロード（決定、H2 の続き）。** `array of Single`、
+  `array of Double`、`array of Int64`、`array of Byte`、`array of Boolean`。実測で
+  `[1, 2]` は `Int64`、`[1.0, 2.0]` は `Single`、`[True, False]` は `Boolean` を選び、
+  曖昧にならない。`Int32` はやめる（`Int64` と曖昧、H2）。`Int32`/`Int16`/`Int8` の
+  データは `FromInt32s` などで。手書き、最初のマイルストーン。
 - `IntListOption`（103 箇所）は未解決の論点でした。オープン配列も動的配列も
   「なし」と「空」を区別できない（どちらも nil／長さ0）ので、`HasValue` を持つ
   record にし、`IntList([...])` で作ることにしました。
@@ -541,13 +593,15 @@ function IntList(const A: array of Int64): TOptIntList;  // 値あり（空で�
 | IntListOption | `const X: TOptIntList`（`IntList([..])` / `NoIntList`） |
 | DoubleList | `const X: array of Double` |
 | TensorList / TensorOptList | `const X: array of TTensor` |
-| String | `const X: AnsiString` |
-| TensorOptions | `AKind: TKind; const ADevice: TDevice` |
-| ScalarType / ScalarTypeOption | `TKind` / `TOptKind` |
+| String | `const X: AnsiString`（ポインタ＋長さで渡す。`None` は tch-rs と同じく空文字列として C に届く） |
+| TensorOptions | `X_kind: TKind; const X_device: TDevice`（YAML の名前は 80 op すべて `options`） |
+| ScalarType / ScalarTypeOption | `X: TKind`（option では `kNone` = なし） |
 | Device | `const X: TDevice` |
+| Layout / LayoutOption | `X: TLayout`（option では `ltNone` = なし） |
 
 戻り値：テンソル1つ → `TTensor`、可変個 → `TTensorArray`、固定 N 個 →
-`out` 引数（4.4 参照）、`bool`/`int64_t`/`double` → `Boolean`/`Int64`/`Double`。
+`out` 引数、または結果が渡したテンソルそのものなら なし（4.4 参照）、
+`bool`/`int64_t`/`double` → `Boolean`/`Int64`/`Double`。
 
 **(H6) 解決**（手順6）：`TTensor.cat([A, B], 0)` と
 `TTensor.cat([A + B, B, A * B], 1)` は正しい形の結果を返し、20万回呼んでも RSS は
@@ -636,16 +690,44 @@ function IntList(const A: array of Int64): TOptIntList;  // 値あり（空で�
   `ETorchError` になります。ドキュメントに書き、小細工はしません。
   あわせて確認済み：以前の値を持つ変数を `out` に渡すと、その値は解放されます
   （呼び出しの前後でハンドル数が変わらない）。
-- デフォルト引数。gen.ml は各引数の `default` をすでに解析しています。一覧ファイルに
-  それを載せ（5 章）、Pascal の生成器は、デフォルト値を持つ `Bool` / `Int64` /
-  `Double` / `String` 引数が *末尾に* 連続する最大の範囲を Pascal のデフォルト引数に
-  します（`keepdim: Boolean = False`、`dim: Int64 = -1`、`mode: AnsiString = 'constant'`）。
-  Pascal では record 型の引数（`TOpt*`、`TScalar`）やオープン配列にデフォルト値を
-  付けられないので、それらが出てきたところで範囲は止まります。手間はかからず、
-  呼び出しの冗長さの大半がなくなります。それ以上の便利なオーバーロードは手書きします。
-- `TensorOptions` 引数は明示的なまま（`AKind, ADevice`）にします。`kFloat`/CPU を
-  既定にした手書きの `TTensor.zeros([2, 3])` オーバーロードは安く作れ、tch-rs の
-  `FLOAT_CPU` に相当します。
+- **結果が渡したテンソルそのものである op（決定、クラウドセッション3）。**
+  複数結果の 246 op のうち 97 は「out=」版（`max_dim_out`、`sort_values`、
+  `topk_values`、`qr_q`、`linalg_solve_ex_out` など）で、結果名がすべて引数名でもあり、
+  libtorch はまさにそのテンソルへのハンドルを返します。ops.tsv で実測：97 op すべてで
+  *全部の* 結果が重なり、一部だけ重なる op はない。ルール：こういう op は
+  **out 引数のない `procedure`** にする。生成した本体は呼び出し後に N 個の結果ハンドルを
+  解放し（`TchFreeSlots`）、テンソルは呼び出し側がすでに持っている
+  （`t.sort_values(V, I)` が `V` と `I` を埋める）。一部だけ重なる場合は生成器のエラー。
+  結果1つの「out=」op（`add_out` など 800 以上）はこれまでどおり `TTensor` を返す
+  （`out` への新しいハンドル。C++ の `Tensor&` と同じ）。
+- デフォルト引数（クラウドセッション3で改訂）。gen.ml は各引数の `default` を正規化した
+  文字列で ops.tsv に書き（5 章）、tchgen はデフォルト値を付けられる引数が *末尾に*
+  連続する最大の範囲を Pascal のデフォルト引数にします。付けられる型：`Bool`、`Int64`、
+  `Double`、`String`、`ScalarType`、`ScalarTypeOption`（`= kNone`）、`Layout`、
+  `LayoutOption`（`= ltNone`）。付けられない型（そこで範囲が止まる）：record
+  （`TOptInt64`、`TOptDouble`、`TOptIntList`、`TScalar`、`TDevice`）、オープン配列、
+  `TTensor`（実測：FPC は record 引数のデフォルト値を拒否する）。Pascal の型で
+  「なし」を表せない型の `::std::nullopt`（`bool?` 23 op、`str?` 50 op：C には
+  ただの bool／空文字列が届く）には **デフォルトを付けない**。tch-rs と同じく
+  呼び出し側が選ぶ。`at::Reduction::Mean` → `1`、`"constant"` → `'constant'`
+  （C のエスケープを解く）。`out` 引数のある op にはデフォルトなし（デフォルトは
+  最後の引数でなければならない）。渡したテンソルを埋める op には付く。2.13 での実測：
+  479 op に1つ以上のデフォルトが付く。out 引数のある 149 op のうち 107 にはデフォルトが
+  付いたはず（`topk`、`sort` など）で、手書きのラッパーで後から足せる。
+- `TensorOptions` 引数は明示的なまま（`options_kind: TKind; const
+  options_device: TDevice`。C の名前）にします。`kFloat`/CPU を既定にした手書きの
+  `TTensor.zeros([2, 3])` オーバーロードは安く作れ、tch-rs の `FLOAT_CPU` に相当します。
+- **生成する本体（クラウドセッション3）。** ローカル変数はすべて `__` で終わる
+  （`Outs__`、`P__`、`R__`、Scalar のハンドルとテンソルリストのポインタ配列は
+  `<引数>__`）。YAML の引数名で `__` で終わるものはない（tchgen が確認）。
+  レシーバーは常に `Self.Raw` と書き、組み込み関数は修飾する（`System.Ord`、
+  `System.Length`、`System.PInt64`、`TchSys.PPTorchTensor`）。`ord` や `length` という
+  引数があり、`duplicatelocals` の下では組み込み関数を隠してしまうため
+  （`linalg_norm` がコンパイルできずに判明）。Scalar のハンドルは `try` の中で作り
+  `finally` で解放する。テンソルのリストは nil チェックのあと `TTensorPtrArray` に
+  写す（`TchTensorPtrs`、`TchTensorOptPtrs`）。「値あり・空」の `IntListOption` は
+  nil でないポインタと長さ 0 で渡す（`TchOptIntListPtr`）。すべて `tests/mock` で
+  動かしている。
 
 ### 4.5 ユニット構成
 
@@ -660,8 +742,12 @@ src/
   TchNN.pas                  TInit, TVarStore, TVarPath, TModule, 各レイヤー,
                              TSequential, TOptimizer（4.6）
   TchJit.pas                 TJitModule, TIValue, TTrainableJitModule（4.6）
+gen/
+  gen.ml, dune, dune-project  tch-rs の生成器のフォーク（+ ops.tsv 出力）
+  ops.tsv                    tchgen が読む一覧                   （生成）
+  tchgen.pas                 Pascal 生成器（5 章）
 csrc/libtch/                 フォークした C ラッパー + CMakeLists.txt
-gen/                         gen.ml（フォーク）+ Pascal 生成器
+tests/mock/                  モックの libtch + 生成層のテスト（libtorch 不要）
 ```
 
 - 生成する record のメンバーは record の中で宣言しなければならないので、
@@ -876,30 +962,85 @@ function  CudaIsAvailable: Boolean; function CudaDeviceCount: Integer;
 
 ## 5. コード生成（決定）
 
+クラウドセッション3で実装済み。以下はコード（`gen/gen.ml`、`gen/tchgen.pas`）が
+実際にしていることで、libtorch 2.13.0 の `Declarations.yaml`（2,657 op）で実測
+しています。
+
 - gen.ml（OCaml）はすでに `Declarations-v2.13.0.yaml` を解析しており、
-  引数の本当の種類を知っています。これをフォークし、出力をもう1つ増やします。
-  1行に1つの op を書く一覧ファイル `gen/ops.tsv` で、例えば次のような形です。
+  引数の本当の種類を知っています。フォークでは出力を1つ足します。一覧ファイル
+  `gen/ops.tsv` で、`gen.exe <Declarations.yaml> <csrc/libtch のディレクトリ>
+  <ops.tsv>` として実行したときに書かれます（このモードでは Rust のファイルは
+  書かない。引数なしなら上流と同じ振る舞いで、バイト一致の確認用）。1行に1つの op、
+  TAB 区切り、`#` の行はコメントです。
 
   ```
-  add	method	self	fixed1	self:Tensor	other:Tensor
-  max_dim	method	self	fixed2	self:Tensor	dim:Int64	keepdim:Bool=False	->values,indices
-  conv2d	method	input	fixed1	input:Tensor	weight:Tensor	bias:TensorOption	stride:IntList=1	...
-  zeros	function	-	fixed1	size:IntList	options:TensorOptions
-  split	method	self	dynamic	self:Tensor	split_size:Int64	dim:Int64=0
+  name  receiver  result  arg:Type[=default]...  [->ret,ret,...]
   ```
 
-  列：公開名、種類、レシーバー（`self` / `input` / `-`）、結果の形、
-  `name:Type[=default]` 形式の引数（YAML の `default` 文字列をそのまま）、
-  省略可能な `->` 以降の `returns[].name` 由来の戻り値名。gen.ml はデフォルト値を
-  すでに持っていて、戻り値名の読み取りは小さな追加で済みます。
-- Pascal の生成器は FPC のプログラム（`gen/tchgen.pas`、`instantfpc` で実行可能）で、
-  `ops.tsv` を読んで `TchSysGenerated.pas` と2つの `.inc` ファイルを書き出します。
-  Pascal 固有の方針はすべてここが受け持ちます：予約語の `&` エスケープ（op 名も
-  引数名も。`result` → `result_`）、デフォルト引数の範囲、nil ハンドルのチェック、
-  手書きメンバー名の一覧との *op 名* の大文字小文字を無視した衝突チェック
-  （引数名のチェックは不要：4.4、H12）。Python/Node は使いません（CLAUDE.md）。
-- 生成したファイルはコミットするので、OCaml が要るのは libtorch を上げるときだけで、
-  tch-fpc のビルドには不要です。
+  | 列 | 値 |
+  |---|---|
+  | name | 公開名。C の関数は `atg_<name>` |
+  | receiver | `self`、`input`（Pascal のレシーバーになる Tensor 引数。tch-rs のルール）、または `-`（静的なクラス関数） |
+  | result | `nothing`、`fixed<N>`（N = 1..7）、`dynamic`、`bool`、`int64`、`double` |
+  | args | C の順番の全引数（レシーバーを含む）。`Type` は gen.ml のコンストラクタ名（`Tensor`、`TensorOption`、`Int64Option`、`IntList`、…、`LayoutOption`）。`=default` は YAML にデフォルトがあるときだけ |
+  | `->` | N ≥ 2 の `fixed<N>` だけ。`returns[].name` 由来の N 個の結果名（YAML にないときは `result0..`） |
+
+  デフォルト値の文字列は正規化してあります（gen.ml の `default_text`）。yaml
+  ライブラリが素のスカラーに型を付ける（`1` が `Float 1.` になる）ためです：
+  `true`/`false`、整数は小数点なし（`-1`、`0`）、それ以外の数は `%.16g`
+  （`1e-05`）、文字列は C++ リテラルの引用符も含めてそのまま（`"constant"`、
+  `::std::nullopt`、`at::Reduction::Mean`、`{}`）。名前に `:`、`=`、TAB は含まれず、
+  デフォルト値に TAB と改行は含まれません（検査済み）。例：
+
+  ```
+  add	self	fixed1	self:Tensor	other:Tensor
+  max_dim	self	fixed2	self:Tensor	dim:Int64	keepdim:Bool=false	->values,indices
+  conv2d	input	fixed1	input:Tensor	weight:Tensor	bias:TensorOption={}	stride:IntList=1	...	groups:Int64=1
+  zeros	-	fixed1	size:IntList	options:TensorOptions={}
+  split	self	dynamic	self:Tensor	split_size:Int64	dim:Int64=0
+  sort_values	self	fixed2	values:Tensor	indices:Tensor	self:Tensor	dim:Int64=-1	descending:Bool=false	->values,indices
+  ```
+
+- Pascal の生成器 `gen/tchgen.pas`（FPC のプログラム。`fpc gen/tchgen.pas` か
+  `instantfpc`）は `gen/ops.tsv` と `src/Tch.pas` を読み、`src/TchSysGenerated.pas`、
+  `src/TchTensorGenerated_intf.inc`、`src/TchTensorGenerated_impl.inc` を書きます。
+  Pascal 固有の方針はすべてここが受け持ちます（4.3、4.4）：引数の種類ごとの
+  Pascal の型、op 名と引数名の予約語の `&` エスケープ（FPC の予約語と修飾子の表。
+  `result` → `result_`。`self` は常にレシーバーだけ）、デフォルト引数の範囲、
+  out 引数の有無、nil ハンドルのチェック、Scalar とテンソルリストの一時変数。
+  `Tch.pas` の `TTensor = record` 宣言を走査して手書きのメンバー名を集め、次の場合は
+  エラーで止まります：op 名がメンバー名と同じ（大文字小文字を無視）、生成する
+  ローカル変数（`<引数>__`、`Outs__`、`P__`、`R__`）がメンバー名と同じ、引数名が
+  `system`/`tch*`/`ttensor`/`self`、結果名と引数名が一部だけ重なる、変換できない
+  デフォルト値、未知の引数の種類。黙って飛ばすことはしません。Python/Node は
+  使いません（CLAUDE.md）。
+- 再生成（libtorch を上げるときだけ。OCaml はメンテナーの道具）：
+
+  ```
+  eval $(opam env --switch=tch-fpc)
+  (cd gen && dune build ./gen.exe)
+  gen/_build/default/gen.exe path/to/Declarations-v2.XX.yaml csrc/libtch gen/ops.tsv
+  fpc -FUbuild/gen -obuild/gen/tchgen gen/tchgen.pas && build/gen/tchgen gen/ops.tsv src
+  ```
+
+  クラウドセッションでは opam の `yaml` パッケージが入らなかった（プロキシ）ので、
+  同じ gen.ml を、このファイルのブロック構文だけを ocaml-yaml と同じスカラーの
+  型付けで読む 150 行の代替 `Yaml` モジュールと組み合わせて動かしました。できた
+  `torch_api_generated.{h,cpp}` はコミット済みのものとバイト一致。コミットした
+  `ops.tsv` はその実行の出力です。ローカルでは本物のライブラリで一度再生成して
+  ください（一致するはず）。
+- 生成したファイル（`ops.tsv`、`torch_api_generated.*`、`TchSysGenerated.pas`、
+  `.inc`）はコミットするので、OCaml が要るのは libtorch を上げるときだけで、
+  tch-fpc のビルドには不要です。2,657 op 入りの `Tch.pas` は 2.7 秒でコンパイル
+  できます（48,691 行）。
+- `tests/mock`（クラウドセッション3）：C で書いたモックの `libtch.so`（すべての
+  `atg_*` を `gen_stubs.sh` でスタブ化して「mock: not implemented」を返し、十数個は
+  double 配列の小さなテンソルで実装）と `mock_test.pas`。libtorch なしで生成層を
+  動かします：結果1つ、out 引数、結果が入力そのもの、可変個、スカラーの結果、
+  Scalar の一時ハンドルの解放、テンソルのリスト（nil 要素は Pascal で、空リストは
+  C で拒否）、`IntListOption` の nil と空の区別、String + `DoubleOption`、
+  デフォルト引数、エラーの分割、リークのカウンタ。45 項目、`tests/mock/run.sh`。
+  配管のテストであって、数値のテストではありません。
 - 不採用：`torch_api_generated.h` を直接解析する方法。2 章で挙げた型の区別が
   失われるため。当面は不採用：Pascal で YAML パーサーを書く方法。可能ではあるが、
   gen.ml に積み重なった特例処理を二重に持つことになるため。

@@ -1,5 +1,9 @@
 (* Modified for tch-fpc from tch-rs 4227b89b72059b0651ff83a38637693574e0a2d6 (gen/gen.ml):
-   extern "C" in the generated header is guarded by __cplusplus. *)
+   extern "C" in the generated header is guarded by __cplusplus; an ops.tsv
+   manifest for the Pascal emitter (gen/tchgen.pas) is written when run as
+     gen.exe <Declarations.yaml> <csrc/libtch dir> <ops.tsv>
+   (no Rust output in that mode). Without arguments it behaves as upstream
+   (paths relative to a tch-rs checkout), for byte-for-byte comparison. *)
 (* Automatically generate the C++ -> C -> rust bindings.
    This takes as input the Descriptions.yaml file that gets generated when
    building PyTorch from source.
@@ -166,7 +170,31 @@ module Func = struct
     ; returns : [ `fixed of int | `dynamic | `bool | `int64_t | `double | `nothing ]
     ; (* number of tensors that are returned *)
       kind : [ `function_ | `method_ ]
+    ; return_names : string list (* tch-fpc: returns[].name, for ops.tsv *)
     }
+
+  (* tch-fpc: the constructor name, as written in ops.tsv. *)
+  let arg_type_name = function
+    | Bool -> "Bool"
+    | Int64 -> "Int64"
+    | Int64Option -> "Int64Option"
+    | Double -> "Double"
+    | DoubleOption -> "DoubleOption"
+    | Tensor -> "Tensor"
+    | TensorOption -> "TensorOption"
+    | IntList -> "IntList"
+    | IntListOption -> "IntListOption"
+    | DoubleList -> "DoubleList"
+    | TensorOptList -> "TensorOptList"
+    | TensorList -> "TensorList"
+    | TensorOptions -> "TensorOptions"
+    | Scalar -> "Scalar"
+    | ScalarType -> "ScalarType"
+    | ScalarTypeOption -> "ScalarTypeOption"
+    | Device -> "Device"
+    | String -> "String"
+    | Layout -> "Layout"
+    | LayoutOption -> "LayoutOption"
 
   let arg_type_of_string str ~is_nullable =
     match String.lowercase str with
@@ -485,6 +513,17 @@ end
 
 exception Not_a_simple_arg
 
+(* tch-fpc: canonical text of a YAML default value for ops.tsv. The yaml
+   library types plain scalars (1 -> Float 1.), so the text is rebuilt:
+   bools as true/false, integral floats without a point, other floats with
+   %.16g, strings verbatim (a C++ string literal keeps its double quotes). *)
+let default_text = function
+  | `Bool b -> if b then "true" else "false"
+  | `Float f -> if Float.is_integer f then Printf.sprintf "%.0f" f else Printf.sprintf "%.16g" f
+  | `String s -> s
+  | `Null -> ""
+  | yaml -> yaml_error yaml ~msg:"expected scalar default"
+
 let read_yaml filename =
   let funcs =
     (* Split the file to avoid Yaml.of_string_exn segfaulting. *)
@@ -504,6 +543,12 @@ let read_yaml filename =
       Map.find_exn map "method_of" |> extract_list |> List.map ~f:extract_string
     in
     let arguments = Map.find_exn map "arguments" |> extract_list in
+    let return_names =
+      Map.find_exn map "returns"
+      |> extract_list
+      |> List.filter_map ~f:(fun r ->
+           Map.find (extract_map r) "name" |> Option.map ~f:extract_string)
+    in
     let returns =
       let is_tensor returns =
         let returns = extract_map returns in
@@ -559,7 +604,7 @@ let read_yaml filename =
                    |> Option.value_map ~default:false ~f:extract_bool
                  in
                  let default_value =
-                   Map.find arg "default" |> Option.map ~f:extract_string
+                   Map.find arg "default" |> Option.map ~f:default_text
                  in
                  match Func.arg_type_of_string arg_type ~is_nullable with
                  | Some Scalar when Option.is_some default_value && not is_nullable ->
@@ -582,7 +627,9 @@ let read_yaml filename =
              let args =
                args ~with_optional_scalar_args:(Set.mem with_optional_scalar_args name)
              in
-             Some [ { Func.name; operator_name; overload_name; args; returns; kind } ]
+             Some
+               [ { Func.name; operator_name; overload_name; args; returns; kind; return_names }
+               ]
            with
            | Not_a_simple_arg -> None)
     else None)
@@ -830,6 +877,70 @@ let write_ffi funcs filename =
           rust_type);
     pm "}")
 
+(* tch-fpc: the manifest read by gen/tchgen.pas. One op per line, TAB
+   separated:
+     name  receiver  result  arg:Type[=default]...  [->ret,ret]
+   name     exported name (the C function is atg_<name>)
+   receiver self | input | -  (the Tensor argument that becomes the Pascal
+            receiver, or none: a static class function)
+   result   nothing | fixed<N> | dynamic | bool | int64 | double
+   args     every argument in C order, including the receiver; Type is the
+            arg_type constructor name; default is the canonical text from
+            default_text, absent when the YAML has no default
+   ->       only for fixed<N> with N >= 2: the N result names from
+            returns[].name, or result0..result<N-1> when the YAML has none
+   Lines starting with # are comments. *)
+let write_ops_tsv funcs filename =
+  Out_channel.with_file filename ~f:(fun out ->
+    let pt s = p out s in
+    pt "# THIS FILE IS AUTOMATICALLY GENERATED by gen/gen.ml, DO NOT EDIT BY HAND!";
+    pt "# name\treceiver\tresult\targ:Type[=default]...\t[->ret,ret]";
+    Map.iteri funcs ~f:(fun ~key:exported_name ~data:(func : Func.t) ->
+      let receiver =
+        match Func.rust_args_list func with
+        | Some self, _ -> self.arg_name
+        | None, _ -> "-"
+      in
+      let result =
+        match func.returns with
+        | `nothing -> "nothing"
+        | `fixed n -> Printf.sprintf "fixed%d" n
+        | `dynamic -> "dynamic"
+        | `bool -> "bool"
+        | `int64_t -> "int64"
+        | `double -> "double"
+      in
+      let check_field what s =
+        if String.exists s ~f:(fun c -> Char.( = ) c '\t' || Char.( = ) c '\n')
+        then Printf.failwithf "ops.tsv: %s of %s contains a tab or newline" what exported_name ()
+      in
+      let args =
+        List.map func.args ~f:(fun (a : Func.arg) ->
+          if String.exists a.arg_name ~f:(fun c -> Char.( = ) c ':' || Char.( = ) c '=' || Char.( = ) c '\t')
+          then Printf.failwithf "ops.tsv: bad argument name %s in %s" a.arg_name exported_name ();
+          let d =
+            match a.default_value with
+            | None -> ""
+            | Some d ->
+              check_field "default" d;
+              "=" ^ d
+          in
+          Printf.sprintf "%s:%s%s" a.arg_name (Func.arg_type_name a.arg_type) d)
+      in
+      let rets =
+        match func.returns with
+        | `fixed n when n >= 2 ->
+          let names =
+            if List.length func.return_names = n
+            then func.return_names
+            else List.init n ~f:(Printf.sprintf "result%d")
+          in
+          List.iter names ~f:(check_field "return name");
+          [ "->" ^ String.concat ~sep:"," names ]
+        | _ -> []
+      in
+      pt "%s" (String.concat ~sep:"\t" ((exported_name :: receiver :: result :: args) @ rets))))
+
 let methods =
   let c name args =
     { Func.name
@@ -838,6 +949,7 @@ let methods =
     ; args
     ; returns = `fixed 1
     ; kind = `method_
+    ; return_names = []
     }
   in
   let ca arg_name arg_type = { Func.arg_name; arg_type; default_value = None } in
@@ -847,13 +959,7 @@ let methods =
   ; c "to" [ ca "self" Tensor; ca "device" Device ]
   ]
 
-let run
-  ~yaml_filename
-  ~cpp_filename
-  ~ffi_filename
-  ~wrapper_filename
-  ~fallible_wrapper_filename
-  =
+let run ~yaml_filename ~cpp_filename ~rust ~ops_tsv_filename =
   let funcs = read_yaml yaml_filename |> List.concat in
   let funcs = methods @ funcs in
   printf "Generating code for %d functions.\n%!" (List.length funcs);
@@ -889,14 +995,36 @@ let run
     |> Map.of_alist_exn (module String)
   in
   write_cpp funcs cpp_filename;
-  write_ffi funcs ffi_filename;
-  write_wrapper funcs wrapper_filename;
-  write_fallible_wrapper funcs fallible_wrapper_filename
+  (match rust with
+   | Some (ffi_filename, wrapper_filename, fallible_wrapper_filename) ->
+     write_ffi funcs ffi_filename;
+     write_wrapper funcs wrapper_filename;
+     write_fallible_wrapper funcs fallible_wrapper_filename
+   | None -> ());
+  match ops_tsv_filename with
+  | Some filename -> write_ops_tsv funcs filename
+  | None -> ()
 
 let () =
-  run
-    ~yaml_filename:"third_party/pytorch/Declarations-v2.13.0.yaml"
-    ~cpp_filename:"torch-sys/libtch/torch_api_generated"
-    ~ffi_filename:"torch-sys/src/c_generated.rs"
-    ~wrapper_filename:"src/wrappers/tensor_generated.rs"
-    ~fallible_wrapper_filename:"src/wrappers/tensor_fallible_generated.rs"
+  match Stdlib.Sys.argv with
+  | [| _ |] ->
+    (* upstream behaviour: run from a tch-rs checkout *)
+    run
+      ~yaml_filename:"third_party/pytorch/Declarations-v2.13.0.yaml"
+      ~cpp_filename:"torch-sys/libtch/torch_api_generated"
+      ~rust:
+        (Some
+           ( "torch-sys/src/c_generated.rs"
+           , "src/wrappers/tensor_generated.rs"
+           , "src/wrappers/tensor_fallible_generated.rs" ))
+      ~ops_tsv_filename:None
+  | [| _; yaml_filename; csrc_dir; ops_tsv_filename |] ->
+    (* tch-fpc: C wrapper + ops.tsv, no Rust *)
+    run
+      ~yaml_filename
+      ~cpp_filename:(Stdlib.Filename.concat csrc_dir "torch_api_generated")
+      ~rust:None
+      ~ops_tsv_filename:(Some ops_tsv_filename)
+  | _ ->
+    prerr_endline "usage: gen.exe [<Declarations.yaml> <csrc/libtch dir> <ops.tsv>]";
+    Stdlib.exit 2

@@ -4,8 +4,9 @@ Free Pascal bindings for the C++ API of PyTorch (libtorch), inspired by
 [tch-rs](https://github.com/LaurentMazare/tch-rs).
 
 **Status:** early implementation. The C wrapper builds against libtorch
-2.13.0 and the core design has been verified on FPC 3.2.2; the generated
-tensor API does not exist yet. Nothing usable yet.
+2.13.0, the core design has been verified on FPC 3.2.2, and the 2,657
+generated tensor ops compile; they have been run against a mock libtch
+only, not yet against libtorch. Nothing usable yet.
 
 ## Naming, and how it differs from tch-rs
 

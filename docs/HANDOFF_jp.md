@@ -45,9 +45,59 @@
   `tests/ownership/ownership_test.pas`（`V.Dim`）。ownership テストは libtorch が
   要るのでクラウドでは **再実行していない**。ローカルで一度走らせること
   （`Tch.pas` 自体はコンパイルできる）。
-- 下の引き継ぎのうち、まだ残っているもの：1（ops.tsv の形式、tchgen.pas の
-  op の形ごとの出力）と 2（エラーメッセージの形、`TKind` 27〜45、`TORCH_WARN`、
-  デフォルト引数の範囲、`FromArray` の Int32）。
+## クラウドセッション3の後半：手順8をクラウドで実装
+
+設計を実測で確かめられたので、生成器は設計するだけでなく *作った*。コンテナに
+FPC 3.2.2 を入れ、OCaml は apt から（`yaml` は入らなかった：opam のリポジトリに
+プロキシ越しで届かないため、このセッションの scratchpad に置いた 150 行の代替
+`Yaml` モジュールで gen.ml を動かした。コミットはしていない）。DESIGN_jp.md の
+5 章に書いてあることは、すべてコミットしたコードが実際にしていること。
+
+- **gen.ml** が `gen/ops.tsv` を書く（`gen.exe <yaml> <csrc/libtch> <ops.tsv>`。
+  引数なしなら上流と同じ振る舞い）。再生成した `torch_api_generated.{h,cpp}` は
+  コミット済みのものとバイト一致。`gen/ops.tsv` はコミット済み（2,657 op）。
+- **gen/tchgen.pas**（Pascal 生成器）が `src/TchSysGenerated.pas`、
+  `src/TchTensorGenerated_intf.inc`、`src/TchTensorGenerated_impl.inc` を生成
+  （コミット済み）。`src/Tch.pas` はこれらを取り込み、`TKind` 全部（`kNone`、0..45）、
+  `TLayout`、`TDevice`、`TScalar`、`TOptInt64`、`TOptDouble`、`TOptIntList`、入れ子の
+  `TTensorArray`、生成した本体が使う補助関数、`ETorchNativeError.Detail` を持つ。
+  仮の op はなくなった。全 op 入りの `Tch.pas` は 2.7 秒でコンパイルできる。
+- **決定**（詳細は DESIGN_jp.md）：エラーメッセージは `Exception raised from` で
+  分割（4.2）。`TKind` は 45 まで広げ、省略可能な dtype には `kNone`。`TOptKind` は
+  なし（4.3）。フォークの autocast 関数はデバイスを取る API に修正、警告ハンドラーは
+  c10 のハンドラーがスレッドローカルなので保留（4.2）。デフォルト引数のルールと
+  その数（4.4）。結果が入力そのものの op には out 引数なし（4.4）。`FromArray` の
+  オーバーロードは `Int32` なし（4.3）。
+- **tests/mock**：モックの `libtch.so`（C、libtorch 不要）と、生成した op の形を
+  すべて動かす `mock_test.pas`。45 項目が通る（`tests/mock/run.sh`）。
+  `tests/compiler/run.sh` も引き続き通る。`tests/ownership/ownership_test.pas` は
+  コンパイルできる（ここではリンクしていない。`ones` は `TDevice.Cpu` を取るようになった）。
+
+ローカルセッションでやること（この順で。すべて機械的）：
+
+1. **libtch を再ビルド**：`csrc/libtch/torch_api.cpp` に autocast のパッチ
+   （`is_autocast_enabled(at::kCUDA)` / `set_autocast_enabled`）が入っているが、
+   クラウドではコンパイルしていない。そのあと `tests/abi` と `tests/fpu` を前と同じく。
+2. **本物のツールチェーンで `gen/ops.tsv` を再現**：
+   `(cd gen && dune build ./gen.exe)` のあと
+   `gen/_build/default/gen.exe <tch-rs>/third_party/pytorch/Declarations-v2.13.0.yaml csrc/libtch gen/ops.tsv`。
+   `git diff` が空になるはず（ops.tsv と C のファイル）。デフォルト値の文字列が
+   違ったら、代替の YAML パーサーがスカラーに別の型を付けていたということ：
+   gen.ml の `default_text` を直し、tchgen を再実行して、本物の出力をコミットする。
+3. **tchgen を実行**（`fpc -FUbuild/gen -obuild/gen/tchgen gen/tchgen.pas &&
+   build/gen/tchgen gen/ops.tsv src`）。差分なしのはず。
+4. **ownership テストを本物の libtorch で実行**（ビルド方法はファイル先頭）。
+   それから `tests/mock/run.sh`（gcc と fpc だけで動く）。
+5. **生成した op を本物の libtorch で試す最初のテスト**（新規、小さく）：
+   `split`、`max_dim`、`sort_values`、`cat`、`add_scalar(1.5)`、
+   `sum_dim_intlist(IntList([]))` と `NoIntList`、`pad(..., 'constant', NoDouble)`、
+   `linalg_norm`（Scalar + IntListOption + デフォルト）、`LayoutOption` の op を1つ
+   （`to_sparse`）、そして `Message` にはバックトレースがなく `Detail` にはあるエラー。
+   tch-rs/PyTorch の結果と比べる。
+6. その次にマイルストーン1の手書き API（DESIGN 6 章）：`FromArray` の
+   オーバーロード、`ToDoubles`/`CopyData`、スカラーの演算子（`+ 1`、`* 2.5`）、
+   `Zeros/Ones` の便利なオーバーロード（生成した名前をオーバーロードするのに
+   `overload` が要るか確認）、自動微分。
 
 ## クラウドへの引き継ぎ（2026-10-10、ローカルセッション1の終了時点）
 
@@ -241,32 +291,26 @@ DESIGN_jp.md の各 (Hn) の横）。手順8のための OCaml の環境はロ�
      `objfpc` のままメソッドの引数にメンバーと同じ名前を使える。引数名 `&out` も
      コンパイルできる。関数の引数名 `result` と、メンバーと同名のローカル変数は
      引き続き拒否される。
-8. **生成器。**
-   - gen.ml に `ops.tsv` の出力を追加する（公開名、種類、レシーバー、結果の形、
-     デフォルト値付きの引数、戻り値名）。
-   - `gen/tchgen.pas` を書き、`TchSysGenerated.pas` と `.inc` ファイルを生成して、
-     全体をコンパイルする。
-   - 手書きの名前（`data`、`grad`、`detach`、`to_device`、`clone` など）との、
-     大文字小文字を無視した衝突チェックを入れる。
-   - 引数名・out の結果名に衝突の処理は不要（H12）。予約語は `&` でエスケープし、
-     `result` は `result_` にする（DESIGN_jp.md の 4.4）。
+8. **生成器。クラウドセッション3で完了**（このファイルの先頭を参照）：gen.ml が
+   `ops.tsv` を書き、`gen/tchgen.pas` が `TchSysGenerated.pas` と `.inc` を書き、
+   全体がコンパイルでき、`tests/mock` で生成層が動く。ローカルでは本物の `yaml`
+   ライブラリで `ops.tsv` を再現し、ownership テストを走らせ、生成した op を本物の
+   libtorch で試す最初のテストを書く。
 
 ## 未解決の論点
 
-- **ネイティブのエラーメッセージの形。** libtorch のメッセージは本文のあとに、
-  複数行の C++ の発生箇所・バックトレース（`Exception raised from ...`）が続く。
-  tch-rs はそのまま渡している。`ETorchNativeError` の案：`Message` は
-  `Exception raised from` より前の本文、全文は `Detail` プロパティに入れる。
-  `TchRaiseNative` を書くとき（手順4以降）に決める。
-- **26 を超える `TKind`。** libtorch 2.13 には ScalarType の 27〜45 があり、CPU で
-  作れる（手順4）。DESIGN の `TKind` は 26 までで、未知の型では例外を投げる。
-  決めること：`TKind` を 45 まで広げる（少なくとも UInt16/32/64 と
-  Float8_e8m0fnu は役に立ちそう）か、0〜26 のままにして `Kind` で例外にするか。
-- **libtorch の警告。** `TORCH_WARN` は無条件に stderr に出る。上流の
-  `at_autocast_*` は呼ぶたびに警告を出す（非推奨の
-  `at::autocast::is_enabled`/`set_enabled`）。案：フォークでこの2つの関数を
-  デバイスを取る非推奨でない API に直す。または libtch から `c10::WarningHandler`
-  を設定して Pascal のコールバックに渡す（両方でもよい）。
+- **ネイティブのエラーメッセージの形：決定済み**（クラウドセッション3）。`Message` は
+  `#10'Exception raised from '` より前の本文、`Detail` は全文（DESIGN_jp.md の 4.2。
+  `ETorchNativeError.Create` に実装済み）。本物の libtorch のメッセージで一度
+  分割を確認すること（上の手順5）。
+- **26 を超える `TKind`：決定済み**（クラウドセッション3）。2.13 の 46 個全部に
+  広げ、省略可能な dtype 用に `kNone = -1` を足した（DESIGN_jp.md の 4.3）。
+  未決：`FromArray`/`CopyData` がどの kind を扱うか（要素サイズ）。手書き API と
+  一緒に決める。
+- **libtorch の警告：決定済み**（クラウドセッション3）。autocast の2関数のフォーク
+  パッチだけ（ローカルではまだコンパイルしていない）。c10 の警告ハンドラーは
+  スレッドローカルなので、Pascal のコールバックは必要になるまで保留
+  （DESIGN_jp.md の 4.2）。
 - **引数名と `TTensor` のメンバーの衝突：決定後に改訂**（2026-10-10、ユーザー判断）。
   最初の決定（ローカルセッション1）：重ならなくなるまで `_` を足し、`Dim` → `NumDims`。
   クラウドセッション3で改訂（H12）：`Tch.pas` の `{$modeswitch duplicatelocals}` で
@@ -281,14 +325,15 @@ DESIGN_jp.md の各 (Hn) の横）。手順8のための OCaml の環境はロ�
   メソッドと重なる `view`、`to_device`、`t` → `tr`）と `prefixed_functions`（素の名前を
   手書き版に譲る `add`、`mul`、`div`、`sub` などに `g_` を付ける）。これらは Rust の
   ラッパーの名前を変えるだけで、生成器が読む `atg_*` の名前には影響しない。README にも記載。
-- **複数出力の op**：`out` 引数（決定済み）。実際にコードを書いてから、よく使う op
-  （`max_dim`、`sort`、`topk`、`lstm`）に手書きの結果用 record を足す価値があるか
-  見直す。(H8) でエイリアシングの危険が実際に問題になるなら、`out` の代わりに `var` に
-  するかも検討する。
-- **デフォルト引数。** 生成器は末尾に連続する Bool/Int64/Double/String 引数に
-  デフォルト値を付ける。それで恩恵を受ける op がどれだけあるか。また、最初の
-  マイルストーンで手書きの便利なオーバーロード（例：`kFloat`/CPU を既定にした
-  `TTensor.zeros([2, 3])`）をどれだけ足すか。
+- **複数出力の op**：`out` 引数（決定済み。149 op）。結果が渡したテンソルそのものの
+  97 op には out 引数なし（クラウドセッション3、DESIGN_jp.md の 4.4）。まだ未決：
+  実際にコードを書いてから、よく使う op（`max_dim`、`sort`、`topk`、`lstm`）に
+  手書きの結果用 record を足す価値があるか。(H8) が実際に問題になるなら `var`。
+- **デフォルト引数：決定済み**（クラウドセッション3、DESIGN_jp.md の 4.4）：479 op に
+  デフォルトが付く。out 引数のある op には付かない（107 op には付いたはず）。
+  未決：最初のマイルストーンに入れる手書きの便利なオーバーロード（`kFloat`/CPU を
+  既定にした `TTensor.zeros([2, 3])`、デフォルト付きの `topk(k)`）と、`objfpc`
+  モードで生成した名前をオーバーロードするのに `overload` 指示子が要るか（未測定）。
 - **等価性とコンテナ。** `TTensor` では `=` を意図的にオーバーロードしていないので、
   FGL（`TFPGList<TTensor>`）は使えない。`TchNN` に必要なことが
   `Generics.Collections.TList<TTensor>` と素の `TTensorArray` で足りるか確認する。

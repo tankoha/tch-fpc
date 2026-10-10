@@ -4,7 +4,8 @@ PyTorch の C++ API (libtorch) に対する Free Pascal バインディング。
 [tch-rs](https://github.com/LaurentMazare/tch-rs) に触発されたプロジェクト。
 
 **状態:** 実装の初期段階。C ラッパーは libtorch 2.13.0 でビルドでき、設計の核は
-FPC 3.2.2 で検証済み。生成するテンソル API はまだない。まだ使えるものはない。
+FPC 3.2.2 で検証済み。生成した 2,657 個のテンソル op はコンパイルできるが、
+動かしたのはモックの libtch に対してだけで、libtorch ではまだ。まだ使えるものはない。
 
 ## 名前の付け方と tch-rs との違い
 

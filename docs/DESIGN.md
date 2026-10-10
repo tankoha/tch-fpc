@@ -1514,7 +1514,8 @@ and `TSequential` (4.6.6). Deferred to milestone 3, with the same pattern:
 `TConv1D` / `TConv3D` and the per-dimension `ConvConfigND`,
 `TConvTranspose`, `TGroupNorm` (identical to `TLayerNorm` over
 `group_norm`), `TLSTM` / `TGRU` (`lstm` / `gru` have `out` parameters and
-need a state record and `ZeroState`), `Id`. Variable names, shapes, default
+need a state record and `ZeroState`), `Id` — all designed in 4.6.10
+(design session 7). Variable names, shapes, default
 initialisations and the generated op each `Forward` calls, all from the
 tch-rs file named:
 
@@ -2525,6 +2526,264 @@ and `names`; `ati_length` on 14 fails like libtorch. The existing
   mutation through one clone is visible through another (no asset has a
   mutating method, and `Define` cannot declare a TorchScript class). It
   follows from `IValue`'s copy constructor; a later asset may check it.
+
+#### 4.6.10 Layers of milestone 3, from `nn/conv.rs`, `conv_transpose.rs`, `group_norm.rs`, `rnn.rs`, `mod.rs` (`Id`) and `tests/nn_tests.rs`
+
+Design session 7 (local machine, real libtorch 2.13.0 CPU, FPC 3.2.2).
+The 4.6.5 deferred list, same pattern as 4.6.5: config record +
+`Default*Config`, two constructors, tch-rs's variable names and
+registration order so `.ot` files interchange. Everything numeric below
+was *measured* against the generated ops (probe under the scratchpad, not
+committed); the layer classes themselves are the local implementer's.
+
+**Shape of tch-rs's `ConvConfigND<ND>` in FPC (decision).** tch-rs has one
+generic config/layer over `ND = [i64; 1|2|3]`, plus `conv1d/2d/3d` taking
+the scalar `ConvConfig` and a `Create::make_array` that repeats the scalar.
+Pascal gets *one non-generic* `TConvConfigND` whose per-dimension fields are
+dynamic arrays (`Nd = Length`), *one* base class `TConvND` that switches on
+`FNd` in `Forward`, and `TConv1D/2D/3D` as thin subclasses carrying the
+scalar-config constructors. An FPC generic record was rejected without
+measuring: a `specialize TConvConfigND<TInt3>` gives three unrelated types,
+each still needing its own `Default` function, and the base class would
+still have to switch on the dimension (Pascal has no `AsRef<[i64]>` and no
+per-type trait impl), so the generic buys nothing. What the chosen shape
+relies on was *measured* (M-A): a base constructor
+`Create(P, In, Out, const KSizes: array of Int64; const Cfg: TConvConfigND)`
+plus two `overload` constructors on the subclass resolve without ambiguity
+for `TConv2D.Create(P, 1, 1, 3)`, `TConv2D.Create(P, 1, 1, 3, Cfg)` **and**
+the inherited `TConv2D.Create(P, 1, 1, [3, 3], CfgND)`; the subclass
+constructor calls `inherited Create(P, In, Out, [K, K], ConvConfigToND(Cfg, 2))`.
+
+```pascal
+  TConvConfigND = record                     // ConvConfigND<[i64; N]>, N = Length(Stride)
+    Stride, Padding, Dilation: TInt64Array;  // all three of length Nd
+    Groups: Int64; Bias: Boolean;
+    WsInit, BsInit: TInit; PaddingMode: TPaddingMode;
+  end;
+  function DefaultConvConfigND(Nd: Integer): TConvConfigND;          // [1..], [0..], [1..], 1, True, KaimingUniform, Constant(0), pmZeros
+  function ConvConfigToND(const Cfg: TConvConfig; Nd: Integer): TConvConfigND;  // Create::conv's make_array
+  function PadWithMode(const X: TTensor; Mode: TPaddingMode;
+    const Pad: array of Int64): TTensor;     // PaddingMode::pad: X.pad(Pad, Name, NoDouble)
+
+  TConvND = class(TModule)                   // Conv<ND>; nn::conv
+  private
+    FNd: Integer; FCfg: TConvConfigND;
+    FPadTwice, FZeroPad: TInt64Array;        // reversed_padding_repeated_twice; [0, ..]
+  public
+    Weight, Bias: TTensor;
+    constructor Create(const P: TVarPath; InDim, OutDim: Int64;
+      const KSizes: array of Int64; const Cfg: TConvConfigND); overload;
+    function Forward(const X: TTensor; Train: Boolean = False): TTensor; override;
+    property Nd: Integer read FNd;
+  end;
+  TConv1D = class(TConvND)                   // conv1d; TConv2D and TConv3D identical
+  public
+    constructor Create(const P: TVarPath; InDim, OutDim, KSize: Int64); overload;
+    constructor Create(const P: TVarPath; InDim, OutDim, KSize: Int64; const Cfg: TConvConfig); overload;
+  end;
+
+  TConvTransposeConfig = record              // ConvTransposeConfig (scalar)
+    Stride, Padding, OutputPadding, Dilation, Groups: Int64; Bias: Boolean;
+    WsInit, BsInit: TInit;                   // no PaddingMode, as tch-rs
+  end;
+  TConvTransposeConfigND = record
+    Stride, Padding, OutputPadding, Dilation: TInt64Array;
+    Groups: Int64; Bias: Boolean; WsInit, BsInit: TInit;
+  end;
+  function DefaultConvTransposeConfig: TConvTransposeConfig;         // 1, 0, 0, 1, 1, True, KaimingUniform, Constant(0)
+  function DefaultConvTransposeConfigND(Nd: Integer): TConvTransposeConfigND;
+  function ConvTransposeConfigToND(const Cfg: TConvTransposeConfig; Nd: Integer): TConvTransposeConfigND;
+  TConvTransposeND = class(TModule)          // ConvTransposeND<ND>
+  private FNd: Integer; FCfg: TConvTransposeConfigND;
+  public
+    Weight, Bias: TTensor;
+    constructor Create(const P: TVarPath; InDim, OutDim: Int64;
+      const KSizes: array of Int64; const Cfg: TConvTransposeConfigND); overload;
+    function Forward(const X: TTensor; Train: Boolean = False): TTensor; override;
+  end;
+  TConvTranspose1D = class(TConvTransposeND) { the two scalar constructors } end;  // and 2D, 3D
+
+  TGroupNormConfig = record CudnnEnabled: Boolean; Eps: Double; Affine: Boolean; WsInit, BsInit: TInit; end;
+  function DefaultGroupNormConfig: TGroupNormConfig;                 // True, 1e-5, True, Constant(1), Constant(0)
+  TGroupNorm = class(TModule)
+  private FCfg: TGroupNormConfig; FNumGroups, FNumChannels: Int64;
+  public
+    Weight, Bias: TTensor;                   // IsNil when Affine is False
+    constructor Create(const P: TVarPath; NumGroups, NumChannels: Int64); overload;
+    constructor Create(const P: TVarPath; NumGroups, NumChannels: Int64; const Cfg: TGroupNormConfig); overload;
+    function Forward(const X: TTensor; Train: Boolean = False): TTensor; override;
+    property NumGroups: Int64 read FNumGroups;  property NumChannels: Int64 read FNumChannels;
+  end;
+
+  TRNNConfig = record                        // RNNConfig, shared by LSTM and GRU
+    HasBiases: Boolean; NumLayers: Int64; Dropout: Double; Train: Boolean;
+    Bidirectional, BatchFirst: Boolean;
+    WIhInit, WHhInit, BIhInit, BHhInit: TInit;   // b_*_init: Option<Init> in tch-rs, see deviations
+  end;
+  function DefaultRNNConfig: TRNNConfig;     // True, 1, 0, True, False, True, KaimingUniform x2, Constant(0) x2
+  TRNNState = record H, C: TTensor; end;     // LSTMState((h, c)); GRUState(h) leaves C nil
+  TRNN = class abstract                      // trait RNN; not a TModule (tch-rs's LSTM/GRU implement no Module)
+  private
+    FFlatWeights: TTensorArray; FHiddenDim: Int64; FCfg: TRNNConfig;
+  protected
+    constructor Create(const P: TVarPath; InDim, HiddenDim, GateMul: Int64; const Cfg: TRNNConfig);  // rnn_weights
+    function BatchDimIndex: Integer; inline; // 0 when BatchFirst else 1
+  public
+    function ZeroState(BatchDim: Int64): TRNNState; virtual; abstract;
+    function Step(const Input: TTensor; const State: TRNNState): TRNNState;       // [batch, features]
+    function Seq(const Input: TTensor; out State: TRNNState): TTensor;             // [batch, seq, features] when BatchFirst
+    function SeqInit(const Input: TTensor; const InState: TRNNState; out OutState: TRNNState): TTensor; virtual; abstract;
+    property FlatWeights: TTensorArray read FFlatWeights;
+    property HiddenDim: Int64 read FHiddenDim;
+    property Config: TRNNConfig read FCfg;
+  end;
+  TLSTM = class(TRNN)
+  public
+    constructor Create(const P: TVarPath; InDim, HiddenDim: Int64); overload;
+    constructor Create(const P: TVarPath; InDim, HiddenDim: Int64; const Cfg: TRNNConfig); overload;
+    function ZeroState(BatchDim: Int64): TRNNState; override;
+    function SeqInit(const Input: TTensor; const InState: TRNNState; out OutState: TRNNState): TTensor; override;
+  end;
+  TGRU = class(TRNN)  { same four members } end;
+
+  TIdentity = class(TModule)                 // nn::Id
+    function Forward(const X: TTensor; Train: Boolean = False): TTensor; override;  // Result := X
+  end;
+```
+
+Per layer — variables (name `[shape]`, default init, registration order),
+config defaults, the exact op `Forward` calls:
+
+| layer (tch-rs file) | variables, in registration order | config defaults | `Forward` |
+|---|---|---|---|
+| `TConvND` / `TConv1D` / `TConv3D` (`conv.rs`; `TConv2D` moves onto the same base, API unchanged) | `bias [Out]` `BsInit` when `Bias`; `weight [Out, In div Groups, K1, .., KNd]` `WsInit` | `DefaultConvConfig` as 4.6.5; `DefaultConvConfigND(Nd)` the same values repeated `Nd` times | `pmZeros`: `X.conv{Nd}d(Weight, Bias, Stride, Padding, Dilation, Groups)`; other modes: `PadWithMode(X, Mode, FPadTwice).conv{Nd}d(Weight, Bias, Stride, FZeroPad, Dilation, Groups)`; `case FNd of 1: conv1d; 2: conv2d; 3: conv3d`. The constructor raises `ETorchError` unless `Length(KSizes)` is 1..3 and `Stride`, `Padding`, `Dilation` all have that length |
+| `TConvTransposeND` / `1D` / `2D` / `3D` (`conv_transpose.rs`) | `bias [Out]` `BsInit` when `Bias`; `weight [In, Out div Groups, K1, .., KNd]` `WsInit` (note `In` first) | `Stride` 1, `Padding` 0, `OutputPadding` 0, `Dilation` 1, `Groups` 1, `Bias` True, `WsInit` KaimingUniform, `BsInit` Constant(0) | `X.conv_transpose{Nd}d(Weight, Bias, Stride, Padding, OutputPadding, Groups, Dilation)` — the generated argument order (groups before dilation) is the C one; no padding modes |
+| `TGroupNorm` (`group_norm.rs`) | `weight [NumChannels]` `WsInit`, `bias [NumChannels]` `BsInit`, both only when `Affine` | `CudnnEnabled` True, `Eps` 1e-5, `Affine` True, `WsInit` Constant(1), `BsInit` Constant(0) | `X.group_norm(NumGroups, Weight, Bias, Eps, CudnnEnabled)` |
+| `TLSTM` / `TGRU` (`rnn.rs`, `rnn_weights`) | for `L` in `0..NumLayers-1`, for `D` in `0..NumDirections-1` (`Sfx` = `'_reverse'` when `D = 1`): `weight_ih_l{L}{Sfx} [GateDim, InL]` `WIhInit`, `weight_hh_l{L}{Sfx} [GateDim, Hidden]` `WHhInit`, then when `HasBiases` `bias_ih_l{L}{Sfx} [GateDim]` `BIhInit`, `bias_hh_l{L}{Sfx} [GateDim]` `BHhInit`; `InL = InDim` for `L = 0`, else `Hidden * NumDirections`; `GateDim = 4 * Hidden` (LSTM, gates i, f, g, o) or `3 * Hidden` (GRU, gates r, z, n); `FFlatWeights` is the same list in the same order (what `lstm`/`gru` take as `params`) | `HasBiases` True, `NumLayers` 1, `Dropout` 0, `Train` True, `Bidirectional` False, `BatchFirst` True, `WIhInit`/`WHhInit` KaimingUniform, `BIhInit`/`BHhInit` Constant(0) | `SeqInit`: LSTM `Input.lstm([InState.H, InState.C], FFlatWeights, HasBiases, NumLayers, Dropout, Train, Bidirectional, BatchFirst, Result, OutState.H, OutState.C)`; GRU `Input.gru(InState.H, FFlatWeights, ..., Result, OutState.H)`. `ZeroState(B)`: `TTensor.zeros([NumLayers * NumDirections, B, Hidden], FFlatWeights[0].Kind, FFlatWeights[0].Device)` into `H` (LSTM: and the same handle into `C`, as tch-rs's `shallow_clone`). `Step(X, S)`: `SeqInit(X.unsqueeze(1 - BatchDimIndex), S, Result)`, output discarded. `Seq(X, S)`: `SeqInit(X, ZeroState(X.Shape[BatchDimIndex]), S)` |
+| `TIdentity` (`mod.rs` `Id`) | none | — | returns `X` (record copy, same handle) |
+
+Decisions and rationale:
+- **One base per family, subclasses only for the scalar constructors.**
+  `TConv2D`'s public API (two constructors, `Weight`, `Bias`, `Forward`)
+  does not change; its body moves into `TConvND` and `TConv2D.Create(P, In,
+  Out, K, Cfg)` becomes `inherited Create(P, In, Out, [K, K],
+  ConvConfigToND(Cfg, 2))`. The group-8 test numbers of 4.6.7 were
+  re-run through this shape and are unchanged (*measured*). A user who
+  wants per-dimension settings builds a `TConvConfigND` and uses either
+  `TConvND.Create` or the inherited constructor on `TConv2D`.
+- **`PadWithMode` is public** (tch-rs's `PaddingMode::pad`) so tch-rs's
+  `pad` test can be ported, and `TConvND.Forward` uses it. `pmZeros` maps
+  to `'constant'` (tch-rs `PaddingMode::to_string`; the current private
+  `ModeNames` has `'zeros'` in that slot, which `Forward` never reaches —
+  replace it).
+- **Reversed padding repeated twice follows PyTorch, not tch-rs
+  (deviation).** For `Padding = [Ph, Pw]`, `pad` wants `[Pw, Pw, Ph, Ph]`
+  (last dimension's left/right first); tch-rs's `conv()` builds
+  `[Pw, Ph, Pw, Ph]` (reverse, then reverse again), which is only correct
+  when all paddings are equal — i.e. for the scalar config everyone uses.
+  *Measured*: `TConv2D` ND with `Padding [1, 0]`, reflect, `KSizes [3, 1]`,
+  weights 1 on `[[1, 2], [3, 4]]` gives `[[7, 10], [5, 8]]` with PyTorch's
+  order and a `[1, 1, 1, 3]` tensor `[5, 8, 5]` with tch-rs's. So
+  `FPadTwice[2*I] = FPadTwice[2*I + 1] = Padding[Nd - 1 - I]`.
+- **`TRNNState` is one record for both layers (deviation).** tch-rs has
+  `LSTMState((h, c))` and `GRUState(h)` as the `RNN` trait's associated
+  type; without generics on associated types, a shared abstract `TRNN`
+  needs one state type, so `TGRU` leaves `C` nil (`C.IsNil`). The
+  accessors `h()`/`c()`/`value()` are just the fields.
+- **`Seq`/`SeqInit` return the output and hand the state back through
+  `out`** (tch-rs returns the tuple `(output, state)`); `Step` returns the
+  new state as its result, as tch-rs. *Measured* (M-B): FPC finalises an
+  `out` record of `TTensor`s on entry (H8 again), so
+  `L.SeqInit(X, S, S)` nils `S.H` before the body runs and the op raises
+  `ETorchError: undefined tensor passed as hx to gru` — a clean failure,
+  documented: `InState` and `OutState` must be distinct variables.
+  *Measured* (M-B2): `S := L.Step(X, S)` is safe; the function result goes
+  through a temporary, so the body still sees the old `S`.
+- **`BatchFirst = False` works (deviation).** tch-rs's `seq` takes
+  `size()[0]` as the batch and `step` does `unsqueeze(1)` regardless of
+  `batch_first`, so with `batch_first: false` both pass the wrong batch
+  size to `zero_state`. Pascal uses `BatchDimIndex` (0 or 1) in both
+  places; the cost is two `if`s. *Measured*: `gru` with `batch_first`
+  False on `[3, 5, 2]` returns `[3, 5, 4]`, `h [1, 5, 4]`.
+- **`BIhInit`/`BHhInit` are plain `TInit`** (tch-rs: `Option<Init>`,
+  `unwrap()`ed when `has_biases` — the `None` case only panics). Plain
+  fields drop the panic path; `HasBiases` False ignores them.
+- **`ZeroState` reads kind and device from `FFlatWeights[0]` at call
+  time** (tch-rs stores `vs.device()` at creation and reads the kind at
+  call time); so `SetKind`/`SetDevice` on the store after construction are
+  honoured. Minor deviation, strictly more permissive.
+- **cuDNN weight flattening is skipped.** tch-rs calls
+  `_cudnn_rnn_flatten_weight` when the store is on CUDA with cuDNN; the
+  generated `TTensor._cudnn_rnn_flatten_weight` exists (class function),
+  but the condition needs the CUDA/ROCm milestone (HANDOFF item 3). On CPU
+  nothing is lost.
+- **`TRNN` is not a `TModule`**, as in tch-rs; the `Train` the op receives
+  is `Config.Train` (dropout between layers only), not a `Forward`
+  argument. A user who wants an RNN inside a `TSequential` wraps `Seq` in
+  a `TFuncModule` method.
+- **`Id` is `TIdentity`** (name only; `Id` reads as "identifier" in
+  Pascal). It is the degenerate layer that lets a `TSequential` slot be
+  filled conditionally.
+
+Not measurable with CPU libtorch here, kept as hypotheses:
+- **(H29)** `.ot` interchange with files written by tch-rs's `lstm`/`gru`/
+  `conv_transpose2d`/`group_norm` (names and shapes match by construction;
+  needs a Rust toolchain to produce the file).
+- **(H30)** the cuDNN flatten call on a CUDA/ROCm store (item 3).
+
+Test list, group 11 "Milestone 3 layers" in `tests/nn/nn_test.pas`
+(numbers *measured* here through the generated ops unless marked tch-rs):
+  1. `PadWithMode` (tch-rs `pad`): `[1, 2, 3]` zeros `[1, 1]` →
+     `[0, 1, 2, 3, 0]`; `[1, 2, 3, 4].view([1, 2, 2])` reflect
+     `[1, 1, 1, 1]` → `[4, 3, 4, 3, 2, 1, 2, 1, 4, 3, 4, 3, 2, 1, 2, 1]`.
+  2. `TConv1D(1, 1, 3)`, `Padding 1`, `Bias False`, weights 1, on
+     `[1, 2, 3]` (`[1, 1, 3]`): zeros `[3, 6, 5]`, reflect `[5, 6, 7]`,
+     replicate `[4, 6, 8]`, circular `[6, 6, 6]`. `TConv1D(4, 6, 3)`
+     registers `bias [6]` then `weight [6, 4, 3]`.
+  3. `TConv2D`: group 8's four results unchanged; ND asymmetric padding
+     `[1, 0]` reflect, `KSizes [3, 1]`, weights 1 → `[[7, 10], [5, 8]]`
+     (shape `[1, 1, 2, 2]`); `DefaultConvConfigND(2)` equals
+     `ConvConfigToND(DefaultConvConfig, 2)` field by field; `KSizes` of
+     length 4, or `Stride` of the wrong length, raise `ETorchError`.
+  4. `TConv3D(1, 1, 2)`, weights 1, no bias, on `1..8` as `[1, 1, 2, 2, 2]`
+     → `[36]`, shape `[1, 1, 1, 1, 1]`; `TConvND(2, 3, [3, 3, 3])` with
+     `Padding [1, 0, 0]` maps `[1, 2, 4, 4, 4] → [1, 3, 4, 2, 2]`, weight
+     `[3, 2, 3, 3, 3]`.
+  5. `TConvTranspose2D(1, 1, 2)`, weights 1, `Bias False`, on
+     `[[1, 2], [3, 4]]`: stride 1 → `[1, 1, 3, 3]`
+     `[1, 3, 2, 4, 10, 6, 3, 7, 4]`; stride 2 → `[1, 1, 4, 4]`
+     `[1, 1, 2, 2, 1, 1, 2, 2, 3, 3, 4, 4, 3, 3, 4, 4]`.
+     `TConvTranspose1D(1, 1, 2)` on `[1, 2, 3]` → `[1, 3, 5, 3]`; stride 2,
+     `OutputPadding 1` → `[1, 1, 7]` `[1, 1, 2, 2, 3, 3, 0]`.
+     `TConvTranspose3D(2, 3, 3)`: weight `[2, 3, 3, 3, 3]` (registered after
+     `bias [3]`), `[1, 2, 4, 4, 4] → [1, 3, 6, 6, 6]`.
+  6. `TGroupNorm(2, 4)` on `[1, 2, 3, 4].view([1, 4, 1])` →
+     `[-1, 1, -1, 1]` within 1e-4 (exactly ±0.99998 with `Eps` 1e-5);
+     registers `weight [4]`, `bias [4]`; `Affine False` registers nothing
+     and still normalises. tch-rs `group_norm_test`: `TGroupNorm(2, 10)`
+     on `randn [1, 10, 7]` keeps the shape.
+  7. `TGRU` and `TLSTM`, tch-rs's five configs (default; `HasBiases`
+     False; `Bidirectional`; `NumLayers 2`; both), `InDim 2`,
+     `Hidden 4`, batch 5, seq 3: `Step` on `randn [5, 2]` from `ZeroState(5)`
+     gives `H` (and `C`) `[LayerDim, 5, 4]`; `Seq` on `randn [5, 3, 2]`
+     gives `[5, 3, 4 * NumDirections]`; variable count
+     `4 * NumLayers * NumDirections` (`2 *` without biases); for the
+     2-layer bidirectional case the names are `weight_ih_l0`,
+     `weight_hh_l0`, `bias_ih_l0`, `bias_hh_l0`, `weight_ih_l0_reverse`, …,
+     `weight_ih_l1 [12, 8]` (GRU) … `bias_hh_l1_reverse`, in this order.
+     `BatchFirst False`: `Seq` on `[3, 5, 2]` → `[3, 5, 4]`.
+  8. Hand numbers: `TGRU(1, 1)`, all weights 0, `bias_ih_l0 := [0, 0, 1]`
+     (under `NoGradGuard`), `Step` on `zeros [1, 1]` → `H = 0.380797`
+     (`= tanh(1) / 2`: r = z = σ(0) = ½, n = tanh(1), h' = (1 − z)·n).
+     `TLSTM(1, 1)`, `bias_ih_l0 := [0, 0, 1, 0]` → `C = 0.380797`
+     (`= ½·tanh(1)`: i = ½, g = tanh(1)), `H = 0.181700`
+     (`= ½·tanh(0.380797)`). Both within 1e-5.
+  9. `L.SeqInit(X, S, S)` raises `ETorchError` (message names `hx`);
+     `S := L.Step(X, S)` works.
+  10. `TIdentity.Forward(X).Raw = X.Raw`; a `TSequential` of
+      `TIdentity` + `AddFn(@Relu)` behaves like the ReLU alone.
+  11. `TchLiveHandles` back to its starting value after freeing the layers
+      and stores.
 
 ### 4.7 Grad mode and global settings
 

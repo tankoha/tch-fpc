@@ -1432,7 +1432,8 @@ type
 同じ型でマイルストーン3に回すもの：`TConv1D` / `TConv3D` と次元ごとの `ConvConfigND`、
 `TConvTranspose`、`TGroupNorm`（`group_norm` 上の `TLayerNorm` と同一）、
 `TLSTM` / `TGRU`（`lstm` / `gru` は `out` 引数を持ち、状態の record と `ZeroState` が
-要る）、`Id`。変数名、形、デフォルトの初期化、各 `Forward` が呼ぶ生成 op は、すべて
+要る）、`Id` — いずれも 4.6.10（設計セッション7）で設計済み。変数名、形、
+デフォルトの初期化、各 `Forward` が呼ぶ生成 op は、すべて
 名前を挙げた tch-rs のファイルから：
 
 | レイヤー（tch-rs のファイル） | 変数：名前 `[形]`、デフォルトの初期化 | 設定のデフォルト | `Forward` |
@@ -2322,6 +2323,243 @@ n)`：`expect_tag(o, 14)`、`mock_last_method` を記録。`name == "fail"` は�
   他方から見えること（変更するメソッドを持つ資材がなく、`Define` は TorchScript の
   クラスを宣言できない）。`IValue` のコピーコンストラクタから従うが、後の資材で確認
   してよい。
+
+#### 4.6.10 マイルストーン3のレイヤー、`nn/conv.rs`、`conv_transpose.rs`、`group_norm.rs`、`rnn.rs`、`mod.rs`（`Id`）、`tests/nn_tests.rs` より
+
+設計セッション7（ローカル機、本物の libtorch 2.13.0 CPU、FPC 3.2.2）。4.6.5 の
+先送りリストを 4.6.5 と同じ型で：設定 record + `Default*Config`、コンストラクタ2つ、
+tch-rs の変数名と登録順（`.ot` ファイルが相互に読める）。以下の数値はすべて生成 op に
+対して*実測*（プローブはスクラッチパッド内、コミットしない）。レイヤークラス自体は
+ローカルの実装者の仕事。
+
+**tch-rs の `ConvConfigND<ND>` を FPC でどう表すか（決定）。** tch-rs は
+`ND = [i64; 1|2|3]` 上のジェネリックな設定とレイヤーを1つ持ち、スカラーの `ConvConfig`
+を取る `conv1d/2d/3d` と、スカラーを繰り返す `Create::make_array` を添えている。Pascal
+では*ジェネリックでない1つの* `TConvConfigND`（次元ごとのフィールドは動的配列、
+`Nd = Length`）、`Forward` で `FNd` により分岐する*1つの*基底クラス `TConvND`、そして
+スカラー設定のコンストラクタだけを持つ薄いサブクラス `TConv1D/2D/3D`。FPC のジェネリック
+record は測らずに却下：`specialize TConvConfigND<TInt3>` は互いに無関係な3つの型になり、
+それぞれに `Default` 関数が要るうえ、基底クラスはどうせ次元で分岐する（Pascal には
+`AsRef<[i64]>` も型ごとの trait 実装もない）ので、ジェネリックは何も買わない。採用した
+形が頼るものは*実測*（M-A）：基底のコンストラクタ
+`Create(P, In, Out, const KSizes: array of Int64; const Cfg: TConvConfigND)` とサブ
+クラスの `overload` コンストラクタ2つは、`TConv2D.Create(P, 1, 1, 3)`、
+`TConv2D.Create(P, 1, 1, 3, Cfg)`、**および**継承された
+`TConv2D.Create(P, 1, 1, [3, 3], CfgND)` のどれも曖昧さなく解決する。サブクラスの
+コンストラクタは `inherited Create(P, In, Out, [K, K], ConvConfigToND(Cfg, 2))` を呼ぶ。
+
+```pascal
+  TConvConfigND = record                     // ConvConfigND<[i64; N]>、N = Length(Stride)
+    Stride, Padding, Dilation: TInt64Array;  // 3つとも長さ Nd
+    Groups: Int64; Bias: Boolean;
+    WsInit, BsInit: TInit; PaddingMode: TPaddingMode;
+  end;
+  function DefaultConvConfigND(Nd: Integer): TConvConfigND;          // [1..], [0..], [1..], 1, True, KaimingUniform, Constant(0), pmZeros
+  function ConvConfigToND(const Cfg: TConvConfig; Nd: Integer): TConvConfigND;  // Create::conv の make_array
+  function PadWithMode(const X: TTensor; Mode: TPaddingMode;
+    const Pad: array of Int64): TTensor;     // PaddingMode::pad: X.pad(Pad, Name, NoDouble)
+
+  TConvND = class(TModule)                   // Conv<ND>; nn::conv
+  private
+    FNd: Integer; FCfg: TConvConfigND;
+    FPadTwice, FZeroPad: TInt64Array;        // reversed_padding_repeated_twice; [0, ..]
+  public
+    Weight, Bias: TTensor;
+    constructor Create(const P: TVarPath; InDim, OutDim: Int64;
+      const KSizes: array of Int64; const Cfg: TConvConfigND); overload;
+    function Forward(const X: TTensor; Train: Boolean = False): TTensor; override;
+    property Nd: Integer read FNd;
+  end;
+  TConv1D = class(TConvND)                   // conv1d。TConv2D と TConv3D も同一
+  public
+    constructor Create(const P: TVarPath; InDim, OutDim, KSize: Int64); overload;
+    constructor Create(const P: TVarPath; InDim, OutDim, KSize: Int64; const Cfg: TConvConfig); overload;
+  end;
+
+  TConvTransposeConfig = record              // ConvTransposeConfig（スカラー）
+    Stride, Padding, OutputPadding, Dilation, Groups: Int64; Bias: Boolean;
+    WsInit, BsInit: TInit;                   // PaddingMode はない（tch-rs と同じ）
+  end;
+  TConvTransposeConfigND = record
+    Stride, Padding, OutputPadding, Dilation: TInt64Array;
+    Groups: Int64; Bias: Boolean; WsInit, BsInit: TInit;
+  end;
+  function DefaultConvTransposeConfig: TConvTransposeConfig;         // 1, 0, 0, 1, 1, True, KaimingUniform, Constant(0)
+  function DefaultConvTransposeConfigND(Nd: Integer): TConvTransposeConfigND;
+  function ConvTransposeConfigToND(const Cfg: TConvTransposeConfig; Nd: Integer): TConvTransposeConfigND;
+  TConvTransposeND = class(TModule)          // ConvTransposeND<ND>
+  private FNd: Integer; FCfg: TConvTransposeConfigND;
+  public
+    Weight, Bias: TTensor;
+    constructor Create(const P: TVarPath; InDim, OutDim: Int64;
+      const KSizes: array of Int64; const Cfg: TConvTransposeConfigND); overload;
+    function Forward(const X: TTensor; Train: Boolean = False): TTensor; override;
+  end;
+  TConvTranspose1D = class(TConvTransposeND) { スカラーのコンストラクタ2つ } end;  // 2D、3D も
+
+  TGroupNormConfig = record CudnnEnabled: Boolean; Eps: Double; Affine: Boolean; WsInit, BsInit: TInit; end;
+  function DefaultGroupNormConfig: TGroupNormConfig;                 // True, 1e-5, True, Constant(1), Constant(0)
+  TGroupNorm = class(TModule)
+  private FCfg: TGroupNormConfig; FNumGroups, FNumChannels: Int64;
+  public
+    Weight, Bias: TTensor;                   // Affine が False なら IsNil
+    constructor Create(const P: TVarPath; NumGroups, NumChannels: Int64); overload;
+    constructor Create(const P: TVarPath; NumGroups, NumChannels: Int64; const Cfg: TGroupNormConfig); overload;
+    function Forward(const X: TTensor; Train: Boolean = False): TTensor; override;
+    property NumGroups: Int64 read FNumGroups;  property NumChannels: Int64 read FNumChannels;
+  end;
+
+  TRNNConfig = record                        // RNNConfig、LSTM と GRU で共通
+    HasBiases: Boolean; NumLayers: Int64; Dropout: Double; Train: Boolean;
+    Bidirectional, BatchFirst: Boolean;
+    WIhInit, WHhInit, BIhInit, BHhInit: TInit;   // b_*_init は tch-rs では Option<Init>。逸脱の項を参照
+  end;
+  function DefaultRNNConfig: TRNNConfig;     // True, 1, 0, True, False, True, KaimingUniform x2, Constant(0) x2
+  TRNNState = record H, C: TTensor; end;     // LSTMState((h, c))。GRUState(h) は C を nil のまま
+  TRNN = class abstract                      // trait RNN。TModule ではない（tch-rs の LSTM/GRU も Module を実装しない）
+  private
+    FFlatWeights: TTensorArray; FHiddenDim: Int64; FCfg: TRNNConfig;
+  protected
+    constructor Create(const P: TVarPath; InDim, HiddenDim, GateMul: Int64; const Cfg: TRNNConfig);  // rnn_weights
+    function BatchDimIndex: Integer; inline; // BatchFirst なら 0、でなければ 1
+  public
+    function ZeroState(BatchDim: Int64): TRNNState; virtual; abstract;
+    function Step(const Input: TTensor; const State: TRNNState): TRNNState;       // [batch, features]
+    function Seq(const Input: TTensor; out State: TRNNState): TTensor;             // BatchFirst なら [batch, seq, features]
+    function SeqInit(const Input: TTensor; const InState: TRNNState; out OutState: TRNNState): TTensor; virtual; abstract;
+    property FlatWeights: TTensorArray read FFlatWeights;
+    property HiddenDim: Int64 read FHiddenDim;
+    property Config: TRNNConfig read FCfg;
+  end;
+  TLSTM = class(TRNN)
+  public
+    constructor Create(const P: TVarPath; InDim, HiddenDim: Int64); overload;
+    constructor Create(const P: TVarPath; InDim, HiddenDim: Int64; const Cfg: TRNNConfig); overload;
+    function ZeroState(BatchDim: Int64): TRNNState; override;
+    function SeqInit(const Input: TTensor; const InState: TRNNState; out OutState: TRNNState): TTensor; override;
+  end;
+  TGRU = class(TRNN)  { 同じ4メンバ } end;
+
+  TIdentity = class(TModule)                 // nn::Id
+    function Forward(const X: TTensor; Train: Boolean = False): TTensor; override;  // Result := X
+  end;
+```
+
+レイヤーごと — 変数（名前 `[形]`、デフォルトの初期化、登録順）、設定のデフォルト、
+`Forward` が呼ぶ op：
+
+| レイヤー（tch-rs のファイル） | 変数、登録順 | 設定のデフォルト | `Forward` |
+|---|---|---|---|
+| `TConvND` / `TConv1D` / `TConv3D`（`conv.rs`。`TConv2D` も同じ基底に移る、API は不変） | `Bias` なら `bias [Out]` `BsInit`。`weight [Out, In div Groups, K1, .., KNd]` `WsInit` | `DefaultConvConfig` は 4.6.5 のとおり。`DefaultConvConfigND(Nd)` は同じ値を `Nd` 回繰り返したもの | `pmZeros`：`X.conv{Nd}d(Weight, Bias, Stride, Padding, Dilation, Groups)`。他のモード：`PadWithMode(X, Mode, FPadTwice).conv{Nd}d(Weight, Bias, Stride, FZeroPad, Dilation, Groups)`。`case FNd of 1: conv1d; 2: conv2d; 3: conv3d`。コンストラクタは `Length(KSizes)` が 1..3 で `Stride`、`Padding`、`Dilation` がその長さでなければ `ETorchError` |
+| `TConvTransposeND` / `1D` / `2D` / `3D`（`conv_transpose.rs`） | `Bias` なら `bias [Out]` `BsInit`。`weight [In, Out div Groups, K1, .., KNd]` `WsInit`（`In` が先） | `Stride` 1、`Padding` 0、`OutputPadding` 0、`Dilation` 1、`Groups` 1、`Bias` True、`WsInit` KaimingUniform、`BsInit` Constant(0) | `X.conv_transpose{Nd}d(Weight, Bias, Stride, Padding, OutputPadding, Groups, Dilation)` — 生成された引数順（groups が dilation の前）は C のもの。パディングモードなし |
+| `TGroupNorm`（`group_norm.rs`） | `weight [NumChannels]` `WsInit`、`bias [NumChannels]` `BsInit`、どちらも `Affine` のときだけ | `CudnnEnabled` True、`Eps` 1e-5、`Affine` True、`WsInit` Constant(1)、`BsInit` Constant(0) | `X.group_norm(NumGroups, Weight, Bias, Eps, CudnnEnabled)` |
+| `TLSTM` / `TGRU`（`rnn.rs`、`rnn_weights`） | `L` in `0..NumLayers-1`、`D` in `0..NumDirections-1`（`D = 1` なら `Sfx` = `'_reverse'`）の順に：`weight_ih_l{L}{Sfx} [GateDim, InL]` `WIhInit`、`weight_hh_l{L}{Sfx} [GateDim, Hidden]` `WHhInit`、次に `HasBiases` なら `bias_ih_l{L}{Sfx} [GateDim]` `BIhInit`、`bias_hh_l{L}{Sfx} [GateDim]` `BHhInit`。`InL = InDim`（`L = 0`）、それ以外は `Hidden * NumDirections`。`GateDim = 4 * Hidden`（LSTM、ゲート i, f, g, o）または `3 * Hidden`（GRU、ゲート r, z, n）。`FFlatWeights` は同じ並びの同じリスト（`lstm`/`gru` の `params`） | `HasBiases` True、`NumLayers` 1、`Dropout` 0、`Train` True、`Bidirectional` False、`BatchFirst` True、`WIhInit`/`WHhInit` KaimingUniform、`BIhInit`/`BHhInit` Constant(0) | `SeqInit`：LSTM は `Input.lstm([InState.H, InState.C], FFlatWeights, HasBiases, NumLayers, Dropout, Train, Bidirectional, BatchFirst, Result, OutState.H, OutState.C)`、GRU は `Input.gru(InState.H, FFlatWeights, ..., Result, OutState.H)`。`ZeroState(B)`：`TTensor.zeros([NumLayers * NumDirections, B, Hidden], FFlatWeights[0].Kind, FFlatWeights[0].Device)` を `H` に（LSTM は同じハンドルを `C` にも、tch-rs の `shallow_clone`）。`Step(X, S)`：`SeqInit(X.unsqueeze(1 - BatchDimIndex), S, Result)`、出力は捨てる。`Seq(X, S)`：`SeqInit(X, ZeroState(X.Shape[BatchDimIndex]), S)` |
+| `TIdentity`（`mod.rs` の `Id`） | なし | — | `X` を返す（record のコピー、同じハンドル） |
+
+決定事項と理由：
+- **族ごとに基底1つ、サブクラスはスカラーのコンストラクタのためだけ。** `TConv2D` の
+  公開 API（コンストラクタ2つ、`Weight`、`Bias`、`Forward`）は変わらない。本体は
+  `TConvND` に移り、`TConv2D.Create(P, In, Out, K, Cfg)` は
+  `inherited Create(P, In, Out, [K, K], ConvConfigToND(Cfg, 2))` になる。4.6.7 の
+  グループ8の数値はこの形で再実行して不変（*実測*）。次元ごとの設定が欲しい
+  ユーザーは `TConvConfigND` を組んで `TConvND.Create` か `TConv2D` の継承コンストラクタ
+  を使う。
+- **`PadWithMode` は公開**（tch-rs の `PaddingMode::pad`）。tch-rs の `pad` テストを
+  移植でき、`TConvND.Forward` もこれを使う。`pmZeros` は `'constant'`（tch-rs
+  `PaddingMode::to_string`。現在の private な `ModeNames` はそのスロットが `'zeros'`
+  だが `Forward` は到達しない — 置き換える）。
+- **reversed padding repeated twice は tch-rs ではなく PyTorch に従う（逸脱）。**
+  `Padding = [Ph, Pw]` のとき `pad` が欲しいのは `[Pw, Pw, Ph, Ph]`（最後の次元の
+  左右が先）。tch-rs の `conv()` は `[Pw, Ph, Pw, Ph]`（反転してもう一度反転）を作り、
+  パディングが全部等しいとき — つまり皆が使うスカラー設定のとき — だけ正しい。*実測*：
+  `TConv2D` の ND で `Padding [1, 0]`、reflect、`KSizes [3, 1]`、重み 1、入力
+  `[[1, 2], [3, 4]]` は PyTorch の順で `[[7, 10], [5, 8]]`、tch-rs の順では
+  `[1, 1, 1, 3]` の `[5, 8, 5]`。よって
+  `FPadTwice[2*I] = FPadTwice[2*I + 1] = Padding[Nd - 1 - I]`。
+- **`TRNNState` は両レイヤーで1つの record（逸脱）。** tch-rs は `LSTMState((h, c))`
+  と `GRUState(h)` を `RNN` trait の関連型として持つ。関連型のジェネリックがないので、
+  共通の抽象 `TRNN` には状態型が1つ要り、`TGRU` は `C` を nil のまま（`C.IsNil`）に
+  する。アクセサ `h()`/`c()`/`value()` は単にフィールド。
+- **`Seq`/`SeqInit` は出力を返し、状態は `out` で戻す**（tch-rs はタプル
+  `(output, state)` を返す）。`Step` は tch-rs と同じく新しい状態を結果として返す。
+  *実測*（M-B）：FPC は `TTensor` の record の `out` 引数を入口で finalize する
+  （H8 の再現）ので、`L.SeqInit(X, S, S)` は本体の前に `S.H` を nil にし、op は
+  `ETorchError: undefined tensor passed as hx to gru` を投げる — きれいな失敗。
+  文書化：`InState` と `OutState` は別の変数でなければならない。*実測*（M-B2）：
+  `S := L.Step(X, S)` は安全。関数結果は一時変数を経由し、本体は古い `S` を見る。
+- **`BatchFirst = False` が動く（逸脱）。** tch-rs の `seq` は `batch_first` に
+  関わらず `size()[0]` をバッチとし、`step` は `unsqueeze(1)` するので、
+  `batch_first: false` では両方が間違ったバッチサイズを `zero_state` に渡す。Pascal
+  は両所で `BatchDimIndex`（0 か 1）を使う。コストは `if` 2つ。*実測*：`batch_first`
+  False の `gru` は `[3, 5, 2]` に対し `[3, 5, 4]`、`h [1, 5, 4]` を返す。
+- **`BIhInit`/`BHhInit` は素の `TInit`**（tch-rs は `Option<Init>` で、`has_biases`
+  のとき `unwrap()` — `None` は panic するだけ）。素のフィールドで panic 経路が消える。
+  `HasBiases` False なら無視。
+- **`ZeroState` は kind と device を呼び出し時に `FFlatWeights[0]` から読む**（tch-rs は
+  `vs.device()` を生成時に保存し、kind は呼び出し時に読む）。生成後の store への
+  `SetKind`/`SetDevice` が反映される。小さな逸脱、厳密により寛容。
+- **cuDNN の重み平坦化は省く。** tch-rs は store が CUDA かつ cuDNN ありのとき
+  `_cudnn_rnn_flatten_weight` を呼ぶ。生成された `TTensor._cudnn_rnn_flatten_weight`
+  （class function）はあるが、条件判定は CUDA/ROCm マイルストーン（HANDOFF 項目3）
+  のもの。CPU では失うものはない。
+- **`TRNN` は `TModule` ではない**。tch-rs と同じ。op が受け取る `Train` は
+  `Config.Train`（層間の dropout にだけ効く）で、`Forward` の引数ではない。
+  `TSequential` に RNN を入れたいユーザーは `Seq` を `TFuncModule` のメソッドで包む。
+- **`Id` は `TIdentity`**（名前だけ。Pascal で `Id` は「識別子」と読める）。
+  `TSequential` のスロットを条件付きで埋めるための退化したレイヤー。
+
+ここの CPU libtorch では測れず、仮説として残すもの：
+- **(H29)** tch-rs の `lstm`/`gru`/`conv_transpose2d`/`group_norm` が書いた `.ot`
+  ファイルとの相互運用（名前と形は構成上一致する。ファイルを作るには Rust ツール
+  チェーンが要る）。
+- **(H30)** CUDA/ROCm の store での cuDNN 平坦化呼び出し（項目3）。
+
+テスト一覧、`tests/nn/nn_test.pas` のグループ11「マイルストーン3のレイヤー」
+（数値は tch-rs と記したもの以外、ここで生成 op に対して*実測*）：
+  1. `PadWithMode`（tch-rs `pad`）：`[1, 2, 3]` を zeros `[1, 1]` →
+     `[0, 1, 2, 3, 0]`。`[1, 2, 3, 4].view([1, 2, 2])` を reflect `[1, 1, 1, 1]` →
+     `[4, 3, 4, 3, 2, 1, 2, 1, 4, 3, 4, 3, 2, 1, 2, 1]`。
+  2. `TConv1D(1, 1, 3)`、`Padding 1`、`Bias False`、重み 1、入力 `[1, 2, 3]`
+     （`[1, 1, 3]`）：zeros `[3, 6, 5]`、reflect `[5, 6, 7]`、replicate `[4, 6, 8]`、
+     circular `[6, 6, 6]`。`TConv1D(4, 6, 3)` は `bias [6]` の次に `weight [6, 4, 3]`
+     を登録。
+  3. `TConv2D`：グループ8の4結果は不変。ND の非対称パディング `[1, 0]` reflect、
+     `KSizes [3, 1]`、重み 1 → `[[7, 10], [5, 8]]`（形 `[1, 1, 2, 2]`）。
+     `DefaultConvConfigND(2)` は `ConvConfigToND(DefaultConvConfig, 2)` とフィールド
+     ごとに等しい。長さ4の `KSizes`、または長さの違う `Stride` は `ETorchError`。
+  4. `TConv3D(1, 1, 2)`、重み 1、バイアスなし、`1..8` を `[1, 1, 2, 2, 2]` として →
+     `[36]`、形 `[1, 1, 1, 1, 1]`。`TConvND(2, 3, [3, 3, 3])` に `Padding [1, 0, 0]`
+     で `[1, 2, 4, 4, 4] → [1, 3, 4, 2, 2]`、weight `[3, 2, 3, 3, 3]`。
+  5. `TConvTranspose2D(1, 1, 2)`、重み 1、`Bias False`、入力 `[[1, 2], [3, 4]]`：
+     stride 1 → `[1, 1, 3, 3]` `[1, 3, 2, 4, 10, 6, 3, 7, 4]`。stride 2 →
+     `[1, 1, 4, 4]` `[1, 1, 2, 2, 1, 1, 2, 2, 3, 3, 4, 4, 3, 3, 4, 4]`。
+     `TConvTranspose1D(1, 1, 2)` に `[1, 2, 3]` → `[1, 3, 5, 3]`。stride 2、
+     `OutputPadding 1` → `[1, 1, 7]` `[1, 1, 2, 2, 3, 3, 0]`。
+     `TConvTranspose3D(2, 3, 3)`：weight `[2, 3, 3, 3, 3]`（`bias [3]` の後に登録）、
+     `[1, 2, 4, 4, 4] → [1, 3, 6, 6, 6]`。
+  6. `TGroupNorm(2, 4)` に `[1, 2, 3, 4].view([1, 4, 1])` → `[-1, 1, -1, 1]` の
+     1e-4 以内（`Eps` 1e-5 でちょうど ±0.99998）。`weight [4]`、`bias [4]` を登録。
+     `Affine False` は何も登録せず、それでも正規化する。tch-rs `group_norm_test`：
+     `TGroupNorm(2, 10)` に `randn [1, 10, 7]` で形を保つ。
+  7. `TGRU` と `TLSTM`、tch-rs の5設定（デフォルト。`HasBiases` False。
+     `Bidirectional`。`NumLayers 2`。両方）、`InDim 2`、`Hidden 4`、バッチ 5、
+     seq 3：`ZeroState(5)` からの `randn [5, 2]` への `Step` は `H`（と `C`）
+     `[LayerDim, 5, 4]`。`randn [5, 3, 2]` への `Seq` は `[5, 3, 4 * NumDirections]`。
+     変数数は `4 * NumLayers * NumDirections`（バイアスなしなら `2 *`）。2層双方向の
+     ケースの名前は `weight_ih_l0`、`weight_hh_l0`、`bias_ih_l0`、`bias_hh_l0`、
+     `weight_ih_l0_reverse`、…、`weight_ih_l1 [12, 8]`（GRU）… `bias_hh_l1_reverse`、
+     この順。`BatchFirst False`：`[3, 5, 2]` への `Seq` → `[3, 5, 4]`。
+  8. 手計算の数値：`TGRU(1, 1)`、重みすべて 0、`bias_ih_l0 := [0, 0, 1]`
+     （`NoGradGuard` 下）、`zeros [1, 1]` への `Step` → `H = 0.380797`
+     （`= tanh(1) / 2`：r = z = σ(0) = ½、n = tanh(1)、h' = (1 − z)·n）。
+     `TLSTM(1, 1)`、`bias_ih_l0 := [0, 0, 1, 0]` → `C = 0.380797`
+     （`= ½·tanh(1)`：i = ½、g = tanh(1)）、`H = 0.181700`（`= ½·tanh(0.380797)`）。
+     どちらも 1e-5 以内。
+  9. `L.SeqInit(X, S, S)` は `ETorchError`（メッセージに `hx`）。
+     `S := L.Step(X, S)` は動く。
+  10. `TIdentity.Forward(X).Raw = X.Raw`。`TIdentity` + `AddFn(@Relu)` の
+      `TSequential` は ReLU 単体と同じ振る舞い。
+  11. レイヤーと store を解放した後、`TchLiveHandles` が開始時の値に戻る。
 
 ### 4.7 勾配モードと全体設定
 

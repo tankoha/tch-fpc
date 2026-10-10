@@ -4,6 +4,78 @@
 
 再開するときは最初にこれを読んでください。決定事項と理由は [DESIGN_jp.md](DESIGN_jp.md) にあります。
 
+## 設計セッション7（2026-10-11）：マイルストーン3のレイヤーを設計
+
+下の「引き継ぎ（ローカルセッション4の終了時点）」の項目2への回答。項目3
+（CUDA/ROCm）は未着手のまま。設計のみ：何もコミットせず、スクラッチパッド外に
+コードなし。ローカル機で本物の libtorch 2.13.0（CPU）と FPC 3.2.2 に対して
+実行したので、DESIGN 4.6.10 の数値は導出ではなく実測。
+
+**決定事項**（詳細と理由は DESIGN 4.6.10）：
+- tch-rs のジェネリックな `ConvConfigND<ND>` は、`TInt64Array` フィールドを持つ
+  ジェネリックでない1つの `TConvConfigND`（`Nd = Length`）、1つの基底クラス
+  `TConvND`（`Forward` は `FNd` で分岐）、スカラー設定のコンストラクタだけを持つ
+  サブクラス `TConv1D/2D/3D` になる。`TConv2D` の API は不変、本体は基底へ移る。
+  `ConvConfigToND(Cfg, Nd)`、`DefaultConvConfigND(Nd)`、`PadWithMode`（公開、
+  `pmZeros` は `'constant'`）を追加。`TConvTransposeND` + `1D/2D/3D` と
+  `TConvTransposeConfig[ND]` も同じ形（weight は `[In, Out div Groups, K..]`）。
+- `TGroupNorm(NumGroups, NumChannels[, Cfg])` は `group_norm` 上。`Affine` のとき
+  weight、bias `[NumChannels]` の順。
+- `TRNN = class abstract`（tch-rs と同じく `TModule` ではない）に `ZeroState`、
+  `Step`、`Seq`、`SeqInit`。`TLSTM` と `TGRU` で1つの
+  `TRNNState = record H, C: TTensor end`（GRU は `C` を nil のまま）。`TRNNConfig`
+  は共通。`FFlatWeights` は層ごと方向ごとに `weight_ih_l{L}[_reverse]`、
+  `weight_hh_…`、`bias_ih_…`、`bias_hh_…` として登録。`SeqInit` は生成された
+  `lstm`/`gru` を呼び、`out` の結果を関数結果（出力）と `OutState.H`/`.C` に受ける。
+- `nn::Id` は `TIdentity`。
+- tch-rs からの逸脱（それぞれ 4.6.10 に明記）：reversed-padding-repeated-twice は
+  PyTorch の順（tch-rs のは非対称な ND パディングで誤り、実測）。`BatchFirst False`
+  を `Seq`/`Step` で扱う。バイアス初期化は `Option<Init>` でなく素の `TInit`。
+  `ZeroState` は kind/device を呼び出し時に最初の重みから読む。cuDNN 平坦化は
+  CUDA/ROCm マイルストーンへ。
+
+**計測**（プローブ `scratchpad/fable-layers/probe*.pas`、FPC 3.2.2 + libtorch 2.13.0
+CPU）：
+- M-A：`array of Int64` を取る基底コンストラクタ + サブクラスの `overload`
+  コンストラクタ2つは、スカラー呼び出しも、サブクラス経由の継承 ND 呼び出しも解決する。
+  グループ8の conv2d の数値は基底経由で不変。
+- M-B / M-B2：`SeqInit(X, S, S)` は入口で `S` を nil にする（H8）→ `ETorchError
+  "undefined tensor passed as hx to gru"`。`S := Step(X, S)` は安全（結果は一時変数経由）。
+- M-C：4.6.10 のテスト一覧の全数値（conv1d の4モード、conv3d、非対称 ND パディング、
+  conv_transpose 1D/2D/3D（stride 2 と `OutputPadding` を含む）、group_norm
+  ±0.99998、GRU `0.380797`、LSTM `0.1817 / 0.380797`、tch-rs の5つの RNN 設定の形と
+  変数名、`batch_first` False の形）。
+
+**新しい仮説**（ここの CPU libtorch では測れない）：**H29** tch-rs が書いた
+RNN/conv-transpose/group-norm の `.ot` ファイルとの相互運用（Rust が要る）。
+**H30** CUDA/ROCm の store での cuDNN 平坦化呼び出し（項目3）。
+
+**ローカル実装リスト**（機械的。すべて `src/TchNN.pas` と `tests/nn/nn_test.pas`、
+L2 と C の変更なし）：
+1. `TConvConfigND`、`DefaultConvConfigND`、`ConvConfigToND`、`PadWithMode`
+   （private の `ModeNames` を置き換え、`pmZeros` は `'constant'`）を追加。
+   `TConvND` に ND コンストラクタ（長さ検査は `ETorchError`）、
+   `FPadTwice[2*I] = FPadTwice[2*I+1] = Padding[Nd-1-I]`、`Forward` は 4.6.10 の表
+   どおり。`TConv2D` をその上に載せ替え（本体 →
+   `inherited Create(P, In, Out, [K, K], ConvConfigToND(Cfg, 2))`）、`TConv1D`、
+   `TConv3D` を追加。既存のグループ8を実行：不変。
+2. `TConvTransposeConfig`、`TConvTransposeConfigND`、`Default*` 2つ、
+   `ConvTransposeConfigToND`、`TConvTransposeND`、`TConvTranspose1D/2D/3D`。
+3. `TGroupNormConfig`、`DefaultGroupNormConfig`、`TGroupNorm`。
+4. `TRNNConfig`、`DefaultRNNConfig`、`TRNNState`、`TRNN`（protected コンストラクタ
+   = `rnn_weights`、`GateMul` は 4 か 3。`Step`、`Seq`、`BatchDimIndex`）、`TLSTM`、
+   `TGRU`（`ZeroState`、`SeqInit`）。`InState`/`OutState` は別変数という規則を宣言の
+   そばに書く。
+5. `TIdentity`。
+6. `tests/nn/nn_test.pas` グループ11、4.6.10 の一覧の項目 1–11。最後の
+   `TchLiveHandles = 0` は維持。
+7. モック（`tests/mock`）：数値的に足すものはない。任意で、形だけのスタブ上で
+   `TLSTM(2, 4)` の生成と登録順（2層双方向で16名）。
+8. 回帰：`tests/nn`、`tests/api`、`tests/mock/run.sh`、`tests/jit`。
+9. H29/H30 の結果はテスト可能になった場合だけ記録。ここに「ローカルセッション6」
+   の節を追加（en + jp）。「引き継ぎ（ローカルセッション4の終了時点）」の項目3が
+   残る設計作業。
+
 ## 設計セッション6（2026-10-11）：TorchScript のオブジェクトを設計
 
 下の「引き継ぎ（ローカルセッション4の終了時点）」の項目1への回答。項目2
@@ -134,7 +206,7 @@
   （計測用で、マスクしないモードは設計上クラッシュまたはハングする）。
 - 依頼どおり手を付けていないもの：マイルストーン3のレイヤー、CUDA/ROCm。
 
-## 引き継ぎ（2026-10-11、ローカルセッション4の終了時点）— 項目1は上の設計セッション6で回答済み
+## 引き継ぎ（2026-10-11、ローカルセッション4の終了時点）— 項目1と2は上の設計セッション6と7で回答済み
 
 **設計のみ**（CLAUDE.md）。止まっているものはなく、以下はどれも任意の次の
 マイルストーン。本物の libtorch が必要なものは H26 以降として記すこと。
@@ -146,7 +218,8 @@
    未使用）。DESIGN 4.6.8 にある参照カウント付きハンドル（オブジェクトは C の `IValue`
    を生かし続ける）と、`TIValue` がそれをどう持つか（コピーは共有。現在 `FromC` は
    タグ 14 で例外）が必要。
-2. **マイルストーン3のレイヤー**（DESIGN 4.6.5 の先送りリスト）。
+2. **マイルストーン3のレイヤー**（DESIGN 4.6.5 の先送りリスト）— *設計済み：DESIGN
+   4.6.10、上の設計セッション7。*
 3. **CUDA/ROCm。** これまで CPU のみ（H13 の実デバイスへの移動は未検証、
    `atm_fuser_cuda_*` は未宣言）。ローカル機には AMD Radeon RX 9070（Navi 48）と
    `rocm-smi` がある。ROCm 版 libtorch はまだ試していない。よって先に設計する GPU の

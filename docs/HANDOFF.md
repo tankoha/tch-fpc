@@ -4,6 +4,84 @@ Japanese version: [HANDOFF_jp.md](HANDOFF_jp.md)
 
 Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 
+## Design session 7 (2026-10-11): milestone 3 layers designed
+
+Answers item 2 of "Handing back (end of local session 4)" below; item 3
+(CUDA/ROCm) stays open. Design only: nothing committed, no code outside the
+scratchpad. Ran on the local machine against the real libtorch 2.13.0 (CPU)
+and FPC 3.2.2, so the numbers in DESIGN 4.6.10 are measured, not derived.
+
+**Decisions** (details and rationale in DESIGN 4.6.10):
+- tch-rs's generic `ConvConfigND<ND>` becomes one non-generic
+  `TConvConfigND` with `TInt64Array` fields (`Nd = Length`), one base class
+  `TConvND` (`Forward` switches on `FNd`), and `TConv1D/2D/3D` subclasses
+  holding only the scalar-config constructors. `TConv2D`'s API is unchanged;
+  its body moves to the base. `ConvConfigToND(Cfg, Nd)`,
+  `DefaultConvConfigND(Nd)`, `PadWithMode` (public, `'constant'` for
+  `pmZeros`) are added. Same shape for `TConvTransposeND` + `1D/2D/3D`
+  with `TConvTransposeConfig[ND]` (weight `[In, Out div Groups, K..]`).
+- `TGroupNorm(NumGroups, NumChannels[, Cfg])` over `group_norm`, weight
+  then bias `[NumChannels]` when `Affine`.
+- `TRNN = class abstract` (not a `TModule`, as tch-rs) with `ZeroState`,
+  `Step`, `Seq`, `SeqInit`; one `TRNNState = record H, C: TTensor end`
+  for both `TLSTM` and `TGRU` (GRU leaves `C` nil); `TRNNConfig` shared;
+  `FFlatWeights` registered as `weight_ih_l{L}[_reverse]`, `weight_hh_…`,
+  `bias_ih_…`, `bias_hh_…` per layer per direction. `SeqInit` calls the
+  generated `lstm`/`gru` with the `out` results going to the function
+  result (output) and `OutState.H`/`.C`.
+- `TIdentity` for `nn::Id`.
+- Deviations from tch-rs, each stated in 4.6.10: PyTorch's order for
+  reversed-padding-repeated-twice (tch-rs's is wrong for asymmetric ND
+  padding, measured); `BatchFirst False` handled in `Seq`/`Step`; plain
+  `TInit` instead of `Option<Init>` for the bias inits; `ZeroState` reads
+  kind/device from the first weight at call time; cuDNN flattening left to
+  the CUDA/ROCm milestone.
+
+**Measurements** (probe `scratchpad/fable-layers/probe*.pas`, FPC 3.2.2 +
+libtorch 2.13.0 CPU):
+- M-A: base constructor with `array of Int64` + two `overload` subclass
+  constructors resolve for the scalar calls and for the inherited ND call
+  through the subclass. Group-8 conv2d numbers unchanged through the base.
+- M-B / M-B2: `SeqInit(X, S, S)` nils `S` on entry (H8) → `ETorchError
+  "undefined tensor passed as hx to gru"`; `S := Step(X, S)` is safe
+  (result through a temporary).
+- M-C: every number in the 4.6.10 test list (conv1d four modes, conv3d,
+  asymmetric ND padding, conv_transpose 1D/2D/3D incl. stride 2 and
+  `OutputPadding`, group_norm ±0.99998, GRU `0.380797`, LSTM `0.1817 /
+  0.380797`, the five tch-rs RNN configs' shapes and variable names,
+  `batch_first` False shapes).
+
+**New hypotheses** (not measurable with CPU libtorch here): **H29** `.ot`
+interchange with tch-rs-written RNN/conv-transpose/group-norm files (needs
+Rust); **H30** the cuDNN flatten call on a CUDA/ROCm store (item 3).
+
+**Local implementation list** (mechanical; all in `src/TchNN.pas` and
+`tests/nn/nn_test.pas`, no L2 or C changes):
+1. Add `TConvConfigND`, `DefaultConvConfigND`, `ConvConfigToND`,
+   `PadWithMode` (replace the private `ModeNames`, `'constant'` for
+   `pmZeros`); `TConvND` with the ND constructor (length checks raise
+   `ETorchError`), `FPadTwice[2*I] = FPadTwice[2*I+1] = Padding[Nd-1-I]`,
+   `Forward` as the 4.6.10 table. Rebase `TConv2D` on it (body →
+   `inherited Create(P, In, Out, [K, K], ConvConfigToND(Cfg, 2))`); add
+   `TConv1D`, `TConv3D`. Run the existing group 8: unchanged.
+2. `TConvTransposeConfig`, `TConvTransposeConfigND`, the two `Default*`,
+   `ConvTransposeConfigToND`, `TConvTransposeND`, `TConvTranspose1D/2D/3D`.
+3. `TGroupNormConfig`, `DefaultGroupNormConfig`, `TGroupNorm`.
+4. `TRNNConfig`, `DefaultRNNConfig`, `TRNNState`, `TRNN` (protected
+   constructor = `rnn_weights` with `GateMul` 4 or 3; `Step`, `Seq`,
+   `BatchDimIndex`), `TLSTM`, `TGRU` (`ZeroState`, `SeqInit`). Document
+   the `InState`/`OutState` distinct-variables rule at the declaration.
+5. `TIdentity`.
+6. `tests/nn/nn_test.pas` group 11, items 1–11 of the 4.6.10 list; keep
+   the final `TchLiveHandles = 0`.
+7. Mock (`tests/mock`): nothing numerical to add; optionally construction
+   and registration order of `TLSTM(2, 4)` (16 names for 2 layers
+   bidirectional) over the shape-only stubs.
+8. Regression: `tests/nn`, `tests/api`, `tests/mock/run.sh`, `tests/jit`.
+9. Record results next to H29/H30 only if they become testable; add a
+   "Local session 6" section here (en + jp). Item 3 of "Handing back (end
+   of local session 4)" remains the open design work.
+
 ## Design session 6 (2026-10-11): TorchScript objects designed
 
 Answers item 1 of "Handing back (end of local session 4)" below; items 2
@@ -149,7 +227,7 @@ Commits `8a912eb` … `b816950`.
   measurement: the unmasked modes crash or hang by design).
 - Not touched, as asked: milestone 3 layers and CUDA/ROCm.
 
-## Handing back (2026-10-11, end of local session 4) — item 1 answered in design session 6 above
+## Handing back (2026-10-11, end of local session 4) — items 1 and 2 answered in design sessions 6 and 7 above
 
 **Design only** (CLAUDE.md). Nothing is blocked; all of the following are
 optional next milestones. Mark what needs real libtorch as H26, ...
@@ -161,7 +239,8 @@ optional next milestones. Mark what needs real libtorch as H26, ...
    (already vendored, unused). Needs the refcounted handle DESIGN 4.6.8
    mentions (an object keeps its C `IValue` alive), and how `TIValue`
    carries it (copies share; `FromC` currently raises on tag 14).
-2. **Milestone 3 layers** (DESIGN 4.6.5 deferred list).
+2. **Milestone 3 layers** (DESIGN 4.6.5 deferred list) — *designed: DESIGN
+   4.6.10, design session 7 above.*
 3. **CUDA/ROCm.** Only CPU so far (H13's real device move untested;
    `atm_fuser_cuda_*` not declared). The local machine has an AMD Radeon
    RX 9070 (Navi 48) and `rocm-smi`; no ROCm libtorch has been tried yet.

@@ -1,0 +1,11 @@
+# FPC build artifacts
+*.o
+*.ppu
+*.a
+*.so
+*.compiled
+*.res
+lib/
+backup/
+# libtorch is downloaded locally, never committed
+libtorch/

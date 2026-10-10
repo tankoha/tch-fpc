@@ -1598,7 +1598,8 @@ BoolList、String、TensorList、GenericList、GenericDict）に対する `TIVal
 `ati_object_method_`、`ati_object_getattr_`、`ati_clone`、`atm_create_class_`。tch-rs の
 `Object`、テスト `jit6` と `jit_double_free`、資材 `foo6.pt`/`foo7.pt`）。オブジェクトは
 C の `IValue` を生かし続けるので `TTensorHandle` のような参照カウント付きハンドルが必要で、
-微調整の用途には要らないからです。それと `atm_fuser_cuda_*`（CUDA と一緒に）。
+微調整の用途には要らないからです — **その後 4.6.9 で設計済み**（設計セッション6）。
+それと `atm_fuser_cuda_*`（CUDA と一緒に）。
 
 **L2（`TchSys.pas`）。** `PTorchModule = Pointer`（`torch::jit::script::Module*`）、
 `PTorchIValue = Pointer`（`torch::jit::IValue*`）、`PPTorchIValue = ^PTorchIValue`。
@@ -2058,6 +2059,270 @@ type
 - モック（`tests/mock/jit_mock_test.pas`）は、`ToC`（nil テンソル）や `FromC`
   （Device）で子が失敗しても C の ivalue が残らないことも確認する。
 
+#### 4.6.9 TorchScript のオブジェクト（`ivObject`、タグ 14）、`wrappers/jit.rs`（`Object`）、`tests/jit_tests.rs`（`jit6`、`jit_double_free`）、`torch_api.cpp` より
+
+設計セッション6（2026-10-11）でローカル機上で設計した。つまり本物の libtorch 2.13.0
+（CPU）とビルド済みの `libtch.so` に対して行ったので、以下で *実測* と記したものはすべて
+生の C エントリポイントを叩く使い捨てプローブの結果（HANDOFF の M9〜M11）。プローブで
+届かなかったものが **(H26)**〜**(H28)**。範囲：4.6.8 が未宣言のまま残した4つのエントリ
+ポイント（`ati_object_method_`、`ati_object_getattr_`、`ati_clone`、`atm_create_class_`）、
+tch-rs の `Object`、テスト `jit6` と `jit_double_free`、取り込み済みの `foo6.pt`/`foo7.pt`。
+4.6.8 のそれ以外は変えない。
+
+**C 側がしていること**（`torch_api.cpp`、上流とバイト単位で同一）：
+- `ati_tag` は `isObject()` に 14 を返す。*実測*：`foo6` の `forward` の結果と `foo7` の
+  `make_input_object` の結果はタグ 14。
+- `ati_object_method_(i, name, ivalues, n)` は `*i` の *コピー* を `self` として、続けて
+  引数のコピーを積み、`i->toObjectRef().type()->getMethod(name)` を実行する。結果は新しい
+  `IValue`。ポインタ `i` は読まれるだけ。*実測*：`foo6` のオブジェクトの `y()` は
+  `x = [3, 4, 5]` に対して `[6, 8, 10]`。
+- `ati_object_getattr_(i, name)` は属性を持つ新しい `IValue` を返す（*実測*：`x` →
+  `[3, 4, 5]`。`foo7` の `foo`/`bar` → `[1, 2, 3]`/`[4, 5, 6]`）。
+- `ati_clone(i)` は `new IValue(*i)`。Object の場合、`IValue` のコピーコンストラクタは
+  `c10::intrusive_ptr<ivalue::Object>` をコピーする（`c10/core/ivalue.h`）。C のヒープ
+  セルは2つ、TorchScript のオブジェクトは1つ。*実測*：元を `ati_free` した後も、
+  **モジュールを `atm_free` した後も**、クローンの `y()` は動く — `ivalue::Object` は
+  `StrongTypePtr`、つまりコンパイル単位への `shared_ptr` を持つので、オブジェクトは
+  モジュールを生かしておく必要がない。
+- `ati_to_tuple` / `ati_to_generic_list` / `ati_to_generic_dict` はスロットごとに新しい
+  `new IValue(child)` を書く。*実測*：オブジェクトから作ったタプルを解放してから展開
+  すると、元と異なる子ポインタが得られ、タプルが消えた後も `y()` が動く。
+- `atm_create_class_(m, clz, ivalues, n)` は `m->create_class(QualifiedName(clz), stack)`：
+  モジュールのコンパイル単位からクラスを **修飾名** で探し、`__init__` を実行する。
+  *実測*：`foo7` に `'__torch__.InputObject'` とテンソル2つで、`add_them` が受け取る
+  オブジェクトができる（`[5, 7, 9]`）。素の `'InputObject'` は失敗する。（この関数の
+  未使用ローカル `base` は無害で、パッチしない。領域を上流と同一のままにする。）
+- メッセージ（*実測*、`what()` の1行目、libtorch 2.13.0）：
+
+  | 呼び出し | メッセージ |
+  |---|---|
+  | `getattr 'nope'` | `__torch__.TorchScriptClass (of Python compilation unit at: 0x…) does not have an attribute with name 'nope'` |
+  | `method 'nope'` | `Couldn't find method: 'nope' on class: '__torch__.TorchScriptClass (…)'` |
+  | 引数1つの `method 'y'` | `Expected at most 1 argument(s) for operator 'y', but received 2 argument(s). Declaration: y(__torch__.TorchScriptClass self) -> Tensor` |
+  | オブジェクトへの `ati_to_tensor` | `Expected Tensor but got Object` |
+  | オブジェクトへの `ati_length` | `unsupported tag for length Object`（-1 を返す） |
+  | `create_class 'InputObject'` / `'__torch__.Nope'` | `Could not find class with name: 'InputObject' in module.` |
+  | 引数1つの `create_class` | `__init__() is missing value for argument 'bar'. Declaration: __init__(__torch__.InputObject self, Tensor foo, Tensor bar) -> NoneType` |
+  | `add_them(5)` | `add_them() Expected a value of type '__torch__.InputObject (…)' for argument 'data' but instead found type 'int'.` |
+  | 非オブジェクトへの `ati_object_getattr_`/`_method_` | `isObject() INTERNAL ASSERT FAILED at ".../ivalue_inl.h":1699, please report a bug to PyTorch. Expected Object but got Int` |
+
+  最後の行は生ポインタでしか到達できない。Pascal の API はタグ 14 のポインタしか包まない
+  ので、これに対するガードは足さない。
+
+**ハンドル（決定）。**
+
+| 選択肢 | 判定 |
+|---|---|
+| `TIValue` に生の `PTorchIValue` を持ち手で解放 | 却下：`TIValue` は自由にコピーされるレコード（`Items`、開配列、戻り値）で、コピーが二重解放する — tch-rs の issue 475（`jit_double_free`）はまさにオブジェクトの `IValue` の2回目の解放だった。 |
+| 管理オペレータ付きレコード | 4.1 と同じ理由で却下。 |
+| `TTensor` のようにハンドルを包むレコード `TJitObject` | コンパイラの事実で却下：`TIValue` がフィールドを必要とし、オブジェクトのメソッドは `TIValue` を受け取り返すが、FPC はレコードを前方宣言できない。 |
+| **`TInterfacedObject` で参照カウントするインターフェース `IJitObject`、実装クラスは非公開** | **採用。** FPC はインターフェースを前方宣言できる：`IJitObject = interface;` → `Obj: IJitObject` フィールドを持つ `TIValue` → `TIValue` を使う完全な宣言。*実測*（M10、FPC 3.2.2）：コンパイルできる。`B := A` はハンドルを共有（同じ `Raw`）、一方を解放しても他方は生き、最後の参照が消えると生存数は 0 に戻る。タグとインターフェースのレコードの `SizeOf` は 16。 |
+
+4.1 が公開インターフェースを避けた理由はここでは当たらない：演算子オーバーロードなし、
+メソッドは3つ、実装クラス `TJitObjectHandle` は implementation 部に宣言するので、誰も
+クラス参照で持てない。スレッド安全性は 4.1 と同じ：`TInterfacedObject` のインターロック
+された参照カウント。TorchScript のオブジェクト自体はテンソルと同様に同期されない。
+生存数は `TchLiveHandles` と同じ方式：ハンドルのコンストラクタ／デストラクタで
+`InterlockedIncrement`/`Decrement` する `LiveObjects` カウンタを `JitLiveObjects` で読む。
+
+```pascal
+unit TchJit;  // 追加分
+type
+  TIValueTag = (..., ivGenericDict = 13, ivObject = 14,
+    ivStringList = 20, ivDevice = 21);
+
+  IJitObject = interface;                       // 前方宣言：TIValue が持ち、そのメソッドが TIValue を使う
+
+  TIValue = record
+    ...
+    Obj: IJitObject;                            // ivObject（それ以外は nil）
+    class function FromObject(const O: IJitObject): TIValue; static;
+    class operator :=(const O: IJitObject): TIValue;
+    function AsObject: IJitObject;              // 不一致なら ETorchError('ivalue: expected Object, got Tuple')
+    ...
+  end;
+
+  { TorchScript のオブジェクト（tch-rs の Object）。TIValue のコピーは共有し、
+    最後の参照が消えたとき C の IValue が解放される。モジュールを生かしておかず、
+    その必要もない。 }
+  IJitObject = interface
+    ['{...新しい GUID...}']
+    function Raw: PTorchIValue;                 // 借用。常にタグ 14
+    function MethodIV(const Name: String; const Inputs: array of TIValue): TIValue;  // ati_object_method_
+    function GetAttr(const Name: String): TIValue;                                   // ati_object_getattr_
+  end;
+
+  TJitModule = class
+    ...
+    { atm_create_class_：ClassName は修飾名、例 '__torch__.InputObject' }
+    function CreateClass(const ClassName: String; const Inputs: array of TIValue): IJitObject;
+  end;
+
+function JitLiveObjects: Integer;               // 生きている TJitObjectHandle の数。TchLiveHandles と同じ
+
+implementation
+type
+  TJitObjectHandle = class(TInterfacedObject, IJitObject)
+  private
+    FRaw: PTorchIValue;
+  public
+    constructor Create(P: PTorchIValue);        // 所有権を取る。本体は代入2つで例外を出せない
+    destructor Destroy; override;               // ati_free(FRaw)。決して例外を出さない
+    function Raw: PTorchIValue;
+    function MethodIV(const Name: String; const Inputs: array of TIValue): TIValue;
+    function GetAttr(const Name: String): TIValue;
+  end;
+```
+
+- `TagName` は `'Object'`。`Count` はスカラーと同様にオブジェクトで例外。`IsNone` は
+  変わらない。非オブジェクトへの `AsObject` は通常の不一致例外。`Obj` が nil の
+  `ivObject` は `FromC` からは出てこず、nil テンソルと同じ扱い：`ToC` が
+  `ETorchError('ivalue: nil object')`。
+- `CreateClass` は `TIValue` ではなくオブジェクトを返す（tch-rs の `create_class_is`
+  からの逸脱、明記）：`Module::create_class` は常に Object を作るので、結果を `FromC`
+  と `AsObject` に通す（ありえない非オブジェクトには `AsObject` が例外を出す）。クラス名は
+  実測したメッセージのとおり修飾名。
+- `array of TIValue` 引数としての `[O, 42]` は、`[T, 42, 1.5]`（M5）と同様に `:=`
+  オペレータで要素ごとに変換されるはず。インターフェース要素では未実測 — 代替は
+  `TIValue.FromObject(O)`。
+
+**すべての経路での所有権**（設計の核心。各行で誰が何を解放するかを言う）：
+1. **`FromC`、タグ 14。** `Result.Tag := ivObject; Result.Obj :=
+   TJitObjectHandle.Create(P); Keep := True` — 以後 `P` はハンドルが所有する。`finally` は
+   `FreeIValues(Cs); if not Keep then ati_free(P)` になる。`Keep` は False で初期化する
+   ローカル。コンストラクタの本体は `inherited Create; InterlockedIncrement(LiveObjects);
+   FRaw := P` — 代入を最後にして、その前で何かが例外を出しても（FPC はデストラクタを
+   走らせる）`FRaw` は nil のまま、デストラクタは何も解放せず、`finally` が `P` を解放する
+   （`Keep` は未設定）。他のタグは変わらず、引き続き `P` を消費する。
+2. **`ToC`、`ivObject`。** `Result := ati_clone(Obj.Raw); TchCheck`。呼び出し側がクローンを
+   所有し、他の `ToC` の結果と同様に解放する（`ForwardIV`/`MethodIV`/`CreateClass` と
+   コンテナ分岐の `finally FreeIValues(Cs)`）。ハンドル自身のポインタは解放のために C に
+   渡されることがない。これが tch-rs の issue 475 の修正：同じオブジェクトを2回渡しても、
+   渡した後に Pascal の値が死んでも安全（C レベルで*実測*：同じポインタで `add_them` を
+   2回呼ぶと `[5, 7, 9]` が2回。Pascal 経路は下のテスト項目 d）。
+3. **コンテナ内のオブジェクト、`ToC`。** 子は他の子と同様にスロットへクローンされ、C の
+   コンテナがそれをコピーし（intrusive_ptr がもう1つ増える）、`FreeIValues(Cs)` が
+   クローンを解放する。後の子が `ToC` で失敗すると、すでに作ったクローンは
+   `IValuesToC` の `except` が解放し、ハンドルには触れない。
+4. **コンテナ内のオブジェクト、`FromC`。** `ati_to_*` はスロットごとに新しい `IValue` を
+   書く（*実測*）。再帰する `FromC` がそれをハンドルで包む（手順1）。後の子が失敗した
+   とき：未消費のスロットは `FreeIValues(Cs)` が解放する。すでに変換済みの子は
+   `IValuesFromC` のローカルな結果配列にあり、巻き戻し中にコンパイラがそれを終了処理
+   してハンドルを解放し、デストラクタがポインタを `ati_free` する。漏れも二重解放も
+   ない。モックのテストが確認する（オブジェクトの後に Device）。
+5. **`MethodIV` / `GetAttr` / `CreateClass`。** `TJitModule.MethodIV` と同じ形：
+   `Cs := IValuesToC(Inputs)`（オブジェクトはクローン）。`P := ati_object_method_(FRaw,
+   PChar(Name), Cs, n)` / `ati_object_getattr_(FRaw, PChar(Name))` /
+   `atm_create_class_(FModule, PChar(ClassName), Cs, n)`。`try … finally FreeIValues(Cs)`
+   の中で `TchCheck`。`Result := TIValue.FromC(P)`。C は `self` をコピーする
+   （`inputs.push_back(*i)`）ので `FRaw` は有効なまま。`GetAttr` は tch-rs の nil 確認を
+   残す（`ETorchError('ivalue: getattr returned nil')`。`PROTECT` 下では `TchCheck` の後は
+   到達不能、`FromC` 自身のものと同様）。
+6. **Destroy。** `if FRaw <> nil then ati_free(FRaw)`、`InterlockedDecrement(LiveObjects)`。
+   決して例外を出さず、エラースロットも読まない（4.1）。
+7. **モジュールの寿命。** オブジェクトは `TJitModule` より長生きする（上で*実測*）。
+   `IJitObject` はモジュールへの参照を持たない。ユニットヘッダに書く。
+8. **一時変数。** H1（4.1）と同じ：式の中で作られたオブジェクトはルーチンが戻るまで
+   ルーチンの一時スロットで生きる（M10 で*実測*：名前付き変数をすべて解放した後も
+   ルーチン内では生存数 1、戻った後に 0）。したがってテストは `JitLiveObjects` と
+   `TchLiveHandles` を呼び出し側のルーチンで比較する。
+
+**L2（`TchSys.pas`）**、`torch_api.h` のとおり：
+
+```pascal
+function  atm_create_class_(m: PTorchModule; clz_name: PChar; ivalues: PPTorchIValue;
+  nivalues: cint): PTorchIValue; cdecl; external LibTch;
+function  ati_object_method_(i: PTorchIValue; method_name: PChar; ivalues: PPTorchIValue;
+  nivalues: cint): PTorchIValue; cdecl; external LibTch;
+function  ati_object_getattr_(i: PTorchIValue; attr_name: PChar): PTorchIValue; cdecl; external LibTch;
+function  ati_clone(i: PTorchIValue): PTorchIValue; cdecl; external LibTch;
+```
+
+4つとも `PROTECT` されエラー時は nil を返す（各呼び出し後に `TchCheck`）。ユニット
+コメントの「未宣言」リストは `atm_fuser_cuda_*` だけになる。**フォークへのパッチ：なし。**
+
+**`tests/jit/jit_test.pas`、グループ 14「Objects」**（手計算できる数値。`x = [3, 4, 5]`、
+`T1 = [1, 2, 3]`、`T2 = [4, 5, 6]`、すべて kFloat。`Before := JitLiveObjects` と
+`TchLiveHandles` は呼び出し側で取る）：
+- a. `jit6`：`foo6.pt`、`R := M.ForwardIV([x])` → `R.Tag = ivObject`、`R.TagName =
+  'Object'`。`O := R.AsObject`。`O.MethodIV('y', []).AsTensor = [6, 8, 10]`。
+  `O.GetAttr('x').AsTensor = [3, 4, 5]`。`R.AsTensor` は `ETorchError` `'ivalue: expected
+  Tensor, got Object'`。`M.Forward([x])` は `ETorchNativeError` "forward did not return a
+  tensor"（`atm_forward` の `isTensor` 確認。**(H27)**）。
+- b. エラー（`ETorchNativeError`、メッセージが含む）：`O.GetAttr('nope')` → `does not have
+  an attribute with name 'nope'`。`O.MethodIV('nope', [])` → `Couldn't find method:
+  'nope'`。`O.MethodIV('y', [7])` → `Expected at most 1 argument(s)`。
+- c. `jit_double_free`：`foo7.pt`、`Inp := M.MethodIV('make_input_object', [T1, T2])` →
+  `ivObject`。`M.MethodIV('add_them', [Inp]).AsTensor = [5, 7, 9]`。**同じ `Inp` で同じ
+  呼び出しをもう一度** → `[5, 7, 9]`（issue 475 の回帰：ハンドルは渡されても生き残る）。
+  `Inp.AsObject.GetAttr('foo') = [1, 2, 3]`、`'bar' = [4, 5, 6]`。
+- d. `CreateClass`：`O := M.CreateClass('__torch__.InputObject', [T1, T2])`。
+  `M.MethodIV('add_them', [O]) = [5, 7, 9]`（または `[TIValue.FromObject(O)]`）。
+  `CreateClass('InputObject', [T1, T2])` → `Could not find class with name: 'InputObject'
+  in module.`。`CreateClass('__torch__.InputObject', [T1])` → `__init__() is missing value
+  for argument 'bar'`。`M.MethodIV('add_them', [5])` → `Expected a value of type
+  '__torch__.InputObject`。`foo6.pt` で：`CreateClass('__torch__.TorchScriptClass',
+  [x]).MethodIV('y', []) = [6, 8, 10]`（**(H27)**）。
+- e. コンテナ：`W := TIValue.FromC(TIValue.Tuple([O, 42]).ToC)` → `W.Count = 2`、
+  `W.Item(1).AsInt = 42`、`W.Item(0).AsObject.GetAttr('foo') = [1, 2, 3]`、
+  `W.Item(0).AsObject.Raw <> O.Raw`（新しい `IValue`、同じオブジェクト）。同じ
+  オブジェクトを `GenericList([O])`（`Item(0)`）と `GenericDict(['k', O])`（`Value(0)`）
+  でも（**(H26)**）。
+- f. 共有と寿命：`A := TIValue.FromObject(O); B := A; A.AsObject.Raw = B.AsObject.Raw`。
+  `A := Default(TIValue)`。`B.AsObject.GetAttr('foo')` は引き続き `[1, 2, 3]`。
+  `O.GetAttr('bar')` の **前に** `M.Free` → 引き続き `[4, 5, 6]`（オブジェクトは
+  モジュールより長生き）。グループのルーチンが戻った後：`JitLiveObjects = Before`、
+  `TchLiveHandles` は開始時の値。プログラム最終行に `TchLiveHandles = 0` と並べて
+  `JitLiveObjects = 0` を足す。
+- g. リークループ（**(H28)**）：小さなルーチン内で `foo6` のオブジェクトに `10^4` 回
+  `O.MethodIV('y', [])`。その後 `JitLiveObjects` と `TchLiveHandles` は不変（C++ 側に
+  カウンタはないので、Pascal のカウンタと 4.1 のループと同様の平坦な RSS が証拠）。
+
+**モック**（`tests/mock/mock_tch.c`、配線のみ）：`mock_ivalue` にタグ 14 用の `char *cls`
+と `char **names` を足す。属性は `items` に（`n` 個）、名前はコンストラクタ順に `a0`、
+`a1`、…。`atm_create_class_(m, clz, ivs, n)` は `mock_last_class` を記録し、`clz` に
+`missing` を含むと失敗、そうでなければ `n` 個のクローンした属性を持つオブジェクトを
+返す。`ati_object_getattr_(o, name)`：`expect_tag(o, 14)`、名前の属性のクローン、
+未知の名前は `set_err("mock: no attribute …")` で nil。`ati_object_method_(o, name, ivs,
+n)`：`expect_tag(o, 14)`、`mock_last_method` を記録。`name == "fail"` はエラーで nil、
+それ以外は属性のクローンの後に引数のクローンを並べたタプル。`ati_clone` → `iv_clone`
+（モックではディープコピーで、生きている ivalue として数える。モックは配線を確認する
+もので同一性は確認しない）。`iv_clone` と `ati_free` は `cls` と `names` をコピー／解放
+する。14 への `ati_length` は libtorch と同様に失敗する。既存の `atm_forward_`/
+`atm_method_`（クローンのタプル）はそのままオブジェクトを運べる。
+`tests/mock/jit_mock_test.pas` に新しい `TestObjects`：
+1. `O := M.CreateClass('__torch__.Foo', [1, 2.5])` → `mock_last_class`、
+   `mock_live_ivalues = 1`、`JitLiveObjects = 1`。
+2. `O.GetAttr('a1').AsDouble = 2.5`。`GetAttr('zz')` → `ETorchNativeError`。それぞれの後
+   `mock_live_ivalues` は 1 に戻る。
+3. `O.MethodIV('m', ['x'])` → タプル `(1, 2.5, 'x')`、`mock_last_method = 'm'`。
+   `MethodIV('fail', [O])` は例外を出し `mock_live_ivalues = 1` のまま（クローンした
+   入力は解放された）。
+4. 共有：`A := TIValue.FromObject(O); B := A; A := Default(TIValue)`。
+   `B.AsObject.Raw = O.Raw`。3つすべてを解放するまで数は不変（呼び出し側で確認）。
+5. 往復 `FromC(Tuple([O, 42]).ToC)`：`Item(0).Tag = ivObject`、
+   `Item(0).AsObject.GetAttr('a0').AsInt = 1`。両オブジェクトが生きている間
+   `mock_live_ivalues = 2`（モックのクローンは別セル）、呼び出し側がすべて解放すると 0。
+6. モックのモジュールで `M.MethodIV('f', [O])`：`Item(0).Tag = ivObject`、その後数は戻る。
+7. 失敗する兄弟：`FromC(Tuple([O, TIValue.FromDevice(Cpu)]).ToC)` は Device の子で例外。
+   `mock_live_ivalues` はオブジェクト自身のセルだけに戻り、`JitLiveObjects` は不変
+   （所有権リストの手順4）。
+8. プログラムの最終行に `JitLiveObjects = 0` を足す。
+
+**仮説（本物の libtorch が必要。上のそれ以外はすべて実測）：**
+- **(H26)** オブジェクトは、タプル（実測）と同様に `GenericList` と `GenericDict` の値と
+  しても往復する：コンテナより長生きする新しいタグ 14 の `IValue`。
+- **(H27)** `foo6.pt` への `atm_create_class_('__torch__.TorchScriptClass', [x])` は
+  `y()` が `2x` のオブジェクトを与え、`foo6.pt` への `atm_forward`（テンソル API）は
+  "forward did not return a tensor" を出す（`torch_api.cpp` の `isTensor` 確認は読んだ
+  だけで、走らせていない）。
+- **(H28)** `10^4` 回のオブジェクトメソッド呼び出しで `JitLiveObjects`、`TchLiveHandles`、
+  RSS が平坦。
+- 取り込み済みの資材では確認できず、よって主張しないこと：一方のクローンを通じた変更が
+  他方から見えること（変更するメソッドを持つ資材がなく、`Define` は TorchScript の
+  クラスを宣言できない）。`IValue` のコピーコンストラクタから従うが、後の資材で確認
+  してよい。
+
 ### 4.7 勾配モードと全体設定
 
 ```pascal
@@ -2204,3 +2469,11 @@ JIT を除く 4.6 を実装。`tests/nn/nn_test.pas`（本物の libtorch）は 
 通り、H19〜H25 は成立（結果は 4.6.8 の末尾）。配線は `tests/mock/jit_mock_test.pas` が
 確認する。`FromArray` の改訂（4.3）と 4.6.7 の積み残しも反映済み。残り：TorchScript の
 オブジェクト（タグ 14）、マイルストーン3のレイヤー（4.6.5 の先送りリスト）、CUDA/ROCm。
+
+**TorchScript のオブジェクト（設計セッション6、2026-10-11 で設計）：** 4.6.9 —
+`ivObject = 14`、`TIValue` 内の参照カウント付きハンドル `IJitObject`（`MethodIV`、
+`GetAttr`）、`TJitModule.CreateClass`、`JitLiveObjects`、L2 の external 4つ、フォークへの
+パッチなし。取り込み済みの `foo6.pt`/`foo7.pt` に対するテスト `jit6`/`jit_double_free` を
+`tests/jit/jit_test.pas` のグループ 14 として、加えてモックの `TestObjects`。大半は
+libtorch 2.13.0 に対して実測済み。H26〜H28 と実装順序は HANDOFF_jp.md にあります。その後も
+残るもの：マイルストーン3のレイヤーと CUDA/ROCm。

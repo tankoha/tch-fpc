@@ -4,6 +4,113 @@ Japanese version: [HANDOFF_jp.md](HANDOFF_jp.md)
 
 Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 
+## Design session 6 (2026-10-11): TorchScript objects designed
+
+Answers item 1 of "Handing back (end of local session 4)" below; items 2
+(milestone 3 layers) and 3 (CUDA/ROCm) stay open. Design only: nothing
+committed, no code outside the scratchpad. The session ran on the local
+machine, so the design is measured against the real libtorch 2.13.0 (CPU)
+and the built `libtch.so`. Everything is in **DESIGN 4.6.9**; summary:
+
+1. **Handle.** `IJitObject`, an interface refcounted by `TInterfacedObject`
+   (as 4.1's `TTensorHandle`; interlocked, deterministic release), with
+   the implementing class `TJitObjectHandle` hidden in the implementation
+   section. An interface rather than a record because `TIValue` needs the
+   field and the object's methods take and return `TIValue`: FPC cannot
+   forward-declare a record but can forward-declare an interface
+   (measured). `JitLiveObjects` counts live handles like `TchLiveHandles`.
+2. **`TIValue`.** `ivObject = 14`, field `Obj: IJitObject`, `FromObject`,
+   `:=` from `IJitObject`, `AsObject`, `TagName = 'Object'`. **`FromC`
+   keeps the pointer for tag 14** (`Keep` flag; the handle owns it);
+   **`ToC` returns `ati_clone(Obj.Raw)`** — the caller frees the clone,
+   the handle's pointer is never handed to C for freeing (tch-rs's fix
+   for issue 475). Inside containers nothing special: `ati_to_*` hand out
+   fresh `IValue`s (measured) and a failing later child releases the
+   converted siblings through the compiler's unwinding of
+   `IValuesFromC`'s local array.
+3. **API.** `IJitObject.MethodIV(Name, Inputs)` and `GetAttr(Name)`
+   (shape of `TJitModule.MethodIV`); `TJitModule.CreateClass(ClassName,
+   Inputs): IJitObject` (qualified name, e.g. `'__torch__.InputObject'`;
+   returns the object rather than tch-rs's `IValue`, stated). An object
+   does not keep its module alive and does not need to (measured: method
+   calls work after `atm_free`).
+4. **L2.** Four externals (`atm_create_class_`, `ati_object_method_`,
+   `ati_object_getattr_`, `ati_clone`), declarations in 4.6.9. **Fork
+   patch: none** (the unused local in `atm_create_class_` is harmless).
+5. **Tests.** Group 14 of `tests/jit/jit_test.pas`: `jit6` (`foo6.pt`,
+   `y()` → `[6, 8, 10]`), `jit_double_free` (`foo7.pt`,
+   `make_input_object` then `add_them` → `[5, 7, 9]`, twice with the same
+   handle), `CreateClass`, the measured error messages, objects through
+   tuple/list/dict, sharing, object after `M.Free`, counts back, a `10^4`
+   loop. Mock: tag-14 `mock_ivalue` with named attributes `a0, a1, …`,
+   `mock_last_class`, `TestObjects` (eight checks).
+
+**Measurements (libtorch 2.13.0 CPU, FPC 3.2.2; probes in the scratchpad
+only):**
+- M9: raw C entry points on `foo6.pt`/`foo7.pt` — `ati_tag` 14 for both
+  object results; `y()` → `[6, 8, 10]`; `getattr x` → `[3, 4, 5]`;
+  `ati_clone` works after `ati_free` of the original and after `atm_free`
+  of the module; a tuple child comes back as a fresh pointer usable after
+  the tuple is freed; `add_them` twice with the same object pointer →
+  `[5, 7, 9]` twice; `atm_create_class_('__torch__.InputObject', [T1,
+  T2])` → `add_them` `[5, 7, 9]`; the bare class name fails. Nine error
+  messages recorded verbatim in 4.6.9 (missing attribute/method, arity,
+  `to_tensor`/`length` on an object, unknown class, missing `__init__`
+  argument, wrong argument type, non-object pointer).
+- M10: FPC accepts `IJitObject = interface;` forward → record field →
+  full interface naming the record; copies share the handle, release is
+  deterministic, the count returns to 0 after the routine returns (inside
+  it a temporary keeps 1, H1); `SizeOf` 16.
+- M11: `atm_forward` throws "forward did not return a tensor" for any
+  non-tensor result (read in `torch_api.cpp`, not run on an object → H27).
+
+**New hypotheses (need real libtorch):**
+- **(H26)** an object round-trips through `GenericList` and as a
+  `GenericDict` value as through a tuple (fresh tag-14 `IValue`s that
+  outlive the container).
+- **(H27)** `CreateClass('__torch__.TorchScriptClass', [x])` on `foo6.pt`
+  gives `y() = 2x`; `Forward` (tensor API) on `foo6.pt` raises "forward
+  did not return a tensor".
+- **(H28)** `10^4` object method calls leave `JitLiveObjects`,
+  `TchLiveHandles` and RSS flat.
+
+**Local session, in this order (mechanical):**
+1. `src/TchSys.pas`: the four externals of 4.6.9 after `ati_free`; the
+   unit comment's "Not declared" list becomes `atm_fuser_cuda_*` only.
+2. `src/TchJit.pas`, interface: `ivObject = 14` in `TIValueTag`;
+   `IJitObject = interface;` before `TIValue`; `Obj: IJitObject` field,
+   `FromObject`, `class operator :=(const O: IJitObject)`, `AsObject`;
+   the full `IJitObject` (new GUID; `Raw`, `MethodIV`, `GetAttr`) after
+   `TIValue`; `TJitModule.CreateClass`; `function JitLiveObjects:
+   Integer`. Header comment: drop "objects not supported", add "an object
+   does not keep its module alive".
+3. `src/TchJit.pas`, implementation: `TagNames` → `'Object'`;
+   `LiveObjects` counter + `JitLiveObjects`; `TJitObjectHandle`
+   (constructor order `inherited; Inc; FRaw := P`, destructor `ati_free`
+   + `Dec`); `AsObject`/`FromObject`/`:=`; `ToC` branch `ivObject`
+   (`ati_clone`, nil `Obj` → `ETorchError('ivalue: nil object')`); `FromC`
+   case 14 with the `Keep` local and `if not Keep then ati_free(P)` in the
+   `finally`; `TJitObjectHandle.MethodIV`/`GetAttr` and
+   `TJitModule.CreateClass` as 4.6.9 step 5 (`IValuesToC`, call,
+   `TchCheck`, `finally FreeIValues`, `FromC`; `CreateClass` ends with
+   `.AsObject`). Compile `tests/mock/run.sh` (the mock lacks the symbols
+   until step 4: the test programs reference only what they use, so the
+   existing three still link).
+4. Mock: `cls`/`names` in `mock_ivalue`, `iv_clone`/`ati_free` updates,
+   `atm_create_class_` + `mock_last_class`, `ati_object_getattr_`,
+   `ati_object_method_`, `ati_clone`, `ati_length` failing on 14.
+5. `tests/mock/jit_mock_test.pas`: `mock_last_class` external,
+   `TestObjects` with the eight checks of 4.6.9 (counts compared from the
+   caller), `JitLiveObjects = 0` at the end. `tests/mock/run.sh`.
+6. `tests/jit/jit_test.pas`: group 14 "Objects" items a–g of 4.6.9,
+   checking H26–H28; `JitLiveObjects = 0` next to the final
+   `TchLiveHandles = 0`. Build and run as the file header says.
+7. Regression: `tests/jit`, `tests/mock/run.sh`, `tests/abi` (C
+   unchanged), `tests/api`, `tests/nn`.
+8. Record H26–H28 results next to the hypotheses in DESIGN 4.6.9 (en +
+   jp), add a "Local session 5" section here (en + jp); items 2 and 3 of
+   "Handing back (end of local session 4)" remain the open design work.
+
 ## Local session 4 (2026-10-11): milestone 3 (JIT) implemented
 
 Steps 1–8 of cloud session 5's list (below) are done; every test passes.
@@ -42,12 +149,13 @@ Commits `8a912eb` … `b816950`.
   measurement: the unmasked modes crash or hang by design).
 - Not touched, as asked: milestone 3 layers and CUDA/ROCm.
 
-## Handing back (2026-10-11, end of local session 4)
+## Handing back (2026-10-11, end of local session 4) — item 1 answered in design session 6 above
 
 **Design only** (CLAUDE.md). Nothing is blocked; all of the following are
 optional next milestones. Mark what needs real libtorch as H26, ...
 
-1. **TorchScript objects (ati_tag 14).** `ati_object_method_`,
+1. **TorchScript objects (ati_tag 14)** — *designed: DESIGN 4.6.9, design
+   session 6 above.* `ati_object_method_`,
    `ati_object_getattr_`, `ati_clone`, `atm_create_class_`; tch-rs
    `Object`, tests `jit6` and `jit_double_free`, assets `foo6.pt`/`foo7.pt`
    (already vendored, unused). Needs the refcounted handle DESIGN 4.6.8

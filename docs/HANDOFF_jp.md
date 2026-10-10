@@ -4,6 +4,101 @@
 
 再開するときは最初にこれを読んでください。決定事項と理由は [DESIGN_jp.md](DESIGN_jp.md) にあります。
 
+## 設計セッション6（2026-10-11）：TorchScript のオブジェクトを設計
+
+下の「引き継ぎ（ローカルセッション4の終了時点）」の項目1への回答。項目2
+（マイルストーン3のレイヤー）と3（CUDA/ROCm）は未着手のまま。設計のみ：何もコミット
+せず、スクラッチパッド外にコードは置いていない。セッションはローカル機で動かしたので、
+設計は本物の libtorch 2.13.0（CPU）とビルド済みの `libtch.so` に対して実測している。
+すべて **DESIGN 4.6.9** にある。要約：
+
+1. **ハンドル。** `IJitObject`、`TInterfacedObject` で参照カウントするインターフェース
+   （4.1 の `TTensorHandle` と同様。インターロック、決定的な解放）。実装クラス
+   `TJitObjectHandle` は implementation 部に隠す。レコードではなくインターフェースなのは、
+   `TIValue` がフィールドを必要とし、オブジェクトのメソッドが `TIValue` を受け取り返す
+   から：FPC はレコードを前方宣言できないがインターフェースはできる（実測）。
+   `JitLiveObjects` が `TchLiveHandles` と同様に生きているハンドルを数える。
+2. **`TIValue`。** `ivObject = 14`、フィールド `Obj: IJitObject`、`FromObject`、
+   `IJitObject` からの `:=`、`AsObject`、`TagName = 'Object'`。**`FromC` はタグ 14 では
+   ポインタを保持する**（`Keep` フラグ。ハンドルが所有）。**`ToC` は
+   `ati_clone(Obj.Raw)` を返す** — 呼び出し側がクローンを解放し、ハンドルのポインタは
+   解放のために C に渡されない（tch-rs の issue 475 の修正）。コンテナ内では特別な
+   ことはない：`ati_to_*` は新しい `IValue` を渡し（実測）、後の子が失敗すれば
+   変換済みの兄弟は `IValuesFromC` のローカル配列をコンパイラが巻き戻すことで解放される。
+3. **API。** `IJitObject.MethodIV(Name, Inputs)` と `GetAttr(Name)`
+   （`TJitModule.MethodIV` の形）。`TJitModule.CreateClass(ClassName, Inputs): IJitObject`
+   （修飾名、例 `'__torch__.InputObject'`。tch-rs の `IValue` ではなくオブジェクトを返す、
+   明記）。オブジェクトはモジュールを生かしておかず、その必要もない（実測：`atm_free`
+   の後もメソッド呼び出しが動く）。
+4. **L2。** external 4つ（`atm_create_class_`、`ati_object_method_`、
+   `ati_object_getattr_`、`ati_clone`）、宣言は 4.6.9。**フォークへのパッチ：なし**
+   （`atm_create_class_` の未使用ローカルは無害）。
+5. **テスト。** `tests/jit/jit_test.pas` のグループ 14：`jit6`（`foo6.pt`、`y()` →
+   `[6, 8, 10]`）、`jit_double_free`（`foo7.pt`、`make_input_object` の後 `add_them` →
+   `[5, 7, 9]`、同じハンドルで2回）、`CreateClass`、実測したエラーメッセージ、タプル／
+   リスト／辞書を通るオブジェクト、共有、`M.Free` 後のオブジェクト、数が戻ること、
+   `10^4` 回のループ。モック：名前付き属性 `a0, a1, …` を持つタグ 14 の `mock_ivalue`、
+   `mock_last_class`、`TestObjects`（8つの確認）。
+
+**計測（libtorch 2.13.0 CPU、FPC 3.2.2。プローブはスクラッチパッドのみ）：**
+- M9：`foo6.pt`/`foo7.pt` に生の C エントリポイント — 両オブジェクト結果で `ati_tag` は
+  14。`y()` → `[6, 8, 10]`。`getattr x` → `[3, 4, 5]`。`ati_clone` は元の `ati_free` の後も
+  モジュールの `atm_free` の後も動く。タプルの子は新しいポインタとして戻り、タプル解放
+  後も使える。同じオブジェクトポインタで `add_them` を2回 → `[5, 7, 9]` が2回。
+  `atm_create_class_('__torch__.InputObject', [T1, T2])` → `add_them` `[5, 7, 9]`。素の
+  クラス名は失敗。エラーメッセージ9つを 4.6.9 に原文で記録（属性／メソッドなし、引数の
+  数、オブジェクトへの `to_tensor`/`length`、未知のクラス、`__init__` の引数不足、引数の
+  型違い、非オブジェクトのポインタ）。
+- M10：FPC は `IJitObject = interface;` の前方宣言 → レコードのフィールド → レコードを
+  使う完全なインターフェースを受け付ける。コピーはハンドルを共有、解放は決定的、
+  ルーチンが戻った後に数は 0 に戻る（ルーチン内では一時変数が 1 を保つ、H1）。
+  `SizeOf` は 16。
+- M11：`atm_forward` はテンソルでない結果すべてに "forward did not return a tensor" を
+  投げる（`torch_api.cpp` を読んだだけで、オブジェクトでは走らせていない → H27）。
+
+**新しい仮説（本物の libtorch が必要）：**
+- **(H26)** オブジェクトはタプルと同様に `GenericList` と `GenericDict` の値としても
+  往復する（コンテナより長生きする新しいタグ 14 の `IValue`）。
+- **(H27)** `foo6.pt` への `CreateClass('__torch__.TorchScriptClass', [x])` は
+  `y() = 2x`。`foo6.pt` への `Forward`（テンソル API）は "forward did not return a
+  tensor" を出す。
+- **(H28)** `10^4` 回のオブジェクトメソッド呼び出しで `JitLiveObjects`、
+  `TchLiveHandles`、RSS が平坦。
+
+**ローカルセッション、この順で（機械的に）：**
+1. `src/TchSys.pas`：4.6.9 の external 4つを `ati_free` の後に。ユニットコメントの
+   「未宣言」リストは `atm_fuser_cuda_*` だけにする。
+2. `src/TchJit.pas`、interface 部：`TIValueTag` に `ivObject = 14`。`TIValue` の前に
+   `IJitObject = interface;`。フィールド `Obj: IJitObject`、`FromObject`、
+   `class operator :=(const O: IJitObject)`、`AsObject`。`TIValue` の後に完全な
+   `IJitObject`（新しい GUID。`Raw`、`MethodIV`、`GetAttr`）。`TJitModule.CreateClass`。
+   `function JitLiveObjects: Integer`。ヘッダコメント：「オブジェクト未対応」を消し、
+   「オブジェクトはモジュールを生かしておかない」を足す。
+3. `src/TchJit.pas`、implementation 部：`TagNames` → `'Object'`。`LiveObjects` カウンタと
+   `JitLiveObjects`。`TJitObjectHandle`（コンストラクタの順序は `inherited; Inc; FRaw := P`、
+   デストラクタは `ati_free` + `Dec`）。`AsObject`/`FromObject`/`:=`。`ToC` の `ivObject`
+   分岐（`ati_clone`、nil の `Obj` → `ETorchError('ivalue: nil object')`）。`FromC` の
+   case 14 に `Keep` ローカル、`finally` に `if not Keep then ati_free(P)`。
+   `TJitObjectHandle.MethodIV`/`GetAttr` と `TJitModule.CreateClass` は 4.6.9 の手順5の
+   とおり（`IValuesToC`、呼び出し、`TchCheck`、`finally FreeIValues`、`FromC`。
+   `CreateClass` は `.AsObject` で終わる）。`tests/mock/run.sh` をコンパイル（手順4まで
+   モックにシンボルはないが、テストプログラムは使うものだけを参照するので既存の3つは
+   リンクできる）。
+4. モック：`mock_ivalue` に `cls`/`names`、`iv_clone`/`ati_free` の更新、
+   `atm_create_class_` + `mock_last_class`、`ati_object_getattr_`、`ati_object_method_`、
+   `ati_clone`、14 で失敗する `ati_length`。
+5. `tests/mock/jit_mock_test.pas`：`mock_last_class` の external、4.6.9 の8つの確認を
+   持つ `TestObjects`（数は呼び出し側で比較）、最後に `JitLiveObjects = 0`。
+   `tests/mock/run.sh`。
+6. `tests/jit/jit_test.pas`：4.6.9 のグループ 14「Objects」項目 a〜g、H26〜H28 を確認。
+   最後の `TchLiveHandles = 0` の隣に `JitLiveObjects = 0`。ファイルヘッダのとおり
+   ビルドして実行。
+7. 回帰：`tests/jit`、`tests/mock/run.sh`、`tests/abi`（C は不変）、`tests/api`、
+   `tests/nn`。
+8. H26〜H28 の結果を DESIGN 4.6.9 の仮説の横に記録（en + jp）、ここに「ローカル
+   セッション5」の節を追加（en + jp）。「引き継ぎ（ローカルセッション4の終了時点）」の
+   項目2と3が残りの設計作業。
+
 ## ローカルセッション4（2026-10-11）：マイルストーン3（JIT）を実装
 
 下のクラウドセッション5の手順1〜8を完了。すべてのテストが通る。
@@ -39,12 +134,13 @@
   （計測用で、マスクしないモードは設計上クラッシュまたはハングする）。
 - 依頼どおり手を付けていないもの：マイルストーン3のレイヤー、CUDA/ROCm。
 
-## 引き継ぎ（2026-10-11、ローカルセッション4の終了時点）
+## 引き継ぎ（2026-10-11、ローカルセッション4の終了時点）— 項目1は上の設計セッション6で回答済み
 
 **設計のみ**（CLAUDE.md）。止まっているものはなく、以下はどれも任意の次の
 マイルストーン。本物の libtorch が必要なものは H26 以降として記すこと。
 
-1. **TorchScript のオブジェクト（ati_tag 14）。** `ati_object_method_`、
+1. **TorchScript のオブジェクト（ati_tag 14）** — *設計済み：DESIGN 4.6.9、上の
+   設計セッション6。* `ati_object_method_`、
    `ati_object_getattr_`、`ati_clone`、`atm_create_class_`。tch-rs の `Object`、
    テスト `jit6` と `jit_double_free`、アセット `foo6.pt`/`foo7.pt`（取り込み済みだが
    未使用）。DESIGN 4.6.8 にある参照カウント付きハンドル（オブジェクトは C の `IValue`

@@ -1713,7 +1713,8 @@ switches. **Deferred**, with their L2 lines: TorchScript objects (tag 14 —
 `atm_create_class_`; tch-rs `Object`, tests `jit6` and `jit_double_free`,
 assets `foo6.pt`/`foo7.pt`), because an object keeps its C `IValue` alive
 and needs a refcounted handle like `TTensorHandle`, and nothing in the
-fine-tuning use case needs them; and `atm_fuser_cuda_*` (with CUDA).
+fine-tuning use case needs them — **designed since in 4.6.9** (design
+session 6); and `atm_fuser_cuda_*` (with CUDA).
 
 **L2 (`TchSys.pas`).** `PTorchModule = Pointer` (`torch::jit::script::
 Module*`), `PTorchIValue = Pointer` (`torch::jit::IValue*`),
@@ -2222,6 +2223,309 @@ Implementation notes (deviations from the sketch above, all small):
   child failing in `ToC` (nil tensor) or in `FromC` (Device) leaves no C
   ivalue behind.
 
+#### 4.6.9 TorchScript objects (`ivObject`, tag 14), from `wrappers/jit.rs` (`Object`), `tests/jit_tests.rs` (`jit6`, `jit_double_free`) and `torch_api.cpp`
+
+Designed in design session 6 (2026-10-11) on the local machine, so against
+the real libtorch 2.13.0 (CPU) and the built `libtch.so`: everything
+marked *measured* below comes from a throwaway probe over the raw C entry
+points (M9–M11 in HANDOFF); what the probe could not reach is
+**(H26)**–**(H28)**. Scope: the four entry points 4.6.8 left undeclared
+(`ati_object_method_`, `ati_object_getattr_`, `ati_clone`,
+`atm_create_class_`), tch-rs's `Object`, the tests `jit6` and
+`jit_double_free`, the vendored `foo6.pt`/`foo7.pt`. Nothing else in
+4.6.8 changes.
+
+**What the C side does** (`torch_api.cpp`, byte-identical to upstream):
+- `ati_tag` returns 14 for `isObject()`. *Measured*: `foo6`'s `forward`
+  result and `foo7`'s `make_input_object` result are tag 14.
+- `ati_object_method_(i, name, ivalues, n)` pushes a *copy* of `*i` as
+  `self`, then copies of the arguments, and runs
+  `i->toObjectRef().type()->getMethod(name)`; the result is a new
+  `IValue`. The pointer `i` is only read. *Measured*: `y()` on `foo6`'s
+  object gives `[6, 8, 10]` for `x = [3, 4, 5]`.
+- `ati_object_getattr_(i, name)` returns a new `IValue` holding the
+  attribute (*measured*: `x` → `[3, 4, 5]`; `foo7`'s `foo`/`bar` →
+  `[1, 2, 3]`/`[4, 5, 6]`).
+- `ati_clone(i)` is `new IValue(*i)`. For an Object the `IValue` copy
+  constructor copies the `c10::intrusive_ptr<ivalue::Object>`
+  (`c10/core/ivalue.h`): two C heap cells, one TorchScript object.
+  *Measured*: the clone's `y()` still works after `ati_free` of the
+  original **and after `atm_free` of the module** — `ivalue::Object` holds
+  a `StrongTypePtr`, i.e. a `shared_ptr` to the compilation unit, so an
+  object does not need its module kept alive.
+- `ati_to_tuple` / `ati_to_generic_list` / `ati_to_generic_dict` write a
+  fresh `new IValue(child)` per slot. *Measured*: a tuple built from an
+  object, freed, and unpacked gives a child pointer different from the
+  original whose `y()` works after the tuple is gone.
+- `atm_create_class_(m, clz, ivalues, n)` is
+  `m->create_class(QualifiedName(clz), stack)`: looks the class up in the
+  module's compilation unit by its **qualified** name and runs `__init__`.
+  *Measured*: `'__torch__.InputObject'` with two tensors on `foo7` gives
+  an object that `add_them` accepts (`[5, 7, 9]`); the bare
+  `'InputObject'` fails. (The unused local `base` in that function is
+  harmless and not patched: the region stays identical to upstream.)
+- Messages (*measured*, first line of `what()`, libtorch 2.13.0):
+
+  | call | message |
+  |---|---|
+  | `getattr 'nope'` | `__torch__.TorchScriptClass (of Python compilation unit at: 0x…) does not have an attribute with name 'nope'` |
+  | `method 'nope'` | `Couldn't find method: 'nope' on class: '__torch__.TorchScriptClass (…)'` |
+  | `method 'y'` with one argument | `Expected at most 1 argument(s) for operator 'y', but received 2 argument(s). Declaration: y(__torch__.TorchScriptClass self) -> Tensor` |
+  | `ati_to_tensor` on an object | `Expected Tensor but got Object` |
+  | `ati_length` on an object | `unsupported tag for length Object` (returns -1) |
+  | `create_class 'InputObject'` / `'__torch__.Nope'` | `Could not find class with name: 'InputObject' in module.` |
+  | `create_class` with one argument | `__init__() is missing value for argument 'bar'. Declaration: __init__(__torch__.InputObject self, Tensor foo, Tensor bar) -> NoneType` |
+  | `add_them(5)` | `add_them() Expected a value of type '__torch__.InputObject (…)' for argument 'data' but instead found type 'int'.` |
+  | `ati_object_getattr_`/`_method_` on a non-object | `isObject() INTERNAL ASSERT FAILED at ".../ivalue_inl.h":1699, please report a bug to PyTorch. Expected Object but got Int` |
+
+  The last row is reachable only with a raw pointer: the Pascal API wraps
+  tag-14 pointers only, so no guard is added for it.
+
+**The handle (decision).**
+
+| Option | Verdict |
+|---|---|
+| Raw `PTorchIValue` in `TIValue`, freed by hand | Rejected: `TIValue` is a record that is copied freely (`Items`, open arrays, results); the copies would double free — tch-rs issue 475 (`jit_double_free`) was exactly a second free of an object's `IValue`. |
+| Record with management operators | Rejected as in 4.1. |
+| A record `TJitObject` wrapping the handle, like `TTensor` | Rejected on a compiler fact: `TIValue` needs the field and the object's methods take and return `TIValue`, and FPC cannot forward-declare a record. |
+| **Interface `IJitObject` refcounted by `TInterfacedObject`, implementing class hidden** | **Chosen.** FPC forward-declares interfaces: `IJitObject = interface;` → `TIValue` with an `Obj: IJitObject` field → the full interface naming `TIValue`. *Measured* (M10, FPC 3.2.2): compiles; `B := A` shares the handle (same `Raw`), releasing one copy keeps the other alive, the live count returns to 0 when the last reference goes; `SizeOf` of a record with a tag and the interface is 16. |
+
+4.1's reasons against a public interface do not apply here: no operator
+overloads, three methods, and the implementing class `TJitObjectHandle`
+is declared in the implementation section, so nobody can hold it by class
+reference. Thread-safety as 4.1: `TInterfacedObject`'s interlocked
+refcount; the TorchScript object itself is as unsynchronised as a tensor.
+Live counting as `TchLiveHandles`: a `LiveObjects` counter
+(`InterlockedIncrement`/`Decrement` in the handle's constructor and
+destructor) read through `JitLiveObjects`.
+
+```pascal
+unit TchJit;  // additions
+type
+  TIValueTag = (..., ivGenericDict = 13, ivObject = 14,
+    ivStringList = 20, ivDevice = 21);
+
+  IJitObject = interface;                       // forward: TIValue holds one, its methods use TIValue
+
+  TIValue = record
+    ...
+    Obj: IJitObject;                            // ivObject (nil otherwise)
+    class function FromObject(const O: IJitObject): TIValue; static;
+    class operator :=(const O: IJitObject): TIValue;
+    function AsObject: IJitObject;              // ETorchError('ivalue: expected Object, got Tuple') on a mismatch
+    ...
+  end;
+
+  { A TorchScript object (tch-rs Object). Copies of a TIValue share it;
+    the C IValue is freed when the last reference goes. It does not keep
+    its module alive and does not need to. }
+  IJitObject = interface
+    ['{...new GUID...}']
+    function Raw: PTorchIValue;                 // borrowed; always tag 14
+    function MethodIV(const Name: String; const Inputs: array of TIValue): TIValue;  // ati_object_method_
+    function GetAttr(const Name: String): TIValue;                                   // ati_object_getattr_
+  end;
+
+  TJitModule = class
+    ...
+    { atm_create_class_: ClassName is qualified, e.g. '__torch__.InputObject' }
+    function CreateClass(const ClassName: String; const Inputs: array of TIValue): IJitObject;
+  end;
+
+function JitLiveObjects: Integer;               // live TJitObjectHandle count, as TchLiveHandles
+
+implementation
+type
+  TJitObjectHandle = class(TInterfacedObject, IJitObject)
+  private
+    FRaw: PTorchIValue;
+  public
+    constructor Create(P: PTorchIValue);        // takes ownership; body is two assignments, cannot raise
+    destructor Destroy; override;               // ati_free(FRaw); never raises
+    function Raw: PTorchIValue;
+    function MethodIV(const Name: String; const Inputs: array of TIValue): TIValue;
+    function GetAttr(const Name: String): TIValue;
+  end;
+```
+
+- `TagName` gives `'Object'`; `Count` raises on an object as on a scalar;
+  `IsNone` is unchanged. `AsObject` on a non-object raises the usual
+  mismatch; an `ivObject` whose `Obj` is nil cannot come out of `FromC`
+  and is treated as a nil tensor is: `ToC` raises
+  `ETorchError('ivalue: nil object')`.
+- `CreateClass` returns the object, not a `TIValue` (deviation from tch-rs's
+  `create_class_is`, stated): `Module::create_class` always produces an
+  Object, so the result goes through `FromC` and `AsObject` (which would
+  raise on the impossible non-object). Class names are qualified, as the
+  measured message shows.
+- `[O, 42]` as an `array of TIValue` argument should convert element-wise
+  through the `:=` operator like `[T, 42, 1.5]` does (M5); not measured
+  for an interface element — the fallback is `TIValue.FromObject(O)`.
+
+**Ownership on every path** (the heart of the design; each line names who
+frees what):
+1. **`FromC`, tag 14.** `Result.Tag := ivObject; Result.Obj :=
+   TJitObjectHandle.Create(P); Keep := True` — the handle now owns `P`.
+   The `finally` becomes `FreeIValues(Cs); if not Keep then ati_free(P)`.
+   `Keep` is a local initialised to False. The constructor's body is
+   `inherited Create; InterlockedIncrement(LiveObjects); FRaw := P` — the
+   assignment last, so that if anything before it raised (FPC then runs
+   the destructor) `FRaw` is still nil, the destructor frees nothing and
+   the `finally` frees `P` (`Keep` not yet set). Every other tag is
+   unchanged and still consumes `P`.
+2. **`ToC`, `ivObject`.** `Result := ati_clone(Obj.Raw); TchCheck`. The
+   caller owns the clone and frees it like every other `ToC` result (the
+   `finally FreeIValues(Cs)` in `ForwardIV`/`MethodIV`/`CreateClass` and
+   in the container branch); the handle's own pointer is never handed to
+   C for freeing. This is tch-rs's fix for issue 475: passing the same
+   object twice, or passing it and letting the Pascal value die, is safe
+   (*measured* at the C level: `add_them` twice with the same pointer gives
+   `[5, 7, 9]` twice; the Pascal path is test item d below).
+3. **Object inside a container, `ToC`.** The child is cloned into its
+   slot like any child, the C container copies it (another intrusive_ptr
+   bump), `FreeIValues(Cs)` frees the clone. A later child failing in
+   `ToC` frees the clones already made (`IValuesToC`'s `except`), and the
+   handles are untouched.
+4. **Object inside a container, `FromC`.** The `ati_to_*` call writes a
+   fresh `IValue` per slot (*measured*); the recursive `FromC` wraps it in
+   a handle (step 1). If a later child fails: slots not yet consumed are
+   freed by `FreeIValues(Cs)`; the children already converted live in
+   `IValuesFromC`'s local result array, which the compiler finalises
+   while unwinding, releasing their handles, whose destructors `ati_free`
+   their pointers. Nothing leaks, nothing is freed twice. The mock test
+   checks it (object followed by a Device).
+5. **`MethodIV` / `GetAttr` / `CreateClass`.** Same shape as
+   `TJitModule.MethodIV`: `Cs := IValuesToC(Inputs)` (objects cloned);
+   `P := ati_object_method_(FRaw, PChar(Name), Cs, n)` /
+   `ati_object_getattr_(FRaw, PChar(Name))` /
+   `atm_create_class_(FModule, PChar(ClassName), Cs, n)`; `TchCheck` inside
+   a `try … finally FreeIValues(Cs)`; `Result := TIValue.FromC(P)`. C copies
+   `self` (`inputs.push_back(*i)`), so `FRaw` stays valid. `GetAttr` keeps
+   tch-rs's nil check (`ETorchError('ivalue: getattr returned nil')`,
+   unreachable after `TchCheck` under `PROTECT`, like `FromC`'s own).
+6. **Destroy.** `if FRaw <> nil then ati_free(FRaw)`;
+   `InterlockedDecrement(LiveObjects)`; never raises, never reads the
+   error slot (4.1).
+7. **Module lifetime.** An object outlives its `TJitModule` (*measured*,
+   above); `IJitObject` holds no reference to the module. Say so in the
+   unit header.
+8. **Temporaries.** As H1 (4.1): an object produced inside an expression
+   stays alive in the routine's temporary slot until the routine returns
+   (*measured* in M10: the count is 1 inside the routine after every
+   named variable was released, 0 after it returns). Tests therefore
+   compare `JitLiveObjects` and `TchLiveHandles` from the calling routine.
+
+**L2 (`TchSys.pas`)**, exactly as `torch_api.h`:
+
+```pascal
+function  atm_create_class_(m: PTorchModule; clz_name: PChar; ivalues: PPTorchIValue;
+  nivalues: cint): PTorchIValue; cdecl; external LibTch;
+function  ati_object_method_(i: PTorchIValue; method_name: PChar; ivalues: PPTorchIValue;
+  nivalues: cint): PTorchIValue; cdecl; external LibTch;
+function  ati_object_getattr_(i: PTorchIValue; attr_name: PChar): PTorchIValue; cdecl; external LibTch;
+function  ati_clone(i: PTorchIValue): PTorchIValue; cdecl; external LibTch;
+```
+
+All four are `PROTECT`ed and return nil on error (`TchCheck` after each).
+The unit comment's "Not declared" list shrinks to `atm_fuser_cuda_*`.
+**Fork patch: none.**
+
+**`tests/jit/jit_test.pas`, group 14 "Objects"** (hand-checkable; `x =
+[3, 4, 5]`, `T1 = [1, 2, 3]`, `T2 = [4, 5, 6]`, all kFloat; `Before :=
+JitLiveObjects` and `TchLiveHandles` taken in the caller):
+- a. `jit6`: `foo6.pt`, `R := M.ForwardIV([x])` → `R.Tag = ivObject`,
+  `R.TagName = 'Object'`; `O := R.AsObject`; `O.MethodIV('y',
+  []).AsTensor = [6, 8, 10]`; `O.GetAttr('x').AsTensor = [3, 4, 5]`;
+  `R.AsTensor` raises `ETorchError` `'ivalue: expected Tensor, got
+  Object'`; `M.Forward([x])` raises `ETorchNativeError` "forward did not
+  return a tensor" (`atm_forward`'s `isTensor` check; **(H27)**).
+- b. Errors (`ETorchNativeError`, message contains): `O.GetAttr('nope')`
+  → `does not have an attribute with name 'nope'`; `O.MethodIV('nope',
+  [])` → `Couldn't find method: 'nope'`; `O.MethodIV('y', [7])` →
+  `Expected at most 1 argument(s)`.
+- c. `jit_double_free`: `foo7.pt`, `Inp := M.MethodIV('make_input_object',
+  [T1, T2])` → `ivObject`; `M.MethodIV('add_them', [Inp]).AsTensor = [5,
+  7, 9]`; **the same call again with the same `Inp`** → `[5, 7, 9]` (the
+  regression of issue 475: the handle survives being passed);
+  `Inp.AsObject.GetAttr('foo') = [1, 2, 3]`, `'bar' = [4, 5, 6]`.
+- d. `CreateClass`: `O := M.CreateClass('__torch__.InputObject', [T1,
+  T2])`; `M.MethodIV('add_them', [O]) = [5, 7, 9]` (or
+  `[TIValue.FromObject(O)]`); `CreateClass('InputObject', [T1, T2])` →
+  `Could not find class with name: 'InputObject' in module.`;
+  `CreateClass('__torch__.InputObject', [T1])` → `__init__() is missing
+  value for argument 'bar'`; `M.MethodIV('add_them', [5])` → `Expected a
+  value of type '__torch__.InputObject`; on `foo6.pt`:
+  `CreateClass('__torch__.TorchScriptClass', [x]).MethodIV('y', []) = [6,
+  8, 10]` (**(H27)**).
+- e. Containers: `W := TIValue.FromC(TIValue.Tuple([O, 42]).ToC)` →
+  `W.Count = 2`, `W.Item(1).AsInt = 42`, `W.Item(0).AsObject.GetAttr('foo')
+  = [1, 2, 3]`, `W.Item(0).AsObject.Raw <> O.Raw` (fresh `IValue`, same
+  object); the same object through `GenericList([O])` (`Item(0)`) and
+  `GenericDict(['k', O])` (`Value(0)`) (**(H26)**).
+- f. Sharing and lifetime: `A := TIValue.FromObject(O); B := A;
+  A.AsObject.Raw = B.AsObject.Raw`; `A := Default(TIValue)`;
+  `B.AsObject.GetAttr('foo')` still `[1, 2, 3]`; `M.Free` **before**
+  `O.GetAttr('bar')` → still `[4, 5, 6]` (the object outlives the
+  module). After the group's routine returns: `JitLiveObjects = Before`,
+  `TchLiveHandles` back to its start; the program's last line adds
+  `JitLiveObjects = 0` next to `TchLiveHandles = 0`.
+- g. Leak loop (**(H28)**): `10^4` × `O.MethodIV('y', [])` on `foo6`'s
+  object in a small routine; afterwards `JitLiveObjects` and
+  `TchLiveHandles` are unchanged (the C++ side has no counter; the Pascal
+  counters plus a flat RSS, as in the 4.1 loop, are the evidence).
+
+**Mock** (`tests/mock/mock_tch.c`, plumbing only): `mock_ivalue` gets
+`char *cls` and `char **names` for tag 14; the attributes live in `items`
+(`n` of them) and are named `a0`, `a1`, … in constructor order.
+`atm_create_class_(m, clz, ivs, n)` records `mock_last_class`, fails when
+`clz` contains `missing`, else returns an object with `n` cloned
+attributes. `ati_object_getattr_(o, name)`: `expect_tag(o, 14)`, a clone
+of the named attribute, unknown name → `set_err("mock: no attribute …")`,
+nil. `ati_object_method_(o, name, ivs, n)`: `expect_tag(o, 14)`, records
+`mock_last_method`; `name == "fail"` → error, nil; else a tuple of clones
+of the attributes followed by clones of the arguments. `ati_clone` →
+`iv_clone` (a deep copy in the mock, counted as a live ivalue: the mock
+checks plumbing, not identity). `iv_clone` and `ati_free` copy/free `cls`
+and `names`; `ati_length` on 14 fails like libtorch. The existing
+`atm_forward_`/`atm_method_` (tuple of clones) already carry an object.
+`tests/mock/jit_mock_test.pas`, new `TestObjects`:
+1. `O := M.CreateClass('__torch__.Foo', [1, 2.5])` → `mock_last_class`,
+   `mock_live_ivalues = 1`, `JitLiveObjects = 1`.
+2. `O.GetAttr('a1').AsDouble = 2.5`; `GetAttr('zz')` → `ETorchNativeError`;
+   `mock_live_ivalues` back to 1 after each.
+3. `O.MethodIV('m', ['x'])` → tuple `(1, 2.5, 'x')`, `mock_last_method =
+   'm'`; `MethodIV('fail', [O])` raises and leaves `mock_live_ivalues = 1`
+   (the cloned input was freed).
+4. Sharing: `A := TIValue.FromObject(O); B := A; A := Default(TIValue)`;
+   `B.AsObject.Raw = O.Raw`; counts unchanged until all three are
+   released (checked from the caller).
+5. Round trip `FromC(Tuple([O, 42]).ToC)`: `Item(0).Tag = ivObject`,
+   `Item(0).AsObject.GetAttr('a0').AsInt = 1`; `mock_live_ivalues = 2`
+   while both objects are alive (the mock's clone is a separate cell), 0
+   when the caller has released everything.
+6. `M.MethodIV('f', [O])` on a mock module: `Item(0).Tag = ivObject`,
+   counts back afterwards.
+7. Failing sibling: `FromC(Tuple([O, TIValue.FromDevice(Cpu)]).ToC)`
+   raises at the Device child; `mock_live_ivalues` is back to the object's
+   own cell only and `JitLiveObjects` unchanged (step 4 of the ownership
+   list).
+8. The final lines of the program add `JitLiveObjects = 0`.
+
+**Hypotheses (need real libtorch; everything else above is measured):**
+- **(H26)** an object round-trips through `GenericList` and as a
+  `GenericDict` value as it does through a tuple (measured): fresh tag-14
+  `IValue`s that outlive the container.
+- **(H27)** `atm_create_class_('__torch__.TorchScriptClass', [x])` on
+  `foo6.pt` gives an object whose `y()` is `2x`, and `atm_forward` (tensor
+  API) on `foo6.pt` raises "forward did not return a tensor" (the
+  `isTensor` check in `torch_api.cpp` is read, not run).
+- **(H28)** `10^4` object method calls leave `JitLiveObjects`,
+  `TchLiveHandles` and RSS flat.
+- Not testable with the vendored assets and therefore not claimed: that a
+  mutation through one clone is visible through another (no asset has a
+  mutating method, and `Define` cannot declare a TorchScript class). It
+  follows from `IValue`'s copy constructor; a later asset may check it.
+
 ### 4.7 Grad mode and global settings
 
 ```pascal
@@ -2381,3 +2685,12 @@ the end of 4.6.8); `tests/mock/jit_mock_test.pas` covers the plumbing. The
 `FromArray` revision (4.3) and the 4.6.7 follow-ups are in. Still open:
 TorchScript objects (tag 14), the milestone 3 layers (4.6.5 deferred
 list), CUDA/ROCm.
+
+**TorchScript objects (designed in design session 6, 2026-10-11):** 4.6.9
+— `ivObject = 14`, the refcounted `IJitObject` handle inside `TIValue`
+(`MethodIV`, `GetAttr`), `TJitModule.CreateClass`, `JitLiveObjects`, the
+four L2 externals, no fork patch; tests `jit6`/`jit_double_free` on the
+vendored `foo6.pt`/`foo7.pt` as group 14 of `tests/jit/jit_test.pas`, plus
+the mock's `TestObjects`. Most of it is measured against libtorch 2.13.0;
+H26–H28 and the implementation order are in HANDOFF.md. Still open after
+it: the milestone 3 layers and CUDA/ROCm.

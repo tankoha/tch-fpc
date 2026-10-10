@@ -1,6 +1,6 @@
 // Modified for tch-fpc from tch-rs 4227b89b72059b0651ff83a38637693574e0a2d6 (torch-sys/libtch):
 // stream/image declarations removed, PROTECT also catches (...),
-// tchf_free added.
+// tchf_free added, C branch includes stddef.h and stdbool.h.
 #ifndef __TORCH_API_H__
 #define __TORCH_API_H__
 #include<stdint.h>
@@ -26,6 +26,8 @@ typedef torch::jit::IValue *ivalue;
       torch_last_err = strdup("unknown C++ exception (not derived from std::exception)"); \
   }
 #else
+#include<stddef.h>
+#include<stdbool.h>
 typedef void *tensor;
 typedef void *optimizer;
 typedef void *scalar;

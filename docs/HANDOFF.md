@@ -29,6 +29,23 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
   `Forward(X, Train = False)`) and 4.7 (grad mode). Unverified FPC 3.2.2
   behaviour is marked **(H1)**–**(H11)** in DESIGN.md and listed below.
 
+## Local progress (2026-10-10)
+
+- **Step 1 done.** FPC 3.2.2, g++ 15.2.0, CMake 4.2.3 (reads libtorch's
+  CMake config fine; "kineto not found" warning is harmless), libtorch
+  2.13.0+cpu (cxx11 ABI) in `libtorch/`. OCaml not installed yet (step 8).
+- **Step 2 done.** `d81f48b` pristine import, `a15806e` fork patch
+  (`git diff d81f48b a15806e` shows the patch). Build:
+  `cmake -S csrc/libtch -B build/libtch -DCMAKE_PREFIX_PATH=$PWD/libtorch
+  -DCMAKE_BUILD_TYPE=Release && cmake --build build/libtch -j 8` (~30 s).
+  2657 `atg_*` exported, `ldd -r` clean. gen.ml patched too, so the
+  `extern "C"` guard survives regeneration.
+- **Step 3 done.** `tests/c/smoke.c` passes (build command in its header).
+  Found while doing it: the C branch of `torch_api.h` needed `<stddef.h>`
+  (`size_t`) and `<stdbool.h>` (`bool`, before C23); added to the patch.
+  An error message is libtorch's text followed by a C++ origin/backtrace
+  starting at `Exception raised from ...` (see open questions).
+
 ## Next steps (local implementation)
 
 1. **Toolchain check.** FPC 3.2.2, g++, CMake, libtorch 2.13.0 CPU
@@ -101,6 +118,11 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 
 ## Open questions
 
+- **Native error message format.** libtorch's message is the text plus a
+  multi-line C++ origin/backtrace (`Exception raised from ...`). tch-rs
+  passes it through unchanged. Option for `ETorchNativeError`: `Message` =
+  text before `Exception raised from`, full text in a `Detail` property.
+  Decide when writing `TchRaiseNative` (step 4+).
 - **Multi-output ops**: `out` parameters (decided) — revisit whether a few
   hand-written result records (`max_dim`, `sort`, `topk`, `lstm`) are worth
   adding after writing real code. Also whether `var` instead of `out` is

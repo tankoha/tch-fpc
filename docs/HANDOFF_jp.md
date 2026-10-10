@@ -31,6 +31,23 @@
   `Forward(X, Train = False)` は1つに）と 4.7（勾配モード）を追加しました。
   FPC 3.2.2 の未検証の挙動は DESIGN.md で **(H1)**〜**(H11)** と印を付け、下に並べています。
 
+## ローカルの進捗（2026-10-10）
+
+- **手順1 完了。** FPC 3.2.2、g++ 15.2.0、CMake 4.2.3（libtorch の CMake 設定を問題なく
+  読める。「kineto not found」の警告は無害）、`libtorch/` に libtorch 2.13.0+cpu
+  （cxx11 ABI）。OCaml は未導入（手順8で必要）。
+- **手順2 完了。** `d81f48b` が無改変の取り込み、`a15806e` がパッチ
+  （`git diff d81f48b a15806e` でパッチだけが見える）。ビルド：
+  `cmake -S csrc/libtch -B build/libtch -DCMAKE_PREFIX_PATH=$PWD/libtorch
+  -DCMAKE_BUILD_TYPE=Release && cmake --build build/libtch -j 8`（約30秒）。
+  `atg_*` を 2657 個公開、`ldd -r` で未解決シンボルなし。gen.ml も直したので、
+  `extern "C"` のガードは再生成しても残る。
+- **手順3 完了。** `tests/c/smoke.c` が通る（ビルド方法はファイル先頭）。
+  その過程で分かったこと：`torch_api.h` の C 側の分岐に `<stddef.h>`（`size_t`）と
+  `<stdbool.h>`（C23 より前の `bool`）が必要だったので、パッチに追加した。
+  エラーメッセージは libtorch の本文のあとに `Exception raised from ...` で始まる
+  C++ の発生箇所・バックトレースが続く（未解決の論点を参照）。
+
 ## 次の作業（ローカル実装）
 
 1. **ツールの確認。** FPC 3.2.2、g++、CMake を用意し、libtorch 2.13.0 の CPU 版
@@ -106,6 +123,11 @@
 
 ## 未解決の論点
 
+- **ネイティブのエラーメッセージの形。** libtorch のメッセージは本文のあとに、
+  複数行の C++ の発生箇所・バックトレース（`Exception raised from ...`）が続く。
+  tch-rs はそのまま渡している。`ETorchNativeError` の案：`Message` は
+  `Exception raised from` より前の本文、全文は `Detail` プロパティに入れる。
+  `TchRaiseNative` を書くとき（手順4以降）に決める。
 - **複数出力の op**：`out` 引数（決定済み）。実際にコードを書いてから、よく使う op
   （`max_dim`、`sort`、`topk`、`lstm`）に手書きの結果用 record を足す価値があるか
   見直す。(H8) でエイリアシングの危険が実際に問題になるなら、`out` の代わりに `var` に

@@ -198,6 +198,8 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
    `gen/tchgen.pas`; generate `TchSysGenerated.pas` and the `.inc` files;
    compile everything. Include the case-insensitive collision check against
    hand-written names (`data`, `grad`, `detach`, `to_device`, `clone`, ...).
+   Apply the parameter/out-name suffix rule (DESIGN.md 4.4) against all
+   members, reserved words and `Result`.
 
 ## Open questions
 
@@ -216,26 +218,11 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
   functions in the fork to the non-deprecated device-taking API, and/or
   install a `c10::WarningHandler` from libtch that forwards to a Pascal
   callback.
-- **Parameter names vs `TTensor` members (found in step 6, blocks step
-  8).** In `{$mode objfpc}` a method parameter may not have the same name
-  (case-insensitive) as a record member *declared earlier*: `add(dim: Int64)`
-  next to the hand-written `Dim` is "Duplicate identifier". Declared before
-  the member it compiles, so the outcome depends on declaration order —
-  too fragile to rely on. `{$mode delphi}` accepts it either way. Scale on
-  2.13: `dim` appears in ~250 ops; 47 parameter names equal an op name
-  (`indices` ~79 ops, `values` ~51, `index` ~53, `grad` ~40, `norm`,
-  `max`, `mean`, ...); `out` result names (`values`, `indices` of
-  `max_dim`) have the same problem. Options:
-  (a) generator appends `_` to any parameter or out-name that equals any
-  `TTensor` member, hand-written or generated (`dim_`, `indices_`):
-  robust, but `dim_` shows up in hundreds of signatures;
-  (b) rename the hand-written members so they never collide with common
-  parameter names (`Dim` → `NumDims`/`Rank`) *and* still apply (a) for the
-  op-name collisions;
-  (c) compile `Tch` in `{$mode delphi}`: changes other semantics of the
-  unit (procvar `@`, generics syntax), needs its own tests.
-  Recommendation: (a) for generated-vs-generated, plus (b) for the
-  hand-written API, since parameter names never appear at the call site.
+- **Parameter names vs `TTensor` members: decided** (2026-10-10, user):
+  the generator appends `_` (repeatedly, until unique) to colliding
+  parameter/out names, and hand-written members avoid common parameter
+  names (`Dim` → `NumDims`, done in `src/Tch.pas`). Rule and numbers in
+  DESIGN.md 4.4.
 - **Multi-output ops**: `out` parameters (decided) — revisit whether a few
   hand-written result records (`max_dim`, `sort`, `topk`, `lstm`) are worth
   adding after writing real code. Also whether `var` instead of `out` is

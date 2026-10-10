@@ -273,7 +273,7 @@ type
     function Raw: PTorchTensor; inline;      // borrowed; nil if IsNil
     function IsNil: Boolean; inline;         // FHandle = nil
     function Defined: Boolean;               // not IsNil and at_defined <> 0
-    function Dim: Integer;
+    function NumDims: Integer;     // not "Dim": see 4.4, parameter names
     function Shape: TInt64Array;
     function Numel: Int64;
     function Kind: TKind;
@@ -603,6 +603,21 @@ temporaries (H1).
   words or `Result`: `out` (819 uses), `end` (31), `to` (7), `result` (3);
   these get a `_` suffix (`out_`, `end_`). Friendlier hand-written aliases
   (`DivBy`, `ToDevice`, `Variance`) can be added on top where it matters.
+- **Parameter and out-names vs `TTensor` members (decision, after step
+  6).** In `{$mode objfpc}` a method parameter may not share its name
+  (case-insensitive) with a record member declared before it; whether it
+  compiles depends on declaration order, so the generator never relies on
+  it. Rule: a generated parameter or `out` result name that equals —
+  case-insensitively — any `TTensor` member (hand-written or generated op),
+  a reserved word, or `Result` gets `_` appended, **repeatedly until it is
+  unique**: `dim` → `dim_`, `indices` → `indices_`, and `pow` → `pow__`
+  because `pow_` is itself an in-place op (same for `abs`, `dropout`,
+  `fill`, `negative`, `sign`, `threshold`, `transpose`). Parameter names
+  never appear at call sites, so this costs readability only in
+  signatures. The hand-written API in turn avoids names that are common
+  parameter names: `NumDims`, not `Dim` (`dim` is a parameter of ~250
+  ops). Remaining overlaps with rare parameters (`shape`, `numel`,
+  `device`, `copy`) are left to the suffix rule.
 - Fixed multi-tensor results (246 ops, 2 to 7 tensors; e.g. `max_dim` →
   values, indices) become
   `procedure max_dim(dim: Int64; keepdim: Boolean; out values, indices: TTensor)`.

@@ -49,7 +49,7 @@ type
     function Raw: PTorchTensor; inline;
     function IsNil: Boolean; inline;
     function Defined: Boolean;
-    function Dim: Integer;
+    function NumDims: Integer;
     function Shape: TInt64Array;
     function ToString(LineWidth: Integer = 80): AnsiString;
     function DoubleValue(const Index: array of Int64): Double;
@@ -214,9 +214,9 @@ begin
   Result := R <> 0;
 end;
 
-function TTensor.Dim: Integer;
+function TTensor.NumDims: Integer;
 begin
-  TchCheckArg(Self, 'self', 'Dim');
+  TchCheckArg(Self, 'self', 'NumDims');
   Result := at_dim(Raw);
   TchCheck;
 end;
@@ -224,7 +224,7 @@ end;
 function TTensor.Shape: TInt64Array;
 begin
   Result := nil;
-  SetLength(Result, Dim);
+  SetLength(Result, NumDims);
   if Length(Result) > 0 then
   begin
     at_shape(Raw, @Result[0]);

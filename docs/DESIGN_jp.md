@@ -275,7 +275,7 @@ type
     function Raw: PTorchTensor; inline;      // 借り物。IsNil なら nil
     function IsNil: Boolean; inline;         // FHandle = nil
     function Defined: Boolean;               // IsNil でなく、かつ at_defined <> 0
-    function Dim: Integer;
+    function NumDims: Integer;     // "Dim" ではない：4.4 の引数名を参照
     function Shape: TInt64Array;
     function Numel: Int64;
     function Kind: TKind;
@@ -592,6 +592,18 @@ function IntList(const A: array of Int64): TOptIntList;  // 値あり（空で�
   予約語や `Result` と衝突する引数名：`out`（819 箇所）、`end`（31）、`to`（7）、
   `result`（3）。これらには `_` を付けます（`out_`、`end_`）。必要な箇所には、
   手書きの分かりやすい別名（`DivBy`、`ToDevice`、`Variance`）を上に足せます。
+- **引数名・out の結果名と `TTensor` のメンバー（決定、手順6のあと）。**
+  `{$mode objfpc}` では、メソッドの引数に、それより前に宣言された record のメンバーと
+  同じ名前（大文字小文字を無視）を使えません。コンパイルが通るかは宣言の順番で
+  変わるので、生成器はそれに頼りません。ルール：生成する引数名や `out` の結果名が、
+  大文字小文字を無視して `TTensor` のメンバー（手書きでも生成した op でも）、予約語、
+  `Result` のどれかと同じなら、**重ならなくなるまで** `_` を足します：`dim` → `dim_`、
+  `indices` → `indices_`。`pow` は `pow_` 自体がインプレースの op なので `pow__` に
+  なります（`abs`、`dropout`、`fill`、`negative`、`sign`、`threshold`、`transpose` も
+  同様）。引数名は呼び出し側には出てこないので、読みにくくなるのはシグネチャだけです。
+  逆に手書きの API は、よくある引数名を避けます：`Dim` ではなく `NumDims`（`dim` は
+  約250の op の引数）。まれな引数（`shape`、`numel`、`device`、`copy`）との重なりは
+  `_` のルールに任せます。
 - 固定個数の複数テンソルを返す op（246 個、2〜7 個。例：`max_dim` → values、indices）は
   `procedure max_dim(dim: Int64; keepdim: Boolean; out values, indices: TTensor)`
   にします。出力の名前は、`Declarations.yaml` の `returns[].name` があればそれを使い、

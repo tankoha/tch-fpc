@@ -26,5 +26,8 @@ PyTorch's op declarations). Details in `docs/DESIGN.md`.
 - Design sessions write to `docs/DESIGN.md` (decisions + rationale) and
   `docs/HANDOFF.md` (open questions, next steps). Keep them current at the
   end of every session.
-- Design sessions may sketch Pascal/C declarations but do not need to build.
+- Design sessions do not implement. They may sketch Pascal/C declarations
+  and run small throwaway measurements to settle a design question, but
+  committed code (generator, units, tests) is written locally. When the
+  design is done, stop and hand back through `docs/HANDOFF.md`.
 - Implementation resumes locally: read `docs/HANDOFF.md` first.

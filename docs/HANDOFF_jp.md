@@ -48,6 +48,30 @@
   エラーメッセージは libtorch の本文のあとに `Exception raised from ...` で始まる
   C++ の発生箇所・バックトレースが続く（未解決の論点を参照）。
 
+- **手順4 完了。** `tests/abi/abi_test.pas` が通る（ビルド方法はファイル先頭。
+  `build/abi_test nilarg` で nil 引数のケースを実行）。測った結果：
+  - C99 の `bool` の戻り値は `Boolean` で宣言する。FPC は `%al` だけを見る
+    （`testb %al,%al`）。SysV ABI が保証するのもそこだけ。**`LongBool` や ctypes の
+    `cbool`（実体は `LongBool`）は使わない**：FPC が `%eax` 全体を見る
+    （`orl %eax,%eax`）。今回は g++ が上位ビットを0にしていたので正しく読めたが、
+    保証はない。`Boolean` の引数（`at_autocast_set_enabled`）も正しく渡る。
+  - `c10::ScalarType` の 0〜26 は `TKind` と完全に一致（Float8 の 23〜26 も含む）。
+    libtorch 2.13 には **27〜45** もある（UInt16/32/64、UInt1〜7、Int1〜7、
+    Float8_e8m0fnu、Float4_e2m1fn_x2）。CPU で `atg_empty` がすべて作れて、
+    `at_scalar_type` も一致する（未解決の論点を参照）。
+  - `uint8_t x_null` を `Byte`、`int8_t` の layout を `ShortInt`（-1 = nullopt を含む）
+    として渡して、意図どおりに動く（`atg_argmax`、`atg_to_sparse`）。
+  - `external 'tch'` と `-Flbuild/libtch -k-rpath=$PWD/build/libtch` で、実行時に
+    `libtch.so` が見つかる。libtorch は libtch の RUNPATH 経由で見つかる。
+  - 省略不可の引数に nil のテンソルを渡す（`atg_add(@S, nil, A)`）と、FPC の
+    SIGSEGV ハンドラーが C++ のフレームの中から捕まえられる `EAccessViolation` に
+    変え、プロセスは動き続ける。回復できるように見えるが安全ではない（C++ の
+    巻き戻しが起きず、libtorch の状態は不明）。呼び出し前の nil ハンドルのチェックは
+    やはり必要。
+  - libtorch は `TORCH_WARN` のメッセージを直接 stderr に書く（例：`at_autocast_*`
+    を呼ぶたびに非推奨 API の警告、量子化型や ComplexHalf の作成時）。
+    未解決の論点を参照。
+
 ## 次の作業（ローカル実装）
 
 1. **ツールの確認。** FPC 3.2.2、g++、CMake を用意し、libtorch 2.13.0 の CPU 版
@@ -128,6 +152,15 @@
   tch-rs はそのまま渡している。`ETorchNativeError` の案：`Message` は
   `Exception raised from` より前の本文、全文は `Detail` プロパティに入れる。
   `TchRaiseNative` を書くとき（手順4以降）に決める。
+- **26 を超える `TKind`。** libtorch 2.13 には ScalarType の 27〜45 があり、CPU で
+  作れる（手順4）。DESIGN の `TKind` は 26 までで、未知の型では例外を投げる。
+  決めること：`TKind` を 45 まで広げる（少なくとも UInt16/32/64 と
+  Float8_e8m0fnu は役に立ちそう）か、0〜26 のままにして `Kind` で例外にするか。
+- **libtorch の警告。** `TORCH_WARN` は無条件に stderr に出る。上流の
+  `at_autocast_*` は呼ぶたびに警告を出す（非推奨の
+  `at::autocast::is_enabled`/`set_enabled`）。案：フォークでこの2つの関数を
+  デバイスを取る非推奨でない API に直す。または libtch から `c10::WarningHandler`
+  を設定して Pascal のコールバックに渡す（両方でもよい）。
 - **複数出力の op**：`out` 引数（決定済み）。実際にコードを書いてから、よく使う op
   （`max_dim`、`sort`、`topk`、`lstm`）に手書きの結果用 record を足す価値があるか
   見直す。(H8) でエイリアシングの危険が実際に問題になるなら、`out` の代わりに `var` に

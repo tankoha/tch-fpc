@@ -46,6 +46,31 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
   An error message is libtorch's text followed by a C++ origin/backtrace
   starting at `Exception raised from ...` (see open questions).
 
+- **Step 4 done.** `tests/abi/abi_test.pas` passes (build command in its
+  header; `build/abi_test nilarg` runs the nil-argument case). Measured:
+  - C99 `bool` returns: declare as `Boolean`. FPC tests only `%al`
+    (`testb %al,%al`), which is all the SysV ABI guarantees. **Do not use
+    `LongBool` or ctypes' `cbool`** (a `LongBool`): FPC then tests the whole
+    `%eax` (`orl %eax,%eax`). It happened to read correctly here because
+    g++ left the upper bits zero, but that is not guaranteed. `Boolean`
+    arguments (`at_autocast_set_enabled`) also work.
+  - `c10::ScalarType` 0-26 match `TKind` exactly, Float8 23-26 included.
+    libtorch 2.13 also has **27-45** (UInt16/32/64, UInt1-7, Int1-7,
+    Float8_e8m0fnu, Float4_e2m1fn_x2); `atg_empty` creates all of them on
+    CPU and `at_scalar_type` round-trips (see open questions).
+  - `uint8_t x_null` as `Byte` and `int8_t` layout as `ShortInt` (incl.
+    -1 = nullopt) behave as intended (`atg_argmax`, `atg_to_sparse`).
+  - `external 'tch'` + `-Flbuild/libtch -k-rpath=$PWD/build/libtch` finds
+    `libtch.so` at run time; libtorch is found through libtch's RUNPATH.
+  - nil tensor to a non-optional argument (`atg_add(@S, nil, A)`): FPC's
+    SIGSEGV handler turns it into a catchable `EAccessViolation`, raised
+    from inside C++ frames, and the process keeps running. That looks
+    recoverable but is not safe (no C++ unwinding, libtorch state
+    unknown), so the nil-handle check before every call stays necessary.
+  - libtorch writes `TORCH_WARN` messages straight to stderr (e.g. the
+    deprecated autocast API on every `at_autocast_*` call, quantized and
+    ComplexHalf creation). See open questions.
+
 ## Next steps (local implementation)
 
 1. **Toolchain check.** FPC 3.2.2, g++, CMake, libtorch 2.13.0 CPU
@@ -123,6 +148,16 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
   passes it through unchanged. Option for `ETorchNativeError`: `Message` =
   text before `Exception raised from`, full text in a `Detail` property.
   Decide when writing `TchRaiseNative` (step 4+).
+- **`TKind` beyond 26.** libtorch 2.13 has ScalarType 27-45 and they are
+  creatable on CPU (step 4). DESIGN's `TKind` stops at 26 and raises on
+  unknown kinds. Decide: extend `TKind` to 45 (at least UInt16/32/64 and
+  Float8_e8m0fnu look useful), or keep 0-26 and let `Kind` raise.
+- **libtorch warnings.** `TORCH_WARN` goes to stderr unconditionally, and
+  the upstream `at_autocast_*` functions warn on every call (deprecated
+  `at::autocast::is_enabled`/`set_enabled`). Options: patch those two
+  functions in the fork to the non-deprecated device-taking API, and/or
+  install a `c10::WarningHandler` from libtch that forwards to a Pascal
+  callback.
 - **Multi-output ops**: `out` parameters (decided) — revisit whether a few
   hand-written result records (`max_dim`, `sort`, `topk`, `lstm`) are worth
   adding after writing real code. Also whether `var` instead of `out` is

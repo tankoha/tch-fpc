@@ -176,14 +176,16 @@ int at_autocast_increment_nesting() {
   return -1;
 }
 
+// tch-fpc: the device-taking API; at::autocast::is_enabled()/set_enabled()
+// are deprecated in libtorch 2.13 and print a TORCH_WARN on every call.
 bool at_autocast_is_enabled() {
-  PROTECT(return at::autocast::is_enabled();)
+  PROTECT(return at::autocast::is_autocast_enabled(at::kCUDA);)
   return -1;
 }
 
 bool at_autocast_set_enabled(bool b) {
-  PROTECT(bool is_enabled = at::autocast::is_enabled();
-          at::autocast::set_enabled(b); return is_enabled;)
+  PROTECT(bool is_enabled = at::autocast::is_autocast_enabled(at::kCUDA);
+          at::autocast::set_autocast_enabled(at::kCUDA, b); return is_enabled;)
   return -1;
 }
 

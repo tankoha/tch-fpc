@@ -175,9 +175,9 @@ tch-rs を読んで得た内容です（CLAUDE.md に従い、**ビルドして�
 - ライブラリ名は定数1つにまとめます：`const LibTch = 'tch';` と
   `external LibTch name 'atg_add'`。リンク時の静的な `external` 束縛にし、
   `LoadLibrary` で 2,657 個の関数ポインタを取る方式は使いません。
-- 名前は C と完全に同じにします（`atg_add`、`at_free`）。引数名が予約語
-  （`out`、`end`、`to`、`result`）の場合は `_` を付けます（`out_`）。
-  引数名は ABI に影響しません。
+- 名前は C と完全に同じにします（`atg_add`、`at_free`）。引数名もそのままで、
+  予約語（`out`、`end`、`to`）は `&` でエスケープし（`&out`）、`result` だけは
+  `result_` にします（4.4 と同じルール）。引数名は ABI に影響しません。
 
 スケッチ：
 
@@ -231,7 +231,7 @@ procedure atg_zeros(out__: PPTorchTensor; size_data: PInt64; size_len: cint;
             options_kind, options_device: cint); cdecl; external LibTch;
 procedure atg_narrow(out__: PPTorchTensor; self: PTorchTensor; dim, start,
             length: Int64); cdecl; external LibTch;
-procedure atg_add_out(out__: PPTorchTensor; out_, self, other: PTorchTensor);
+procedure atg_add_out(out__: PPTorchTensor; &out, self, other: PTorchTensor);
             cdecl; external LibTch;
 ```
 
@@ -275,7 +275,7 @@ type
     function Raw: PTorchTensor; inline;      // 借り物。IsNil なら nil
     function IsNil: Boolean; inline;         // FHandle = nil
     function Defined: Boolean;               // IsNil でなく、かつ at_defined <> 0
-    function NumDims: Integer;     // "Dim" ではない：4.4 の引数名を参照
+    function Dim: Integer;
     function Shape: TInt64Array;
     function Numel: Int64;
     function Kind: TKind;
@@ -419,7 +419,7 @@ type
   `TchRaiseNative` はインライン化しない別手続きにして、通常の経路を小さく保ちます。
   エラーの格納場所は C 側でスレッドローカルで、同じスレッドの直後に読むので、
   スレッド同士が干渉しません。生成されたコードが使う補助関数には `Tch` を付け、
-  op の引数名（`self`、`out_`、`data`、`index` など）に隠されないようにします。
+  op の引数名（`self`、`&out`、`data`、`index` など）に隠されないようにします。
 - 呼び出し前に、省略不可の `Tensor` 引数（レシーバーを含む）すべてについて
   `IsNil` を確認し、nil なら
   `ETorchError('undefined tensor passed as <param> to <op>')` を投げます。
@@ -589,21 +589,40 @@ function IntList(const A: array of Int64): TOptIntList;  // 値あり（空で�
   解決**：`&div`、`&var`、`&to`、`&set`、`&repeat`、`&absolute`、`&alias`、`&index` は
   コンパイルでき、`t.&div(u)` のように呼べる。`absolute`、`alias`、`index` は `&` なしでも
   コンパイルできる）。
-  予約語や `Result` と衝突する引数名：`out`（819 箇所）、`end`（31）、`to`（7）、
-  `result`（3）。これらには `_` を付けます（`out_`、`end_`）。必要な箇所には、
-  手書きの分かりやすい別名（`DivBy`、`ToDevice`、`Variance`）を上に足せます。
-- **引数名・out の結果名と `TTensor` のメンバー（決定、手順6のあと）。**
-  `{$mode objfpc}` では、メソッドの引数に、それより前に宣言された record のメンバーと
-  同じ名前（大文字小文字を無視）を使えません。コンパイルが通るかは宣言の順番で
-  変わるので、生成器はそれに頼りません。ルール：生成する引数名や `out` の結果名が、
-  大文字小文字を無視して `TTensor` のメンバー（手書きでも生成した op でも）、予約語、
-  `Result` のどれかと同じなら、**重ならなくなるまで** `_` を足します：`dim` → `dim_`、
-  `indices` → `indices_`。`pow` は `pow_` 自体がインプレースの op なので `pow__` に
-  なります（`abs`、`dropout`、`fill`、`negative`、`sign`、`threshold`、`transpose` も
-  同様）。引数名は呼び出し側には出てこないので、読みにくくなるのはシグネチャだけです。
-  逆に手書きの API は、よくある引数名を避けます：`Dim` ではなく `NumDims`（`dim` は
-  約250の op の引数）。まれな引数（`shape`、`numel`、`device`、`copy`）との重なりは
-  `_` のルールに任せます。
+  予約語と同じ引数名も同じ `&` エスケープにします：`out`（819 箇所）、`end`（31）、
+  `to`（7）は `&out`、`&end`、`&to`。こうすると op 名も引数名も1つのエスケープ
+  ルールで済みます（H12 で確認）。例外は `result`（3 op：`_linalg_det_result`、
+  `_linalg_solve_ex_result`、`linalg_solve_ex_out`）。`&result` にしても識別子は
+  `result` のままで、関数の戻り値のシンボルと衝突するので `result_` にします。
+  必要な箇所には、手書きの分かりやすい別名（`DivBy`、`ToDevice`、`Variance`）を
+  上に足せます。
+- **引数名・out の結果名と `TTensor` のメンバー（決定。クラウドセッション3で改訂）。**
+  素の `{$mode objfpc}` では、メソッドの引数に、それより前に宣言された record の
+  メンバーと同じ名前（大文字小文字を無視）を使えません（`Dim` の横の `dim`、
+  op `indices` の横の `indices`）。コンパイルが通るかは宣言の順番で変わります。
+  最初の決定（ローカルセッション1）は `_` を足すルール（`dim_`、`indices_`、`pow__`）
+  と `Dim` → `NumDims` の改名でした。これを **(H12、実測済み)** で置き換えます：
+  `Tch.pas` に `{$modeswitch duplicatelocals}` を足す。これは Delphi モードのうち
+  まさにこれを許す部分だけで、ほかは `objfpc` のままです。FPC 3.2.2 で実測
+  （`tests/compiler/h12_*`、`xfail_h12_*`）：
+  - 引数名や `out` の名前は、前後どちらに宣言されたメンバーとも同じにできる。
+    op `indices` の横の `out indices` も、`pow`/`pow_` の横の引数 `pow` も通る。
+    本体の中では裸の名前が引数、`Self.Dim` がメンバー。
+  - スイッチが要るのはメソッドを宣言するユニット（`Tch.pas` とその `.inc`）だけ。
+    利用側のユニットはどのモードでもよい。
+  - *ローカル変数* がメンバーと同名になるのは `objfpc` では引き続きエラー
+    （これを許すのは `{$mode delphi}` だけ）。手書きの本体がローカル変数で
+    うっかりメンバーを隠すことはない。
+  - *関数* の引数名 `result` は引き続き重複識別子（メンバーではなく戻り値の
+    シンボル）。上の `result_` はそのため。
+  - コンパイラのソースでこのスイッチ（`m_duplicate_names`）を見ているのは
+    `symtable.pas` の3箇所だけ：引数とメンバーの重複チェックと、TP/Delphi の
+    「関数と同名のローカル変数」の扱い。ほかには何も変わらない。
+  結果：生成するシグネチャは PyTorch の引数名をそのまま保ち（`dim`、`indices`、
+  `pow`）、生成器にメンバー向けの接尾辞ロジックはなく、手書きの API は `Dim` を
+  使えます（`NumDims` から戻した）。`Tch.pas` の手書きコードでの注意：メンバーと
+  同名の引数はその本体の中で黙ってメンバーを隠すので、`Self.Member` と書くか、
+  手書きの引数にはメンバーと重ならない名前を付けます。
 - 固定個数の複数テンソルを返す op（246 個、2〜7 個。例：`max_dim` → values、indices）は
   `procedure max_dim(dim: Int64; keepdim: Boolean; out values, indices: TTensor)`
   にします。出力の名前は、`Declarations.yaml` の `returns[].name` があればそれを使い、
@@ -875,9 +894,10 @@ function  CudaIsAvailable: Boolean; function CudaDeviceCount: Integer;
   すでに持っていて、戻り値名の読み取りは小さな追加で済みます。
 - Pascal の生成器は FPC のプログラム（`gen/tchgen.pas`、`instantfpc` で実行可能）で、
   `ops.tsv` を読んで `TchSysGenerated.pas` と2つの `.inc` ファイルを書き出します。
-  Pascal 固有の方針はすべてここが受け持ちます：予約語のエスケープ、引数名の接尾辞、
-  デフォルト引数の範囲、nil ハンドルのチェック、手書きメンバー名の一覧との
-  大文字小文字を無視した衝突チェック。Python/Node は使いません（CLAUDE.md）。
+  Pascal 固有の方針はすべてここが受け持ちます：予約語の `&` エスケープ（op 名も
+  引数名も。`result` → `result_`）、デフォルト引数の範囲、nil ハンドルのチェック、
+  手書きメンバー名の一覧との *op 名* の大文字小文字を無視した衝突チェック
+  （引数名のチェックは不要：4.4、H12）。Python/Node は使いません（CLAUDE.md）。
 - 生成したファイルはコミットするので、OCaml が要るのは libtorch を上げるときだけで、
   tch-fpc のビルドには不要です。
 - 不採用：`torch_api_generated.h` を直接解析する方法。2 章で挙げた型の区別が

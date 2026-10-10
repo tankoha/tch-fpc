@@ -12,20 +12,16 @@ tensor API does not exist yet. Nothing usable yet.
 - Generated ops keep the PyTorch/tch-rs name verbatim in snake_case
   (`t.max_pool2d(...)`, `t.add_(u)`); the hand-written API uses Pascal
   CamelCase (`Shape`, `Kind`, `ToString`).
-- Op names that are Pascal reserved words or modifiers are escaped with
-  `&`: `t.&div(u)`, `t.&var(0)`.
-- **Parameter names may carry trailing underscores** (`dim_`, `indices_`,
-  `pow__`). In `{$mode objfpc}` a method parameter may not share its name
-  with a member of the record, and every op is a member of `TTensor`, so
-  a parameter named like a member (a hand-written method, or another op such
-  as `indices`) gets `_` appended until it is unique. Rust has no such
-  conflict: parameters are plain locals and methods are only reachable as
-  `self.dim()`, so tch-rs keeps `dim: i64` next to `fn dim(&self)`.
-  Parameter names never appear at call sites, so this only shows in
-  signatures.
-- For the same reason the hand-written API avoids common parameter names:
-  the number of dimensions is `NumDims`, not `Dim` (`dim` is a parameter
-  of about 250 ops).
+- Names that are Pascal reserved words or modifiers are escaped with `&`,
+  ops and parameters alike: `t.&div(u)`, `t.&var(0)`, `add_out(&out, ...)`.
+  The one exception is a parameter named `result` (3 ops), which becomes
+  `result_` because `Result` is the function result in Pascal.
+- Parameter names are otherwise verbatim too (`dim`, `indices`, `pow`),
+  even where they equal a `TTensor` member such as `Dim` or the `indices`
+  op. `Tch.pas` enables `{$modeswitch duplicatelocals}` for this, the part
+  of Delphi mode that lets a parameter shadow a member, as Rust does
+  implicitly (parameters are locals, methods are reached as `self.dim()`).
+  Your own units are not affected; the switch lives in `Tch.pas` only.
 
 ## License
 

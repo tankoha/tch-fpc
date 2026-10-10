@@ -224,7 +224,7 @@ begin
   T.max_dim(1, False, V, I);
   Check(TchLiveHandles - L0 = 0,
     'delta 0: previous V and I released by the out call');
-  Check(V.NumDims = 1, 'values has 1 dim');
+  Check(V.Dim = 1, 'values has 1 dim');
 end;
 
 procedure TestH8;

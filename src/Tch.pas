@@ -8,6 +8,12 @@ unit Tch;
 
 {$mode objfpc}{$H+}
 {$modeswitch advancedrecords}
+{ duplicatelocals: a method parameter may have the same name as a TTensor
+  member (dim, indices, pow, ...), as in Delphi mode. Generated ops keep the
+  PyTorch parameter names verbatim because of this (DESIGN.md 4.4, H12).
+  Inside a method body the bare name is the parameter; use Self.X to reach
+  the member. Local variables still may not shadow members. }
+{$modeswitch duplicatelocals}
 
 interface
 
@@ -49,7 +55,7 @@ type
     function Raw: PTorchTensor; inline;
     function IsNil: Boolean; inline;
     function Defined: Boolean;
-    function NumDims: Integer;
+    function Dim: Integer;
     function Shape: TInt64Array;
     function ToString(LineWidth: Integer = 80): AnsiString;
     function DoubleValue(const Index: array of Int64): Double;
@@ -62,9 +68,9 @@ type
     // generated (stand-ins until step 8)
     function add(const other: TTensor): TTensor;
     function mul(const other: TTensor): TTensor;
-    class function cat(const tensors: array of TTensor; dim_: Int64): TTensor;
+    class function cat(const tensors: array of TTensor; dim: Int64): TTensor;
       static;
-    procedure max_dim(dim_: Int64; keepdim: Boolean;
+    procedure max_dim(dim: Int64; keepdim: Boolean;
       out values, indices: TTensor);
     class function ones(const size: array of Int64; options_kind: TKind;
       options_device: Integer): TTensor; static;
@@ -214,9 +220,9 @@ begin
   Result := R <> 0;
 end;
 
-function TTensor.NumDims: Integer;
+function TTensor.Dim: Integer;
 begin
-  TchCheckArg(Self, 'self', 'NumDims');
+  TchCheckArg(Self, 'self', 'Dim');
   Result := at_dim(Raw);
   TchCheck;
 end;
@@ -224,7 +230,7 @@ end;
 function TTensor.Shape: TInt64Array;
 begin
   Result := nil;
-  SetLength(Result, NumDims);
+  SetLength(Result, Dim);
   if Length(Result) > 0 then
   begin
     at_shape(Raw, @Result[0]);
@@ -294,7 +300,7 @@ begin
 end;
 
 class function TTensor.cat(const tensors: array of TTensor;
-  dim_: Int64): TTensor;
+  dim: Int64): TTensor;
 var
   Outs: array[0..0] of PTorchTensor;
   Raws: array of PTorchTensor;
@@ -308,12 +314,12 @@ begin
     Raws[I] := tensors[I].Raw;
   end;
   Outs[0] := nil;
-  atg_cat(@Outs[0], PPTorchTensor(Raws), Length(Raws), dim_);
+  atg_cat(@Outs[0], PPTorchTensor(Raws), Length(Raws), dim);
   TchCheckSlots(@Outs[0], 1);
   Result := TTensor.FromRaw(Outs[0]);
 end;
 
-procedure TTensor.max_dim(dim_: Int64; keepdim: Boolean;
+procedure TTensor.max_dim(dim: Int64; keepdim: Boolean;
   out values, indices: TTensor);
 var
   Outs: array[0..1] of PTorchTensor;
@@ -321,7 +327,7 @@ begin
   TchCheckArg(Self, 'self', 'max_dim');
   Outs[0] := nil;
   Outs[1] := nil;
-  atg_max_dim(@Outs[0], Raw, dim_, Ord(keepdim));
+  atg_max_dim(@Outs[0], Raw, dim, Ord(keepdim));
   TchCheckSlots(@Outs[0], 2);
   values := TTensor.FromRaw(Outs[0]);
   indices := TTensor.FromRaw(Outs[1]);

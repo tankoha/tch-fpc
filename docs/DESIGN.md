@@ -173,9 +173,10 @@ generator needs gen.ml's richer type information (section 5).
 - Library name in one constant: `const LibTch = 'tch';` and
   `external LibTch name 'atg_add'`. Static `external` (link-time) binding,
   not `LoadLibrary` + 2,657 function pointers.
-- Names stay exactly as in C (`atg_add`, `at_free`). Reserved words in
-  parameter names (`out`, `end`, `to`, `result`) are given a `_` suffix
-  (`out_`); parameter names have no ABI meaning.
+- Names stay exactly as in C (`atg_add`, `at_free`). Parameter names stay
+  too; reserved words among them (`out`, `end`, `to`) are escaped with `&`
+  (`&out`), and `result` becomes `result_` (same rule as 4.4). Parameter
+  names have no ABI meaning.
 
 Sketch:
 
@@ -229,7 +230,7 @@ procedure atg_zeros(out__: PPTorchTensor; size_data: PInt64; size_len: cint;
             options_kind, options_device: cint); cdecl; external LibTch;
 procedure atg_narrow(out__: PPTorchTensor; self: PTorchTensor; dim, start,
             length: Int64); cdecl; external LibTch;
-procedure atg_add_out(out__: PPTorchTensor; out_, self, other: PTorchTensor);
+procedure atg_add_out(out__: PPTorchTensor; &out, self, other: PTorchTensor);
             cdecl; external LibTch;
 ```
 
@@ -273,7 +274,7 @@ type
     function Raw: PTorchTensor; inline;      // borrowed; nil if IsNil
     function IsNil: Boolean; inline;         // FHandle = nil
     function Defined: Boolean;               // not IsNil and at_defined <> 0
-    function NumDims: Integer;     // not "Dim": see 4.4, parameter names
+    function Dim: Integer;
     function Shape: TInt64Array;
     function Numel: Int64;
     function Kind: TKind;
@@ -422,7 +423,7 @@ management-operator variant is the escape hatch).
   small. The error slot is thread-local on the C side and we read it on the
   same thread immediately, so threads do not interfere. Helpers used by
   generated bodies are prefixed `Tch` so that no op parameter name
-  (`self`, `out_`, `data`, `index`, ...) can shadow them.
+  (`self`, `&out`, `data`, `index`, ...) can shadow them.
 - Before a call, every non-optional `Tensor` argument (including the
   receiver) is checked for `IsNil`; a nil handle raises
   `ETorchError('undefined tensor passed as <param> to <op>')`. This is the
@@ -599,25 +600,46 @@ temporaries (H1).
   accepts as method names **(H7, resolved in step 7**: `&div`, `&var`,
   `&to`, `&set`, `&repeat`, `&absolute`, `&alias`, `&index` compile and
   are callable as `t.&div(u)`; `absolute`, `alias`, `index` also compile
-  without `&`). Parameter names colliding with reserved
-  words or `Result`: `out` (819 uses), `end` (31), `to` (7), `result` (3);
-  these get a `_` suffix (`out_`, `end_`). Friendlier hand-written aliases
+  without `&`). Parameter names that are reserved words get the same `&`
+  escape: `out` (819 uses), `end` (31), `to` (7) become `&out`, `&end`,
+  `&to`, so the one escape rule covers op names and parameter names alike
+  (verified in H12). The exception is `result` (3 ops:
+  `_linalg_det_result`, `_linalg_solve_ex_result`, `linalg_solve_ex_out`):
+  `&result` is still the identifier `result`, which is the function result
+  symbol, so it becomes `result_`. Friendlier hand-written aliases
   (`DivBy`, `ToDevice`, `Variance`) can be added on top where it matters.
-- **Parameter and out-names vs `TTensor` members (decision, after step
-  6).** In `{$mode objfpc}` a method parameter may not share its name
-  (case-insensitive) with a record member declared before it; whether it
-  compiles depends on declaration order, so the generator never relies on
-  it. Rule: a generated parameter or `out` result name that equals —
-  case-insensitively — any `TTensor` member (hand-written or generated op),
-  a reserved word, or `Result` gets `_` appended, **repeatedly until it is
-  unique**: `dim` → `dim_`, `indices` → `indices_`, and `pow` → `pow__`
-  because `pow_` is itself an in-place op (same for `abs`, `dropout`,
-  `fill`, `negative`, `sign`, `threshold`, `transpose`). Parameter names
-  never appear at call sites, so this costs readability only in
-  signatures. The hand-written API in turn avoids names that are common
-  parameter names: `NumDims`, not `Dim` (`dim` is a parameter of ~250
-  ops). Remaining overlaps with rare parameters (`shape`, `numel`,
-  `device`, `copy`) are left to the suffix rule.
+- **Parameter and out-names vs `TTensor` members (decision, revised in
+  cloud session 3).** In plain `{$mode objfpc}` a method parameter may not
+  share its name (case-insensitive) with a record member declared before
+  it (`dim` next to `Dim`, `indices` next to the `indices` op); whether it
+  compiles depends on declaration order. The first decision (local session
+  1) was a `_` suffix rule (`dim_`, `indices_`, `pow__`) plus renaming
+  `Dim` to `NumDims`. Replaced by **(H12, measured)**: `Tch.pas` adds
+  `{$modeswitch duplicatelocals}`, the part of Delphi mode that allows
+  exactly this, and everything else stays `objfpc`. Measured on FPC 3.2.2
+  (`tests/compiler/h12_*`, `xfail_h12_*`):
+  - A parameter or `out` name may equal any member, declared before or
+    after, including `indices` as an `out` name next to the `indices` op and
+    `pow` next to `pow`/`pow_`. Inside the body the bare name is the
+    parameter and `Self.Dim` reaches the member.
+  - The switch is needed only in the unit that declares the methods
+    (`Tch.pas` and its `.inc` files); user units stay in whatever mode they
+    like.
+  - A *local variable* still may not shadow a member in `objfpc` (that part
+    is only lifted by `{$mode delphi}`), so hand-written bodies cannot
+    shadow a member by accident through a local.
+  - `result` as a *function* parameter is still a duplicate identifier (it
+    is the result symbol, not a member); hence `result_` above.
+  - In the compiler source the switch (`m_duplicate_names`) is consulted in
+    three places of `symtable.pas` only: the parameter-vs-member check and
+    the TP/Delphi "local named like the function" case. Nothing else
+    changes.
+  Consequences: generated signatures keep PyTorch's parameter names verbatim
+  (`dim`, `indices`, `pow`), the generator has no suffix logic for members,
+  and the hand-written API is free to use `Dim` (back from `NumDims`).
+  Pitfall for hand-written code in `Tch.pas`: a parameter named like a
+  member silently hides it in that body, so either write `Self.Member` or
+  give hand-written parameters names that are not members.
 - Fixed multi-tensor results (246 ops, 2 to 7 tensors; e.g. `max_dim` →
   values, indices) become
   `procedure max_dim(dim: Int64; keepdim: Boolean; out values, indices: TTensor)`.
@@ -898,10 +920,12 @@ in the API comment.
   already has the defaults; reading return names is a small addition.
 - The Pascal emitter is an FPC program (`gen/tchgen.pas`, runnable with
   `instantfpc`) that reads `ops.tsv` and writes `TchSysGenerated.pas` and the
-  two `.inc` files. It owns all Pascal-specific policy: reserved-word
-  escaping, parameter suffixes, default-parameter runs, the nil-handle
-  checks, and the case-insensitive collision check against a list of
-  hand-written member names. No Python/Node (CLAUDE.md).
+  two `.inc` files. It owns all Pascal-specific policy: the `&` escaping
+  of reserved words (op and parameter names alike, `result` → `result_`),
+  default-parameter runs, the nil-handle checks, and the case-insensitive
+  collision check of *op names* against a list of hand-written member
+  names (parameter names need no check: 4.4, H12). No Python/Node
+  (CLAUDE.md).
 - Generated files are committed, so OCaml is only needed when bumping
   libtorch, not to build tch-fpc.
 - Rejected: parsing `torch_api_generated.h` directly — it loses the type

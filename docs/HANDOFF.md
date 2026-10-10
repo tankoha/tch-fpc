@@ -29,6 +29,25 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
   `Forward(X, Train = False)`) and 4.7 (grad mode). Unverified FPC 3.2.2
   behaviour is marked **(H1)**–**(H11)** in DESIGN.md and listed below.
 
+## Cloud session 3 (2026-10-10): parameter-name rule revised
+
+- **Parameter names vs members, revised (H12).** The `_` suffix rule from
+  local session 1 is replaced by `{$modeswitch duplicatelocals}` in
+  `Tch.pas`; generated parameter and `out` names stay verbatim (`dim`,
+  `indices`, `pow`), `NumDims` is `Dim` again, and reserved words use the
+  same `&` escape as op names (`&out`, `&end`, `&to`); only `result`
+  (3 ops) becomes `result_`. Measured on FPC 3.2.2 in the cloud container:
+  `tests/compiler/h12_duplicatelocals.pas` and three `xfail_h12_*.pas`;
+  the whole `tests/compiler/run.sh` passes. Details and the compiler-source
+  check in DESIGN.md 4.4; README (en/jp) updated.
+- Changed code: `src/Tch.pas` (switch, `Dim`, stand-ins use `dim`),
+  `tests/ownership/ownership_test.pas` (`V.Dim`). The ownership test needs
+  libtorch and was **not** re-run in the cloud; run it locally once
+  (`Tch.pas` itself compiles).
+- Still open from the hand-back below: items 1 (ops.tsv schema, tchgen.pas
+  output per op shape) and 2 (error message format, `TKind` 27-45,
+  `TORCH_WARN`, default-argument scope, `FromArray` Int32).
+
 ## Handing back to the cloud (2026-10-10, end of local session 1)
 
 Steps 1-7 are done and every hypothesis H1-H11 is measured (results in
@@ -43,9 +62,10 @@ in the cloud. Asked of the next cloud session:
      shape (fixed-N, dynamic, scalar, nothing), with the stand-ins in
      `src/Tch.pas` (`add`, `cat`, `max_dim`, `ones`) as the reference
      bodies that already work;
-   - naming: the parameter/out-name suffix rule (DESIGN 4.4), the `&`
-     escapes, and the op-name check against our hand-written members (see
-     the tch-rs notes under "Parameter names vs `TTensor` members").
+   - naming: the parameter/out-name rule (DESIGN 4.4; revised in cloud
+     session 3, see above), the `&` escapes, and the op-name check against
+     our hand-written members (see the tch-rs notes under "Parameter names
+     vs `TTensor` members").
 2. **Decide the open questions the generator touches:** native error
    message format (`Message` vs `Detail`), `TKind` 27-45, `TORCH_WARN`
    handling (patch `at_autocast_*` and/or a warning handler), default
@@ -54,7 +74,7 @@ in the cloud. Asked of the next cloud session:
 3. Update DESIGN/HANDOFF (en + jp) at the end, as usual.
 
 Local state the design can rely on: `src/TchSys.pas`, `src/Tch.pas`
-(minimal `TTensor`, `NumDims`, `TchLiveHandles`), tests under `tests/`,
+(minimal `TTensor`, `Dim`, `TchLiveHandles`), tests under `tests/`,
 build commands in each test's header and in "Local progress".
 
 ## Local progress (2026-10-10)
@@ -128,8 +148,8 @@ build commands in each test's header and in "Local progress".
   - **(H8) resolved:** receiver passed as `out` gives `ETorchError`; a
     previous value in an `out` variable is released.
   - New problem found (see open questions): generated parameter names
-    collide with `TTensor` members (`dim` vs `Dim`). The stand-ins use
-    `dim_` for now.
+    collide with `TTensor` members (`dim` vs `Dim`). The stand-ins used
+    `dim_` until cloud session 3 (H12).
 
 - **Step 7 done.** `tests/compiler/run.sh` (h*.pas must compile and run,
   xfail_*.pas must be rejected, plus a generated big record). All as
@@ -221,13 +241,17 @@ build commands in each test's header and in "Local progress".
    - A record with ~2,650 methods pulled in via `{$I}` inside the record
      declaration compiles in reasonable time; `{$modeswitch advancedrecords}`
      properties on records if the `T[i]` sugar is wanted.
+   - **(H12, resolved in cloud session 3)** `{$modeswitch duplicatelocals}`
+     lets a method parameter share a member's name in `objfpc`; `&out` as
+     a parameter name compiles; `result` as a function parameter and a
+     local variable named like a member are still rejected.
 8. **Generator.** Add `ops.tsv` output to gen.ml (exported name, kind,
    receiver, result shape, args with defaults, return names); write
    `gen/tchgen.pas`; generate `TchSysGenerated.pas` and the `.inc` files;
    compile everything. Include the case-insensitive collision check against
    hand-written names (`data`, `grad`, `detach`, `to_device`, `clone`, ...).
-   Apply the parameter/out-name suffix rule (DESIGN.md 4.4) against all
-   members, reserved words and `Result`.
+   Parameter and out-names need no collision handling (H12); escape
+   reserved words with `&` and rename `result` to `result_` (DESIGN.md 4.4).
 
 ## Open questions
 
@@ -246,15 +270,18 @@ build commands in each test's header and in "Local progress".
   functions in the fork to the non-deprecated device-taking API, and/or
   install a `c10::WarningHandler` from libtch that forwards to a Pascal
   callback.
-- **Parameter names vs `TTensor` members: decided** (2026-10-10, user):
-  the generator appends `_` (repeatedly, until unique) to colliding
-  parameter/out names, and hand-written members avoid common parameter
-  names (`Dim` → `NumDims`, done in `src/Tch.pas`). Rule and numbers in
-  DESIGN.md 4.4.
+- **Parameter names vs `TTensor` members: decided, then revised**
+  (2026-10-10, user). First decision (local session 1): append `_` until
+  unique, rename `Dim` → `NumDims`. Revised in cloud session 3 (H12):
+  `{$modeswitch duplicatelocals}` in `Tch.pas` removes the collision, names
+  stay verbatim, `Dim` is back, reserved words get `&`, `result` →
+  `result_`. Rule, measurements and the compiler-source check in DESIGN.md
+  4.4.
   Why tch-rs never needed this: in Rust, parameters are plain locals and
   methods are reachable only as `self.dim()` / `Tensor::dim`, so
-  `fn dim(&self)` and ~250 ops with `dim: i64` coexist. (`{$mode delphi}`
-  behaves like Rust here.) What tch-rs *does* handle, and step 8 must
+  `fn dim(&self)` and ~250 ops with `dim: i64` coexist. (`duplicatelocals`
+  is the part of `{$mode delphi}` that behaves like Rust here.) What
+  tch-rs *does* handle, and step 8 must
   check against our own names: op-name collisions in gen.ml's
   `replace_map` (`where`/`unsafe` for Rust keywords; `view`, `to_device`,
   `t` → `tr` for hand-written methods) and `prefixed_functions` (`g_`

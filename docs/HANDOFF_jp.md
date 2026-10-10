@@ -31,6 +31,24 @@
   `Forward(X, Train = False)` は1つに）と 4.7（勾配モード）を追加しました。
   FPC 3.2.2 の未検証の挙動は DESIGN.md で **(H1)**〜**(H11)** と印を付け、下に並べています。
 
+## クラウドセッション3（2026-10-10）：引数名のルールを改訂
+
+- **引数名とメンバーの衝突、改訂（H12）。** ローカルセッション1の `_` を足す
+  ルールをやめ、`Tch.pas` に `{$modeswitch duplicatelocals}` を入れる。生成する
+  引数名・`out` の名前はそのまま（`dim`、`indices`、`pow`）、`NumDims` は `Dim` に
+  戻し、予約語は op 名と同じ `&` エスケープ（`&out`、`&end`、`&to`）。`result`
+  （3 op）だけ `result_`。クラウドのコンテナの FPC 3.2.2 で実測：
+  `tests/compiler/h12_duplicatelocals.pas` と `xfail_h12_*.pas` 3本。
+  `tests/compiler/run.sh` 全体が通る。詳細とコンパイラのソースの確認は
+  DESIGN_jp.md の 4.4。README（en/jp）も更新。
+- 変えたコード：`src/Tch.pas`（スイッチ、`Dim`、仮の op は `dim`）、
+  `tests/ownership/ownership_test.pas`（`V.Dim`）。ownership テストは libtorch が
+  要るのでクラウドでは **再実行していない**。ローカルで一度走らせること
+  （`Tch.pas` 自体はコンパイルできる）。
+- 下の引き継ぎのうち、まだ残っているもの：1（ops.tsv の形式、tchgen.pas の
+  op の形ごとの出力）と 2（エラーメッセージの形、`TKind` 27〜45、`TORCH_WARN`、
+  デフォルト引数の範囲、`FromArray` の Int32）。
+
 ## クラウドへの引き継ぎ（2026-10-10、ローカルセッション1の終了時点）
 
 手順1〜7は完了し、仮説 H1〜H11 はすべて実測済み（結果は下の「ローカルの進捗」と、
@@ -43,7 +61,8 @@ DESIGN_jp.md の各 (Hn) の横）。手順8のための OCaml の環境はロ�
    - `gen/tchgen.pas` の構成と、op の形（固定個数、可変個数、スカラー、戻り値なし）ごとに
      出力する Pascal の正確な形。`src/Tch.pas` の仮の op（`add`、`cat`、`max_dim`、
      `ones`）が、すでに動いている本体の見本になる。
-   - 名前：引数名・結果名の `_` のルール（DESIGN_jp.md の 4.4）、`&` のエスケープ、
+   - 名前：引数名・結果名のルール（DESIGN_jp.md の 4.4。クラウドセッション3で改訂、
+     上を参照）、`&` のエスケープ、
      手書きのメンバーと op 名の衝突チェック（「引数名と `TTensor` のメンバーの衝突」の
      tch-rs についてのメモを参照）。
 2. **生成器に関わる未解決の論点を決める：** ネイティブのエラーメッセージの形
@@ -53,7 +72,7 @@ DESIGN_jp.md の各 (Hn) の横）。手順8のための OCaml の環境はロ�
 3. 最後にいつもどおり DESIGN/HANDOFF（英語版と jp）を更新する。
 
 設計の前提にしてよいローカルの状態：`src/TchSys.pas`、`src/Tch.pas`（最小限の
-`TTensor`、`NumDims`、`TchLiveHandles`）、`tests/` 以下のテスト。ビルド方法は各テストの
+`TTensor`、`Dim`、`TchLiveHandles`）、`tests/` 以下のテスト。ビルド方法は各テストの
 先頭と「ローカルの進捗」にある。
 
 ## ローカルの進捗（2026-10-10）
@@ -124,7 +143,8 @@ DESIGN_jp.md の各 (Hn) の横）。手順8のための OCaml の環境はロ�
   - **(H8) 解決：** レシーバーを `out` に渡すと `ETorchError`。`out` に渡した変数の
     以前の値は解放される。
   - 新しく見つかった問題（未解決の論点を参照）：生成する引数名が `TTensor` の
-    メンバーと衝突する（`dim` と `Dim`）。仮の op では当面 `dim_` にしている。
+    メンバーと衝突する（`dim` と `Dim`）。仮の op はクラウドセッション3（H12）まで
+    `dim_` にしていた。
 
 - **手順7 完了。** `tests/compiler/run.sh`（h*.pas はコンパイルできて動くこと、
   xfail_*.pas は拒否されること、それに生成した大きな record）。すべて想定どおり。
@@ -217,6 +237,10 @@ DESIGN_jp.md の各 (Hn) の横）。手順8のための OCaml の環境はロ�
    - `{$I}` で record 宣言の中に約 2,650 個のメソッドを取り込んでも、妥当な時間で
      コンパイルできるか。`T[i]` の糖衣が欲しければ、`{$modeswitch advancedrecords}` の
      record でプロパティが使えるか。
+   - **(H12、クラウドセッション3で解決)** `{$modeswitch duplicatelocals}` で、
+     `objfpc` のままメソッドの引数にメンバーと同じ名前を使える。引数名 `&out` も
+     コンパイルできる。関数の引数名 `result` と、メンバーと同名のローカル変数は
+     引き続き拒否される。
 8. **生成器。**
    - gen.ml に `ops.tsv` の出力を追加する（公開名、種類、レシーバー、結果の形、
      デフォルト値付きの引数、戻り値名）。
@@ -224,8 +248,8 @@ DESIGN_jp.md の各 (Hn) の横）。手順8のための OCaml の環境はロ�
      全体をコンパイルする。
    - 手書きの名前（`data`、`grad`、`detach`、`to_device`、`clone` など）との、
      大文字小文字を無視した衝突チェックを入れる。
-   - 引数名・out の結果名に、すべてのメンバー・予約語・`Result` に対する `_` のルール
-     （DESIGN_jp.md の 4.4）を適用する。
+   - 引数名・out の結果名に衝突の処理は不要（H12）。予約語は `&` でエスケープし、
+     `result` は `result_` にする（DESIGN_jp.md の 4.4）。
 
 ## 未解決の論点
 
@@ -243,13 +267,15 @@ DESIGN_jp.md の各 (Hn) の横）。手順8のための OCaml の環境はロ�
   `at::autocast::is_enabled`/`set_enabled`）。案：フォークでこの2つの関数を
   デバイスを取る非推奨でない API に直す。または libtch から `c10::WarningHandler`
   を設定して Pascal のコールバックに渡す（両方でもよい）。
-- **引数名と `TTensor` のメンバーの衝突：決定済み**（2026-10-10、ユーザー判断）：
-  生成器は衝突する引数名・out の結果名に（重ならなくなるまで）`_` を足し、手書きの
-  メンバーはよくある引数名を避ける（`Dim` → `NumDims`。`src/Tch.pas` に反映済み）。
-  ルールと数字は DESIGN_jp.md の 4.4。
+- **引数名と `TTensor` のメンバーの衝突：決定後に改訂**（2026-10-10、ユーザー判断）。
+  最初の決定（ローカルセッション1）：重ならなくなるまで `_` を足し、`Dim` → `NumDims`。
+  クラウドセッション3で改訂（H12）：`Tch.pas` の `{$modeswitch duplicatelocals}` で
+  衝突そのものがなくなり、名前はそのまま、`Dim` に戻し、予約語は `&`、`result` →
+  `result_`。ルール、実測、コンパイラのソースの確認は DESIGN_jp.md の 4.4。
   tch-rs でこれが要らなかった理由：Rust では引数はただのローカル変数で、メソッドは
   `self.dim()` や `Tensor::dim` の形でしか呼べないので、`fn dim(&self)` と `dim: i64` を
-  持つ約250の op が共存できる（`{$mode delphi}` はこの点で Rust と同じ振る舞い）。
+  持つ約250の op が共存できる（`duplicatelocals` は `{$mode delphi}` のうち、この点で
+  Rust と同じ振る舞いをする部分）。
   tch-rs が *対処している* のは op 名の衝突で、手順8ではこちらの名前に対して同じ
   チェックが必要：gen.ml の `replace_map`（Rust の予約語の `where`/`unsafe`、手書きの
   メソッドと重なる `view`、`to_device`、`t` → `tr`）と `prefixed_functions`（素の名前を

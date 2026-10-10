@@ -126,5 +126,10 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 - **Windows / macOS.** Not designed yet beyond `cdecl` and `tchf_free`.
   Windows additionally needs symbol export from `tch.dll`
   (`--export-all-symbols` or a `.def` file).
+- **Release packaging.** Generated files (`ops.tsv`, `torch_api_generated.*`,
+  `TchSysGenerated.pas`, `.inc`) are committed, so every tag's source archive
+  builds without OCaml. Open: whether releases also attach prebuilt
+  `libtch.so`/`tch.dll` per libtorch version and platform, or users always
+  build it with CMake. libtorch itself is never bundled.
 - **Going public.** The license is decided (below); the repo stays private
   until the user decides to publish it.

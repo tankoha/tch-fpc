@@ -130,5 +130,10 @@
 - **Windows / macOS。** `cdecl` と `tchf_free` 以外はまだ設計していない。Windows では
   さらに `tch.dll` からのシンボルのエクスポートが必要（`--export-all-symbols` か
   `.def` ファイル）。
+- **リリースの中身。** 生成ファイル（`ops.tsv`、`torch_api_generated.*`、
+  `TchSysGenerated.pas`、`.inc`）はコミットされるので、どのタグのソースアーカイブも
+  OCaml なしでビルドできる。未決：リリースに libtorch のバージョン・プラットフォーム別の
+  ビルド済み `libtch.so`/`tch.dll` も添付するか、利用者が常に CMake でビルドするか。
+  libtorch 本体は同梱しない。
 - **公開。** ライセンスは決定済み（上記）。リポジトリはユーザーが公開を決めるまで
   非公開のまま。

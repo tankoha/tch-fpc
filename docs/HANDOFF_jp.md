@@ -130,6 +130,15 @@
 - **Windows / macOS。** `cdecl` と `tchf_free` 以外はまだ設計していない。Windows では
   さらに `tch.dll` からのシンボルのエクスポートが必要（`--export-all-symbols` か
   `.def` ファイル）。
+- **ROCm（保留。まず CPU）。** 手順2〜7は CPU 版 libtorch で進める。手元の GPU は
+  RX 9070（Navi 48、gfx1201）と内蔵の Raphael で、システムに ROCm は入っていない。
+  libtorch 2.13.0 の ROCm 版は `+rocm7.1` のみ（約5.8GB、2026-10-10 確認）。
+  未測定の見込み：ROCm 版は HIP を CUDA として見せる（`cuda` デバイス、
+  `torch::cuda::is_available`）ので、C API・`TDevice`・`CudaIsAvailable` は変更不要。
+  `libtorch-rocm/` として追加するときに確認すること：`torch_hip` を
+  `-Wl,--no-as-needed` でリンクする（libtch は直接参照しない）、zip に gfx1201 の
+  カーネルが入っているか、内蔵 GPU の列挙（`HIP_VISIBLE_DEVICES`）、同梱の依存だけで
+  システムの ROCm なしに動くか。DESIGN.md の1章は `libtorch_cuda.so` しか書いていない。
 - **リリースの中身。** 生成ファイル（`ops.tsv`、`torch_api_generated.*`、
   `TchSysGenerated.pas`、`.inc`）はコミットされるので、どのタグのソースアーカイブも
   OCaml なしでビルドできる。未決：リリースに libtorch のバージョン・プラットフォーム別の

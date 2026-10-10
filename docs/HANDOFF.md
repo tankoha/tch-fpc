@@ -126,6 +126,16 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 - **Windows / macOS.** Not designed yet beyond `cdecl` and `tchf_free`.
   Windows additionally needs symbol export from `tch.dll`
   (`--export-all-symbols` or a `.def` file).
+- **ROCm (deferred; CPU first).** Steps 2-7 use the CPU libtorch. The local
+  GPU is an RX 9070 (Navi 48, gfx1201) plus a Raphael iGPU; no system ROCm.
+  libtorch 2.13.0 for ROCm exists only as `+rocm7.1` (~5.8 GB, checked
+  2026-10-10). Expected, unmeasured: the ROCm build presents HIP as CUDA
+  (`cuda` device, `torch::cuda::is_available`), so the C API, `TDevice` and
+  `CudaIsAvailable` stay unchanged. To check when added as `libtorch-rocm/`:
+  link `torch_hip` with `-Wl,--no-as-needed` (libtch never references it
+  directly); gfx1201 kernels present in the zip; iGPU enumeration
+  (`HIP_VISIBLE_DEVICES`); whether the bundled deps suffice without system
+  ROCm. DESIGN.md section 1 lists only `libtorch_cuda.so`.
 - **Release packaging.** Generated files (`ops.tsv`, `torch_api_generated.*`,
   `TchSysGenerated.pas`, `.inc`) are committed, so every tag's source archive
   builds without OCaml. Open: whether releases also attach prebuilt

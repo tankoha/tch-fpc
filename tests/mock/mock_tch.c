@@ -1,6 +1,6 @@
 /* Mock libtch for testing the generated Pascal layer without libtorch
    (cloud sessions, CI). Implements the handful of at_, ats_ and atg_ entry
-   points that tests/mock/mock_test.pas exercises on a tiny CPU "tensor"
+   points that tests/mock/mock_test.pas and nn_mock_test.pas exercise on a tiny CPU "tensor"
    (double data, up to 8 dims); every other atg_ function is a generated
    stub that reports "mock: not implemented" through the error slot
    (gen_stubs.sh). Built by tests/mock/run.sh into build/mock/libtch.so.
@@ -17,6 +17,7 @@ typedef struct {
   int64_t numel;
   double *data;
   int kind;
+  int requires_grad;
 } mock_tensor;
 
 typedef struct {
@@ -337,14 +338,184 @@ void at_copy_data(tensor t, void *vs, size_t numel, size_t elt_size_in_bytes) {
   (void)t; (void)vs; (void)numel; (void)elt_size_in_bytes; mock_unimpl("at_copy_data");
 }
 tensor at_shallow_clone(tensor t) { (void)t; mock_unimpl("at_shallow_clone"); return NULL; }
-void at_copy_(tensor dst, tensor src) { (void)dst; (void)src; mock_unimpl("at_copy_"); }
 void at_backward(tensor t, int keep_graph, int create_graph) {
   (void)t; (void)keep_graph; (void)create_graph; mock_unimpl("at_backward");
 }
-int at_requires_grad(tensor t) { (void)t; mock_unimpl("at_requires_grad"); return -1; }
-int at_grad_set_enabled(int b) { (void)b; mock_unimpl("at_grad_set_enabled"); return -1; }
 void at_manual_seed(int64_t seed) { (void)seed; }
 int at_get_num_threads(void) { return 1; }
 void at_set_num_threads(int n_threads) { (void)n_threads; }
 int atc_cuda_device_count(void) { return 0; }
 int atc_cuda_is_available(void) { return 0; }
+
+/* --- nn support (tests/mock/nn_mock_test.pas, DESIGN.md 4.6.7) ---
+   In-place ops modify self and hand back a fresh copy (libtorch returns a
+   second handle to the same tensor; the Pascal side discards it). */
+
+static int grad_enabled = 1;
+int mock_grad_enabled(void) { return grad_enabled; }
+int at_grad_set_enabled(int b) { int prev = grad_enabled; grad_enabled = b != 0; return prev; }
+int at_requires_grad(tensor t) { return ((mock_tensor *)t)->requires_grad; }
+
+/* converts like copy_: same element count required */
+void at_copy_(tensor dst, tensor src) {
+  mock_tensor *d = dst, *s = src;
+  if (d->numel != s->numel) { set_err("mock: copy_ size mismatch"); return; }
+  memcpy(d->data, s->data, s->numel * sizeof(double));
+}
+
+void atg_set_requires_grad(tensor *out__, tensor self, int r) {
+  mock_tensor *m = self;
+  m->requires_grad = r != 0;
+  out__[0] = copy_of(m);
+}
+
+/* self takes new_data's shape, kind and values */
+void atg_set_data(tensor self, tensor new_data) {
+  mock_tensor *d = self, *s = new_data;
+  free(d->data);
+  d->ndim = s->ndim;
+  memcpy(d->dims, s->dims, sizeof d->dims);
+  d->numel = s->numel;
+  d->kind = s->kind;
+  d->data = malloc((s->numel ? s->numel : 1) * sizeof(double));
+  memcpy(d->data, s->data, s->numel * sizeof(double));
+}
+
+void atg_fill_(tensor *out__, tensor self, scalar value) {
+  mock_tensor *m = self;
+  double v = scalar_value(value);
+  for (int64_t i = 0; i < m->numel; i++) m->data[i] = v;
+  out__[0] = copy_of(m);
+}
+
+/* records the bounds; fills with the midpoint */
+static double last_uniform_from = 0, last_uniform_to = 0;
+double mock_last_uniform_from(void) { return last_uniform_from; }
+double mock_last_uniform_to(void) { return last_uniform_to; }
+void atg_uniform_(tensor *out__, tensor self, double from, double to) {
+  mock_tensor *m = self;
+  last_uniform_from = from;
+  last_uniform_to = to;
+  for (int64_t i = 0; i < m->numel; i++) m->data[i] = (from + to) / 2;
+  out__[0] = copy_of(m);
+}
+
+/* save: records the names and the file */
+#define MOCK_MAX_SAVED 16
+static char saved_names[MOCK_MAX_SAVED][64];
+static int saved_count = -1;
+static char saved_file[256];
+int mock_saved_count(void) { return saved_count; }
+const char *mock_saved_name(int i) { return saved_names[i]; }
+const char *mock_saved_file(void) { return saved_file; }
+void at_save_multi(tensor *tensors, char **tensor_names, int ntensors, char *filename) {
+  saved_count = ntensors;
+  for (int i = 0; i < ntensors && i < MOCK_MAX_SAVED; i++) {
+    if (!tensors[i]) { set_err("mock: nil tensor in save"); return; }
+    snprintf(saved_names[i], sizeof saved_names[i], "%s", tensor_names[i]);
+  }
+  snprintf(saved_file, sizeof saved_file, "%s", filename);
+}
+
+/* load: calls back with a|b|t2 = [7, 7, 7] and t1 = [42, 42, 42, 42].
+   File name containing "err_after_first": one callback, then an error.
+   "nil_tensor": a NULL tensor first (the Pascal callback fails), then t1. */
+static int last_load = 0, last_load_device = 99;
+int mock_last_load(void) { return last_load; }
+int mock_last_load_device(void) { return last_load_device; }
+static mock_tensor *filled(int n, double v) {
+  int64_t d[1] = { n };
+  mock_tensor *m = mk(1, d, 6);
+  for (int i = 0; i < n; i++) m->data[i] = v;
+  return m;
+}
+static void load_common(char *filename, void *data, void (*f)(void *, char *, tensor)) {
+  if (strstr(filename, "nil_tensor")) {
+    f(data, "x", NULL);
+    f(data, "t1", filled(4, 42));
+    return;
+  }
+  f(data, "a|b|t2", filled(3, 7));
+  if (strstr(filename, "err_after_first")) { set_err("mock: load failed"); return; }
+  f(data, "t1", filled(4, 42));
+}
+void at_load_callback_with_device(char *filename, void *data, void (*f)(void *, char *, tensor), int device_id) {
+  last_load = 1; last_load_device = device_id;
+  load_common(filename, data, f);
+}
+void at_loadz_callback_with_device(char *filename, void *data, void (*f)(void *, char *, tensor), int device_id) {
+  last_load = 2; last_load_device = device_id;
+  load_common(filename, data, f);
+}
+
+/* optimizers: counters only */
+#define MOCK_MAX_GROUPS 8
+typedef struct {
+  int kind;                       /* 0 sgd, 1 adam, 2 adamw, 3 rmsprop */
+  int adds[MOCK_MAX_GROUPS];
+  int ngroups;
+  int zero_grads, steps;
+  double lr;
+} mock_opt;
+static mock_opt *last_opt = NULL;
+static int live_opts = 0;
+int mock_live_opts(void) { return live_opts; }
+int mock_opt_kind(void) { return last_opt ? last_opt->kind : -1; }
+int mock_opt_adds(int group) { return last_opt ? last_opt->adds[group] : -1; }
+int mock_opt_groups(void) { return last_opt ? last_opt->ngroups : -1; }
+int mock_opt_zero_grads(void) { return last_opt ? last_opt->zero_grads : -1; }
+int mock_opt_steps(void) { return last_opt ? last_opt->steps : -1; }
+double mock_opt_lr(void) { return last_opt ? last_opt->lr : -1; }
+static optimizer new_opt(int kind, double lr) {
+  if (lr < 0) { set_err("Invalid learning rate (mock)"); return NULL; }
+  mock_opt *o = calloc(1, sizeof *o);
+  o->kind = kind;
+  o->lr = lr;
+  last_opt = o;
+  live_opts++;
+  return o;
+}
+optimizer ato_sgd(double learning_rate, double momentum, double dampening, double weight_decay, int nesterov) {
+  (void)momentum; (void)dampening; (void)weight_decay; (void)nesterov;
+  return new_opt(0, learning_rate);
+}
+optimizer ato_adam(double learning_rate, double beta1, double beta2, double weight_decay, double eps, bool amsgrad) {
+  (void)beta1; (void)beta2; (void)weight_decay; (void)eps; (void)amsgrad;
+  return new_opt(1, learning_rate);
+}
+optimizer ato_adamw(double learning_rate, double beta1, double beta2, double weight_decay, double eps, bool amsgrad) {
+  (void)beta1; (void)beta2; (void)weight_decay; (void)eps; (void)amsgrad;
+  return new_opt(2, learning_rate);
+}
+optimizer ato_rms_prop(double learning_rate, double alpha, double eps, double weight_decay, double momentum, int centered) {
+  (void)alpha; (void)eps; (void)weight_decay; (void)momentum; (void)centered;
+  return new_opt(3, learning_rate);
+}
+void ato_add_parameters(optimizer t, tensor p, size_t group) {
+  mock_opt *o = t;
+  (void)p;
+  if (group >= MOCK_MAX_GROUPS) { set_err("mock: too many groups"); return; }
+  o->adds[group]++;
+  if ((int)group + 1 > o->ngroups) o->ngroups = (int)group + 1;
+}
+/* like param_groups().at(group) */
+static int group_ok(mock_opt *o, size_t group) {
+  if ((int)group >= o->ngroups) { set_err("vector::_M_range_check (mock)"); return 0; }
+  return 1;
+}
+void ato_set_learning_rate(optimizer t, double learning_rate) { ((mock_opt *)t)->lr = learning_rate; }
+void ato_set_learning_rate_group(optimizer t, size_t group, double learning_rate) {
+  (void)learning_rate; group_ok(t, group);
+}
+void ato_set_momentum(optimizer t, double momentum) { (void)t; (void)momentum; }
+void ato_set_momentum_group(optimizer t, size_t group, double momentum) { (void)momentum; group_ok(t, group); }
+void ato_set_weight_decay(optimizer t, double weight_decay) { (void)t; (void)weight_decay; }
+void ato_set_weight_decay_group(optimizer t, size_t group, double weight_decay) { (void)weight_decay; group_ok(t, group); }
+void ato_zero_grad(optimizer t) { ((mock_opt *)t)->zero_grads++; }
+void ato_step(optimizer t) { ((mock_opt *)t)->steps++; }
+void ato_free(optimizer t) {
+  if (!t) return;
+  if (t == last_opt) last_opt = NULL;
+  free(t);
+  live_opts--;
+}

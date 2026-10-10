@@ -4,6 +4,121 @@
 
 再開するときは最初にこれを読んでください。決定事項と理由は [DESIGN_jp.md](DESIGN_jp.md) にあります。
 
+## クラウドセッション5（2026-10-10）：JIT を設計、`FromArray` を改訂、ローカルセッション3を確認
+
+下の依頼（「クラウドへの引き継ぎ、ローカルセッション3の終了時点」）の項目1〜3に
+回答しました。項目4（マイルストーン3のレイヤー、CUDA/ROCm）には手を付けていません。
+設計のみ：何もコミットしておらず、スクラッチパッドの外にコードは書いていません。
+要約：
+
+1. **JIT（DESIGN 4.6.8）。** L2：`PTorchModule`、`PTorchIValue`、そこに列挙した 21 個の
+   `atm_*`/`at_set_graph_executor_optimize` と 31 個の `ati_*` の external
+   （`atm_named_parameters` は `TTorchLoadCallback` を再利用）。宣言しないもの：
+   TorchScript のオブジェクト（タグ 14：`ati_object_*`、`ati_clone`、`atm_create_class_`、
+   テスト `jit6`/`jit_double_free`、`foo6.pt`/`foo7.pt` — 参照カウント付きハンドルが要る
+   ので後のマイルストーン）と `atm_fuser_cuda_*`（CUDA）。`TIValue`：タグの値 = `ati_tag`
+   の 0〜13 と入力専用の `ivStringList`/`ivDevice`。静的コンストラクタ、`TTensor`/`Int64`/
+   `Double`/`Boolean`/`String` からの暗黙の `:=`、`As*`/`Item`/`Key`/`Value` アクセサ。
+   `ToC`（呼び出し側が解放）／`FromC`（消費する）は nil 初期化した子のスロットと
+   `finally` での後始末。`GenericDict` は平坦なキー／値の `Items`。`TJitModule`：
+   `Create(file[, device])`、`CreateFromStream`、`CreateByTracing`、`CreateEmpty` +
+   `RegisterParameter` + `Define`（フォークの追加 `atm_create`/`atm_register_parameter`/
+   `atm_define`：`Module::define`、`register_parameter`、`training` 属性の上の1行関数3つ）、
+   `Forward`/`Method`（テンソル）、`ForwardIV`/`MethodIV`（ivalue）、`SetEval`/`SetTrain`、
+   `ToDevice(device, kind)`、`Save`、`NamedParameters`（4.6.3 のトランポリンを `TchJit` に
+   複製）、`Jit*` のグローバル関数。`TTrainableJitModule = class(TModule)`：
+   `atm_load_on_device(P.Device)`、`P.Add('.'→'_' した名前, T, T.RequiresGrad)`、ハンドルは
+   共有。`Forward(X, Train)` は `Train` が変わったときに `atm_train`/`atm_eval` で適用する
+   （明示した差異：tch-rs は無視する）。**テスト資材：** tch-rs の `tests/foo*.pt` を
+   `tests/jit/models/` に取り込む（ライセンスファイルを隣に）**かつ**、パラメータ付き／
+   `self.training` のモジュールはテスト内で TorchScript のソースから作る。トレースだけでは
+   パラメータを作れない。手計算できる数値を持つ13のテストグループは 4.6.8 に。
+2. **`FromArray`（DESIGN 4.3）。** `Single` のオーバーロードを外す。`Double`/`Int64`/
+   `Byte`/`Boolean` のオーバーロードは末尾に自然な既定値の `AKind` を持つ（`kFloat`/
+   `kInt64`/`kUInt8`/`kBool`）。`Single` のバッファには `FromSingleArray`
+   （`FromInt32Array` と同様）。実測：これですべての実数リテラルが `Double` に解決する
+   （既定で float32 のテンソル。PyTorch の規則で、Python と同じビット列）。`[1, 2]` は
+   `Int64` のまま。リテラル内の `Single` 変数は変換されるが、`array of Single` の変数には
+   名前付きの関数が要る。
+3. **ローカルセッション3の確認。** lr 1e-10：`‖g‖² = 80.955² + 8.974² = 6634.2`、
+   `49 · 1e-10 · 6634.2 = 3.25e-5`、確認。実測の `-3.24e-5` は 23 付近の loss の float32 の
+   分解能（1.9e-6）の範囲内。4.6.7 テスト7は tch-rs の *add* / *add_partial* の構成
+   （`t123` は1回）に訂正。`TVarPath.Group`、`FullName` の検査（`TryGet` は `.`/`|` で
+   例外）、`AddEntry` の nil 検査を承認。`CreateRaw` は private のまま。警告 3018 は
+   `{$push}{$warn 3018 off} … {$pop}` で消す（実測：`strict private` でも警告は出る）。
+   追加テストはすべて 4.6.7 に採用。1つ追加予定
+   （`save_and_load_partial_var_store_incomplete_file` の半精度の後半）。
+
+**クラウドでの計測（FPC 3.2.2。スクラッチパッドのみ）：**
+- M4：オープン配列リテラルと `FromArray` のオーバーロードの組（表は 4.3）：実数リテラルが
+  `Single` になるのは binary32 で正確に表せるときだけ — `[1.0, 2.0]`、`[2.5]`、
+  `[1.0, 0.1]` は `Single` を選び、`[0.9, -1.9]`、`[3.14]`、`[0.1]` は曖昧。`Single` の
+  オーバーロードがなければすべて `Double` に解決。`AKind` の既定値は解決を変えない。
+- M5：明示したタグ値を持つ `TIValue` record（`TIValueTag(12) = ivGenericList`）、入れ子の
+  タプル、`Int64`/`Double`/`Boolean`/`String`/record からの暗黙の `:=`。
+  **`[T, 42, 1.5]` はこれらの演算子を通して `array of TIValue` 引数に要素ごとに
+  変換される**。`SizeOf(Boolean) = 1`。
+- M6：FPC は `private` と `strict private` のコンストラクタに `(3018) Constructor should
+  be public` と警告する。`{$push}{$warn 3018 off} … {$pop}` で消える。
+- M7：フォークの `torch_api.{h,cpp}` の `atm_*`/`ati_*` の領域は上流 4227b89b と同一
+  （`diff`）。`foo*.pt` は zip 形式バージョン3で、その TorchScript（`code/__torch__.py`）
+  は 4.6.8 に要約。
+- M8：4.6.8 のインターフェース全体（`TIValue`、`TJitModule`、`TTrainableJitModule`、
+  `Jit*` 関数）を、本体をスタブにした使い捨てのユニットとして本物の `Tch`/`TchNN` に対して
+  コンパイル：エラーなし、プラグマで囲んだ `CreateRaw` からの警告なし、テストの呼び出し
+  形 `ForwardIV([X, 42, 1.5])`、`Tuple([2.0, 3.0, 4])`、`GenericDict(['bar', X, 'foo',
+  X])`、`StringList([...])` が解決する。
+
+**新しい仮説（本物の libtorch が必要）：**
+- **(H19)** 取り込んだ `tests/jit/models/foo*.pt` は libtorch 2.13 で読み込め、
+  `jit_tests.rs` の数値（4.6.8 の項目1〜7）を与える。
+- **(H20)** フォークの追加：`Module::define` は 4.6.8 の2つの TorchScript ソース
+  （`torch.matmul`、`torch.t`、`self.training`）をコンパイルする。登録した `training`
+  属性で `self.training` と `atm_train`/`atm_eval` が働く。`named_parameters` は登録した
+  パラメータをその `requires_grad` とともに返す。
+- **(H21)** パラメータの共有：var-store への1回の SGD ステップの後に
+  `TTrainableJitModule.Forward(X) = 3.0` で、`Save` + 読み戻しで学習済みの値が保たれる。
+- **(H22)** `ati_generic_dict` の `Dict[str, Tensor]` への特化が `foo8.pt` の `generate`
+  に受け入れられる。
+- **(H23)** 例外を投げるトレースのクロージャの後の `atm_end_tracing(M, name, nil, 0)` で、
+  次の `CreateByTracing` が使える。
+- **(H24)** `GenericDict` の往復は挿入順を保つ（`c10::Dict` は順序を保つ）。
+- **(H25)** 新しいプロセスで `JitGetProfilingMode` は True。
+
+**ローカルセッション、この順に（機械的）：**
+1. `FromArray` の改訂（DESIGN 4.3）：`src/Tch.pas` — `array of Single` のオーバーロードを
+   外し、他の4つに `AKind` の既定値を足し（`kFloat` の高速経路：Pascal 側で `Single` の
+   バッファに変換。それ以外は `totype`）、`FromSingleArray` を足す。テスト：
+   `tests/api/api_test.pas`（`TDoubleArray.Create(0.25, 0.5)` は今後 `kFloat` — `kDouble`
+   を渡すか期待値を変える。`FromArray([0.9, -1.9])`、`FromArray([1, 2], kFloat)`、
+   `FromSingleArray` を追加）、`tests/nn/nn_test.pas`（`Double(…)` のキャストは外せる）、
+   `tests/compiler/h2_fromarray.pas`（新しい組。`[0.9, -1.9]`、`[3.14]`、`[1.0, 0.1]` →
+   Double）と、`Single` と `Double` の両方があると `[0.9, -1.9]` が曖昧になることを示す
+   新しい `xfail_h2_single.pas`。`tests/compiler/run.sh`、`tests/api`、`tests/nn`、
+   `tests/mock/run.sh` を実行。
+2. 4.6.7 の積み残し：`TOptimizer.CreateRaw` を `{$push}{$warn 3018 off}` / `{$pop}` で
+   囲む。4.6.7 項目 7d の半精度の `LoadPartial` の確認を `TestSaveLoad` に足す。
+3. フォークのパッチ：`csrc/libtch/torch_api.{h,cpp}` に `atm_create`、
+   `atm_register_parameter`、`atm_define`（コードは 4.6.8）。libtch を再ビルド。
+   `tests/abi`、`tests/mock/run.sh`（モックのスタブは手順7で。テストプログラムは使う
+   ものしか参照しない）。
+4. tch-rs 4227b89b（`tests/`）から `tests/jit/models/foo.pt` … `foo8.pt` と `LICENSE-MIT`、
+   `LICENSE-APACHE` を取り込む。コミットメッセージに出典のファイルと
+   `tests/create_jit_models.py` を書く。
+5. `src/TchSys.pas`：4.6.8 の JIT の型と external。
+6. `src/TchJit.pas`。各部分が単独でコンパイルできるようこの順に：`TIValue`（record、
+   コンストラクタ、演算子、アクセサ）→ `ToC`/`FromC` → `TJitModule`（load/free/forward/
+   method/eval/train/to/save）→ `NamedParameters` のトランポリン → `CreateByTracing` →
+   `CreateEmpty` / `RegisterParameter` / `Define` → `Jit*` のグローバル →
+   `TTrainableJitModule`。
+7. モック：`tests/mock/mock_tch.c` に `atm_*`/`ati_*` のスタブ（4.6.8「モック」）、
+   `tests/mock/jit_mock_test.pas`、`run.sh` に追加。
+8. 4.6.8 の13グループによる `tests/jit/jit_test.pas`。出てきた順に H19〜H25 を確認し、
+   結果を DESIGN.md の各 (Hn) の横に記録する。
+9. DESIGN/HANDOFF（英語・日本語）を更新。その後、必要なら TorchScript のオブジェクト
+   （タグ 14）、マイルストーン3のレイヤー（4.6.5 の先送り一覧）、CUDA/ROCm を
+   設計セッションに戻す。
+
 ## ローカルセッション3（2026-10-10）：マイルストーン2を実装
 
 下のクラウドセッション4の一覧の手順1〜5を完了し、すべてのテストが通ります。
@@ -43,7 +158,7 @@
   オーバーロードの間で**曖昧**。`[1.0, 0.1]` は黙って `Single` を選ぶ。テストでの回避策は
   `[Double(0.9), -1.9]`。
 
-## クラウドへの引き継ぎ（2026-10-10、ローカルセッション3の終了時点）
+## クラウドへの引き継ぎ（2026-10-10、ローカルセッション3の終了時点）— 上のクラウドセッション5で回答済み
 
 **設計のみ**（CLAUDE.md）。本物の libtorch で確認が必要なことは H19 以降として記す。
 
@@ -626,9 +741,11 @@ DESIGN_jp.md の各 (Hn) の横）。手順8のための OCaml の環境はロ�
   ローカルセッション2：`zeros`、`ones`、`empty`、`rand`、`randn` のオーバーロードを
   追加。`objfpc` では `overload` 指示子は不要（実測）だが、tchgen は意図した
   オーバーロードの目印に `overload;` を使う（DESIGN_jp.md の 4.4）。未決：out 引数の op に `topk(k)` 型のデフォルト。
-- **実数リテラルの `FromArray`**（ローカルセッション3、DESIGN 4.3 の H2 追記）：要素型は
-  先頭の要素で決まる。`[0.9, …]` は曖昧、`[1.0, 0.1]` は `Single` に丸められる。上でクラウドに
-  引き継いだ。
+- **実数リテラルの `FromArray`：決定**（クラウドセッション5、DESIGN 4.3 の H2 追記）。
+  要素型は先頭の要素で決まり、実数リテラルが `Single` になるのは正確に表せるときだけ
+  なので、`[0.9, …]` は曖昧で `[1.0, 0.1]` は `Single` に丸められていた。`Single` の
+  オーバーロードを外し、他は自然な既定値の `AKind` を取り（`Double` には `kFloat`）、
+  `Single` のバッファは `FromSingleArray` で。ローカルセッション4で実装（上の手順1）。
 - **等価性とコンテナ：決定**（クラウドセッション4）。`TTensor` の `=` は
   オーバーロードしないまま。`TchNN` に必要なのは追加のみの `array of TVarEntry`、
   `TDictionary<String, Integer>` の名前の索引、`TObjectList<TModule>` だけで、

@@ -577,12 +577,50 @@ function IntList(const A: array of Int64): TOptIntList;  // 値あり（空で�
   エンコード（`-1`）そのままで、こうすると `= kNone` のデフォルトが付きます。
   `LayoutOption` も `ltNone` で同じ。`Int64Option`/`DoubleOption` は record の
   まま：`Int64`/`Double` には「なし」に使える余りの値がありません。
-- **`FromArray` のオーバーロード（決定、H2 の続き）。** `array of Single`、
-  `array of Double`、`array of Int64`、`array of Byte`、`array of Boolean`。実測で
-  `[1, 2]` は `Int64`、`[1.0, 2.0]` は `Single`、`[True, False]` は `Boolean` を選び、
-  曖昧にならない。`Int32` はやめる（`Int64` と曖昧、H2）。`Int32` の
-  データは `FromInt32Array` で（以前の草稿では `FromInt32s`）、`Int16`/`Int8` は `FromBytes` で。手書き、最初の
-  マイルストーン。ローカルセッション2で実装。
+- **`FromArray` のオーバーロード（決定、H2 の続き。クラウドセッション5で改訂）。**
+  最初の決定（クラウドセッション3、ローカルセッション2で実装）：`array of Single`、
+  `array of Double`、`array of Int64`、`array of Byte`、`array of Boolean`。`Int32` は
+  やめる（`Int64` と曖昧、H2）。`Int32` のデータは `FromInt32Array` で、`Int16`/`Int8` は
+  `FromBytes` で。**H2 追記、実測**（ローカルセッション3、クラウドセッション5。FPC 3.2.2）：
+  オープン配列コンストラクタの要素型は**先頭**の要素で決まり、実数リテラルの型が
+  `Single` になるのは、その値が binary32 で正確に表せるときだけです。`Single` と `Double`
+  の両方のオーバーロードがあると、`[1.0, 2.0]`、`[2.5]`、`[0.75]`、`[100.0]`、`[1.5e2]` は
+  `Single` を選び、`[1.0, 0.1]` も同様です — `0.1` や `[1.5, D]` の `Double` 変数 `D` は
+  黙って `Single` に丸められます。`[0.9, -1.9]`、`[3.14]`、`[0.1]`、`[1e-3]`、`[0.3]`、
+  `[0.1, 1.0]` はコンパイルエラー（"Can't determine which overloaded function to
+  call"）。つまりリテラルがコンパイルできるかどうかが先頭要素の二進展開に依存します。
+  **改訂した決定：** `Single` のオーバーロードを外し、残る4つのオーバーロードの末尾に
+  自然な既定値を持つ kind 引数を付けます：
+
+  ```pascal
+  class function FromArray(const A: array of Double;  AKind: TKind = kFloat): TTensor; overload; static;
+  class function FromArray(const A: array of Int64;   AKind: TKind = kInt64): TTensor; overload; static;
+  class function FromArray(const A: array of Byte;    AKind: TKind = kUInt8): TTensor; overload; static;
+  class function FromArray(const A: array of Boolean; AKind: TKind = kBool):  TTensor; overload; static;
+  class function FromSingleArray(const A: array of Single; AKind: TKind = kFloat): TTensor; static;
+  ```
+
+  ちょうどこの組で実測：`[1.0, 2.0]`、`[0.9, -1.9]`、`[1.0, 0.1]`、`[3.14]`、`[1.5, 2]`、
+  `[D, 1.5]`、`[1.5, D]`、`[S]`（`Single` 変数）はすべて `Double` に解決。`[1, 2]`、
+  `[1, 5000000000]`、`[N, 2]` は `Int64` のまま。`[Byte(200), 1]` は `Byte`、
+  `[True, False]` は `Boolean`。`FromArray([0.9, -1.9], kDouble)` と
+  `FromArray([1, 2], kFloat)` は kind をそのまま渡す。`array of Single` の*変数*はどの
+  オーバーロードにも合わなくなるので `FromSingleArray` を置く（`Int32` と同じ扱い）。
+  `[1, 2.5]` は引き続きエラー（`Int64` の配列になり、次に `Single`）：`[1.0, 2.5]` と
+  書く。利用者向けに書く規則：リテラル配列の型は先頭要素で決まる。先頭が整数なら
+  整数配列になる。
+  - 既定の `kFloat` は PyTorch の `torch.tensor([1.0, 2.0])` の既定（float32）を保ち、
+    Python と同じビット列になります（10進 → binary64 → binary32）。kind 引数は結果への
+    `.to_dtype` の代わりです。
+  - 実装：`Double` で `AKind = kFloat` のときは Pascal 側で `Single` のバッファに変換して
+    `at_tensor_of_data` を1回呼ぶ（2つ目のテンソルは作らない）。それ以外の組み合わせは
+    自然な kind で作り、違えば `totype(AKind)`。`FromSingleArray` は旧 `Single` 版の本体に
+    kind を足したものです。
+  - 既存の呼び出し側：`tests/api` は `TDoubleArray.Create(0.25, 0.5)` が `kDouble` になる
+    ことを期待している（今後は `kDouble` を渡さなければ `kFloat`）、`tests/nn` は
+    `[Double(0.9), -1.9]` とキャストしている（不要になる）、
+    `tests/compiler/h2_fromarray.pas` は旧い組を記録している — すべてローカルセッション4で
+    更新します（HANDOFF）。
 - **要素サイズ（ローカルセッション2で実測）。** `KindElementSize(AKind)` は Pascal 側の
   表で、`tests/api` が 46 種すべてについて libtorch の `element_size()` と照合済み
   （libtch の `at_copy_data` はサイズが違うと拒否する）。1 バイト未満の型と
@@ -771,6 +809,8 @@ gen/
   tchgen.pas                 Pascal 生成器（5 章）
 csrc/libtch/                 フォークした C ラッパー + CMakeLists.txt
 tests/mock/                  モックの libtch + 生成層のテスト（libtorch 不要）
+tests/jit/                   TchJit のテスト（本物の libtorch）。models/ = tch-rs の tests/foo*.pt
+                             （tch-rs のライセンスファイルを隣に置く。4.6.8）
 ```
 
 - 生成する record のメンバーは record の中で宣言しなければならないので、
@@ -854,6 +894,7 @@ type
     function Sub(const Name: String): TVarPath;               // Name に '.' があれば例外
     class operator /(const P: TVarPath; const Name: String): TVarPath;
     function SetGroup(G: Integer): TVarPath;
+    function Group: Integer; inline;                          // ローカルセッション3の追加、承認済み
     function Store: TVarStore; inline;
     function Device: TDevice;
     function Kind: TKind;
@@ -1014,7 +1055,9 @@ type
     FOpt: PTorchOptimizer;
     FStore: TVarStore;            // 所有しない。オプティマイザをストアより先に解放する
     FVarsInOptimizer: Integer;    // variables_in_optimizer
+    {$push}{$warn 3018 off}       // 「Constructor should be public」：API は下の class function（4.6.4）
     constructor CreateRaw(AOpt: PTorchOptimizer; VS: TVarStore);
+    {$pop}
     procedure AddMissingVariables;
   public
     class function Sgd(VS: TVarStore; LR: Double; Momentum: Double = 0; Dampening: Double = 0;
@@ -1075,14 +1118,16 @@ type
 - **JIT。** `TJitModule` はクラスです（インスタンスは少なく、ファイルのように
   明示的な寿命を持つ）。`TIValue` はタグ付き record（`Tag`、`Tensor`、`I`、`D`、`B`、
   `S`、`Items: array of TIValue`、`Tensors: TTensorArray` など）で、静的コンストラクタ
-  （`TIValue.Tuple([...])`）とタグが合わなければ例外を投げる `As*` アクセサを持ちます。
+  （`TIValue.Tuple([...])`）、`TTensor`、`Int64`、`Double`、`Boolean`、`String` からの
+  暗黙の `:=` 演算子、タグが合わなければ例外を投げる `As*` アクセサを持ちます。
   **(H10)** 自分自身の型の動的配列を含む record が 3.2.2 でコンパイルできる必要があります。
   だめなら fpjson 風のクラス階層にします。**(H10) 解決**（手順7）：コンパイルでき、
   入れ子（タプルのタプル）も作れる。ドキュメントに書くべき意味論：`W := V` は `Items` を
   共有する（動的配列は参照カウントで、コピーオンライトではない）ので、`W.Items[0]` に
   書くと `V` も変わる。`TIValue` は作ったあとは変更しないものとして扱う。`TTrainableJitModule` は `NamedParameters` を
   `TVarPath` に登録し、`TModule` を継承するので、スクリプト化したモデルも他のレイヤーと
-  同じく `TOptimizer` で微調整できます。マイルストーン2の範囲外です。
+  同じく `TOptimizer` で微調整できます。マイルストーン2の範囲外です。機械的な設計は
+  4.6.8（クラウドセッション5）。
 
 #### 4.6.1 初期化（`TInit`）、`src/nn/init.rs` より
 
@@ -1176,7 +1221,14 @@ type
 - **名前の検証：** `Sub` とすべての変数名は、文字列に `.` が含まれていれば `ETorchError`
   を投げます（tch-rs は panic："sub name cannot contain ."、"variable name cannot
   contain ."）。tch-rs より厳しい点（明示）：`|` も拒否し（save/load の往復で `.` に
-  なってしまう）、空文字列も拒否します。
+  なってしまう）、空文字列も拒否します。検査は `TVarPath.FullName` にあり、パスの操作は
+  すべてそこを通るので、`TVarPath.TryGet('a.b')` は False を返す代わりに例外を投げます
+  （tch-rs の `Path::get` は文字列を連結するだけ。ドットを含む名前は追加され得ないので、
+  例外にするのが一貫した選択）。ストア側の `TVarStore.TryGet(FullName)` はドット区切りの
+  完全名を受け取り、検査しません。`AddEntry` はテンソルを `TchCheckArg` で検査します
+  （4.2：さもなければ `set_requires_grad` が nil ハンドルへの最初の C 呼び出しになる）。
+  `TVarPath.Group` は `Device`/`Kind` と並んでグループを返します。この3点はローカル
+  セッション3の追加で、クラウドセッション5で承認しました。
 - **`GetOrAdd(Name, Dims, Init)`**（`Entry::or_var`）：完全名で既存のテンソルがあれば、
   `Dims` と `Init` が何であれそれを返します（tch-rs のテスト `var_store_entry`：2回目の
   `or_zeros(&[1, 5, 9])` は `[3, 1, 4]` のテンソルを返す）。なければ学習対象の変数を
@@ -1318,7 +1370,11 @@ type
   順に `ato_add_parameters(FOpt, Tensor.Raw, Group)`、
   `FVarsInOptimizer := Length(FStore.FTrainable)`。`ato_add_parameters` は `group` までの
   パラメータグループをデフォルトの複製として作るので、グループは飛び飛びでもよい
-  （tch-rs と同じ）。
+  （tch-rs と同じ）。`CreateRaw(AOpt, VS)` は4つの class function が使う private な
+  コンストラクタで、FPC 3.2.2 は `(3018) Constructor should be public` と警告します
+  （クラウドセッション5で計測：`strict private` でも同じ）。決定：private のまま — API は
+  factory であり、生ポインタを取る public なコンストラクタは API にしない — 宣言を
+  `{$push}{$warn 3018 off} … {$pop}` で囲んで警告を消します（計測：警告は出なくなる）。
 - **遅延追加**（`add_missing_variables`）：`ZeroGrad`、`Step`、3つの `BackwardStep*` は
   まず `FStore.FTrainable[FVarsInOptimizer..]` をそれぞれのグループで追加し、カウントを
   更新します。`ClipGrad*` とセッターはしません。これは `TVarStore` の private
@@ -1410,58 +1466,100 @@ type
   `TVarStore.FTrainable` / `FVars` を読みますが、同じユニット内なら private に
   アクセスできます（4.5）。`TchJit.pas` は JIT のマイルストーンで。
 - **`TchSys.pas` への追加：** `PTorchOptimizer`、`TTorchLoadCallback`、`at_save_multi`、
-  `at_load_callback_with_device`、`at_loadz_callback_with_device`、4.6.4 の13個の `ato_*`。
-  **`Tch.pas` への追加：** `at_copy_` を包む `TTensor.CopyFrom(const Src: TTensor)`。
-  **フォークのパッチ：** `ato_set_momentum_group` の `} else if`（4.6.4）、その後
-  `libtch.so` を再ビルド。
-- **`tests/nn/nn_test.pas`**（本物の libtorch）、手計算できる数値：
+  `at_load_callback_with_device`、`at_loadz_callback_with_device`、4.6.4 の14個の `ato_*`
+  （13個 + `ato_free`）。**`Tch.pas` への追加：** `at_copy_` を包む
+  `TTensor.CopyFrom(const Src: TTensor)`。**フォークのパッチ：** `ato_set_momentum_group`
+  の `} else if`（4.6.4）、その後 `libtch.so` を再ビルド。
+- **`tests/nn/nn_test.pas`**（本物の libtorch。ビルド方法はヘッダ）、手計算できる数値。
+  この一覧はローカルセッション3以降のテストの現状で、クラウドセッション5で確認したもの
+  （クラウドセッション4の一覧にない追加は採用。まだ足していないものが 7d に1つ）：
   1. 初期化：`[4, 16]` への `KaimingUniform` はすべての値が `±sqrt(6/16) = ±0.6124` の
-     範囲にあり、平均は 0 から 0.1 以内。`Constant(3)` はすべて 3。`Orthogonal` の
-     `[3, 5]` と `[5, 3]`（H14）、結果の形 = `Dims`。
-  2. ストア：`Sub` を通した `a.b.t2` という命名。`Sub('x.y')` と `Zeros('a.b', …)` は
-     例外。`t123` を2回追加すると `Count = 4` で、2つ目の名前は `a.b.ccc.t123__3`
-     （tch-rs の `save_and_load_var_store`）。既存の名前への `GetOrAdd` は要求した次元に
-     かかわらず `[3, 1, 4]` のテンソルを返す。`TrainableVariables` は登録順。`Freeze` →
-     `RequiresGrad = False`、`Unfreeze` → True。`Freeze; Step` は何も変えない（H18）。
+     範囲にあり、平均は 0 から 0.1 以内。`[8, 3, 5, 5]` の `FanForDims` = 75（in）／200
+     （out）。`Constant(3)` はすべて 3、`Constant(1)` は要求した kind を保つ。`Orthogonal`
+     の `[3, 5]`、`[5, 3]`、gain 2 の `[2, 3, 2]`（H14）、結果の形 = `Dims`、1次元は例外。
+     `Apply`（H17）：ガードなしの学習対象の葉への `fill_` は例外、すべての `TInit` の
+     `Apply` は成功し、変数は引き続き grad を要求する。
+  2. ストア：`Sub` と `/` を通した `a.b.t2` という命名。`Sub('x.y')`、`Zeros('a.b', …)`、
+     `Zeros('a|b', …)`、`Sub('')` は例外で、何も追加しない。`t123` を2回追加すると
+     `Count = 4` で、2つ目の名前は `a.b.ccc.t123__3`（tch-rs の `save_and_load_var_store`）。
+     `TryGet` は完全名で、パス経由で、存在しない名前で。既存の名前への `GetOrAdd` は
+     要求した次元にかかわらず `[3, 1, 4]` のテンソルを返す。`ZerosNoTrain` は grad を
+     要求しない。`TrainableVariables` は登録順。`Freeze` → `RequiresGrad = False`、
+     `Unfreeze` → True。`VarCopy`。`Freeze; Step` は何も変えない（H18）。`TLinear` と SGD
+     オプティマイザを作った後の `SetKind(kDouble)`：レイヤーの `Weight` は `kDouble`、
+     ステップは手計算の `[0.9, 0.8]` を与え `kDouble` のまま（H13）。`SetDevice(Cpu)` は
+     ハンドルを使える状態に保つ。部分木 `lin` への `TVarPath.SetKind(kFloat)` は `weight`
+     と `bias` だけを変換する。
   3. 線形回帰（tch-rs の `optimizer_test`）：`xs = 1..14` を `[14, 1]` の float、
      `ys = 0.42·xs + 1.337`、両方の初期化を `Constant(0)` にした `TLinear(1, 1)`、
      `Sgd(VS, 0)` の後に `SetLearningRate(1e-2)`。最初の `mse_loss` =
      `mean((0.42x + 1.337)²) = (0.1764·1015 + 1.12308·105 + 14·1.787569) / 14 = 22.99967`。
-     **1回** のステップ後：`w = 0.80955`、`b = 0.08974`（`∂/∂w = -2/14·Σx·y = -80.955`、
-     `∂/∂b = -2/14·Σy = -8.974`）、float32 で 1e-3 以内。49回の `BackwardStep` の後は
-     loss < 0.25。両方に `Apply(Constant(0))` すると loss は初期値に戻る。
-     `SetLearningRate(1e-10)` でさらに49ステップ：tch-rs の判定は
-     `final - initial < 1e-5`（**符号付き**）。絶対値で 1e-5 未満は成り立たない：loss は
-     `49 · 1e-10 · (80.955² + 8.974²) = 3.25e-5` 下がり、実測は `-3.24e-5`
-     （ローカルセッション3）。テストは両方を確認する。
+     **1回** のステップ後：`w = 0.80955`、`b = 0.08974`（`∂/∂w = -2/14·Σx·y =
+     -2/14·566.685 = -80.955`、`∂/∂b = -2/14·Σy = -2/14·62.818 = -8.974`）、float32 で
+     1e-3 以内。49回の `BackwardStep` の後は loss < 0.25。両方に `Apply(Constant(0))`
+     すると loss は初期値に戻る。`SetLearningRate(1e-10)` でさらに49ステップ：tch-rs の
+     判定は `final - initial < 1e-5`（**符号付き**）。絶対値で 1e-5 未満は成り立たない：
+     勾配はほぼ一定なので、1ステップごとに loss は `lr·‖g‖² = 1e-10 · (80.955² + 8.974²)
+     = 1e-10 · 6634.2 = 6.634e-7` 下がり、49ステップで `3.25e-5`。実測は `-3.24e-5`
+     （ローカルセッション3）で、23 付近の loss の float32 の分解能（ulp 1.9e-6）の範囲内。
+     テストは両方を確認する：tch-rs の符号付きの上限と `Near(L - Initial, -3.25e-5,
+     5e-6)`。計算はクラウドセッション5で確認。加えて `Bias False` の `TLinear` は変数を
+     1つ登録し、`Bias.IsNil`、forward は `[4, 3] → [4, 2]`。
   4. Adam：パラメータ `p = [1, -2]`、`loss = sum(p²)`、`Adam(VS, 0.1)`、1回の
      `BackwardStep` → `p = [0.9, -1.9]`、1e-6 以内：Adam の最初のステップは
-     `-lr·g/(|g| + eps)`、すなわち `lr·sign(g)`。
-  5. 勾配クリッピング：4.6.4 の数値。
+     `-lr·g/(|g| + eps)`、すなわち `lr·sign(g)`。同じ `p` に既定の weight decay 0.01 の
+     AdamW：PyTorch は先に減衰 `p ← p·(1 - lr·wd) = [0.999, -1.998]`、次に Adam の
+     ステップ `lr·sign(g)` → **`[0.899, -1.898]`**、1e-6 以内（ローカルセッション3の追加、
+     計算を確認）。RmsProp のステップと `SetMomentum`、SGD の `SetMomentumGroup`、Adam の
+     setter は例外を出さない。Adam への `SetMomentumGroup(0, 0.8)` はパッチ済みのフォーク
+     では例外を出さない（H16。`build/nn_test h16` はこの確認だけを実行する）。
+  5. 勾配クリッピング：4.6.4 の数値。勾配がないときの `ClipGradNorm` は静かに抜ける。
+     `BackwardStepClip(4)` はクリップした勾配でステップする（`v2 = 1 - 4`）。
   6. 遅延追加：オプティマイザを作ってから学習対象の変数を追加し、1回の `BackwardStep` で
-     それが変わる。グループ1の変数は `SetLearningRateGroup(1, 0)` で動かず、グループ0は
-     動く。
-  7. Save → Load（tch-rs の `save_and_load_var_store`）：`NoGradGuard` の下で `u += 42`、
-     `v *= 2`。一時的な `.ot` に `Save`。同じ構成の2つ目のストアが `Load`：平均は 42 と 2。
-     入れ子の名前は `|` を通して往復する。余分な変数を持つストアへの `Load` はその名前を
-     含む `ETorchError`。`LoadPartial` は `['a.b.t2']` を返す（tch-rs の
-     `…_incomplete_file`）。`SetFloatKind(kHalf)` して保存し、float のストアに読み込む →
-     変数は `kHalf` で平均は同じ（H15）。
+     それが変わり、`TrainableVariables` にも見える。グループ1の変数は
+     `SetLearningRateGroup(1, 0)` で動かず、グループ0は動く。
+  7. Save → Load。構成は tch-rs の `tests/var_store.rs` のもの：*full*
+     （`save_and_load_var_store`：`a.b.t2 [3]`、`t1 [4]`、`a.b.ccc.t123 [3]` を**2回** →
+     `t123__3`）、*add*（`t1`、`t123` 1回）、*add_partial*（`a.b.t2`、`t1`、`t123` 1回）。
+     (a) full 構成のストア2つ。`NoGradGuard` の下で `u += 42`、`v *= 2`。一時的な `.ot`
+     に `Save`。2つ目のストアが `Load`：平均は 42 と 2、入れ子の名前は `|` を通して往復し、
+     読み込んだ変数は引き続き grad を要求する。(b) 余分な `extra.x` を持つ full 構成の
+     ストアへの `Load` はその名前を含む `ETorchError` で、ストアは変わらない（tch-rs の
+     `save_and_load_var_store_incomplete_file`、`should_panic`）。そこでの `LoadPartial` は
+     `['extra.x']` を返し、残りを読み込む。(c) `SetFloatKind(kHalf)` して保存し、新しい
+     float のストアに `Load` → 変数は `kHalf` で平均は同じ（H15）。(d) tch-rs の
+     `save_and_load_partial_var_store_incomplete_file`：ストア1は *add*、ストア2は
+     *add_partial*、`u1 += 42`、`LoadPartial` は **`['a.b.t2']`** を返し、`u2 = 42`、`v2`
+     は手つかず（1）。クラウドセッション4はこの場合を full 構成で書いたが、それだと
+     `a.b.ccc.t123__3` も欠ける。訂正（ローカルセッション3／クラウドセッション5）。
+     **追加予定**（ローカルセッション4）、この tch-rs テストの後半：ストア1に
+     `SetFloatKind(kHalf)` して保存し、新しい float の *add_partial* ストアに
+     `LoadPartial` → `u2` は `kHalf` で平均 42、欠けている `v2` は `kFloat` のまま平均 1、
+     missing = `['a.b.t2']`。(e) `.safetensors` への `Save` は `ETorchError`。存在しない
+     ファイルの `Load` は `ETorchNativeError`。(f) `CopyFrom`：名前でコピーする
+     （`u2 = 7`）。コピー元にない名前はその名前を含む `ETorchError`。
   8. レイヤー：`Padding 1`、`Bias False`、重みをすべて 1 にした `TConv2D(1, 1, 3)` を
      `[[1, 2], [3, 4]]`（NCHW `[1, 1, 2, 2]`）に適用：zeros padding → `[10, 10, 10, 10]`、
      reflect → `[27, 24, 21, 18]`、circular → `[27, 24, 21, 18]`、replicate →
-     `[18, 21, 24, 27]`（tch-rs の `conv` テスト）。`TBatchNorm(1, 40)` は4つの変数を
-     登録する（`Affine` False なら2つ）、`[10, 40]` への train モードの forward が動き、
-     `[10, 40, 3, 3]` は例外。`TLayerNorm([2])` のフィット（tch-rs の
-     `layer_norm_parameters_test`：`xs = [[42, 42], [42, 24]]`、SGD lr 1.0、初期 loss > 1、
-     49ステップ後 < 0.25）。`TEmbedding(10, 4)` を `randint(10, [5, 7])` に適用すると
-     `[5, 7, 4]` で、`PaddingIdx` の行は `Weight` の行と等しい。`TLinear` は `weight` と
-     `bias` を登録する（`Count` 2、バイアスなしなら 1）。
-  9. Sequential：`[1, -1, 2]` への `AddFn(@Relu)` → `[1, 0, 2]`。`Train` を記録する
-     `TTensorFuncT` は `Forward(X, True)` が渡したフラグを見る。`ForwardAll` はレイヤー
-     ごとに1つのテンソルを返す。
-  10. オプティマイザ、レイヤー、ストアをこの順に解放したあと、`TchLiveHandles` が
-      開始時の値に戻る。
+     `[18, 21, 24, 27]`（tch-rs の `conv` テスト）。`TConv2D(4, 6, 3)` は `c.bias`、次に
+     `c.weight` を登録し、`[2, 4, 8, 8] → [2, 6, 6, 6]`。`TBatchNorm(1, 40)` は4つの変数を
+     登録する（`running_mean`、`running_var` は学習対象でない。`Affine` False なら2つ）、
+     `[10, 40]` への train モードの forward が動いて running stats が変わり、
+     `[10, 40, 3, 3]` は例外。`BatchNorm2d` の eval forward は形を保つ。`TLayerNorm([2])`
+     のフィット（tch-rs の `layer_norm_parameters_test`：`xs = [[42, 42], [42, 24]]`、SGD
+     lr 1.0、初期 loss > 1、49ステップ後 < 0.25、リセットで初期 loss に戻る）。
+     `TEmbedding(10, 4)` を `randint(10, [5, 7])` に適用すると `[5, 7, 4]` で、`PaddingIdx`
+     の行は `Weight` の行と等しい。`TLinear` は `weight` と `bias` を登録する（`Count` 2、
+     バイアスなしなら 1）。
+  9. Sequential：空の sequential は同じハンドルを返し、その `ForwardAll` は `[X]`。
+     `[1, -1, 2]` への `AddFn(@Relu)` → `[1, 0, 2]`。4つの `AddFn` オーバーロードの
+     チェーン（関数、関数+Train、メソッド、メソッド+Train。`Factor = 3` のオブジェクト）：
+     `Forward(X, True)` = `[9, 0, 18]` で `TTensorFuncT` は `Train` を見る、`Forward(X)` =
+     `[3, 0, 6]`。`ForwardAll` はレイヤーごとに1つのテンソルを返し、`ForwardAll(N = 2)`
+     は2つ。`Items[0] is TFuncModule`。`TLinear` 2つと ReLU の MLP：`[4, 3] → [4, 2]`、
+     変数は4つ。
+  10. オプティマイザ、レイヤー、ストアをこの順に解放したあと（間に MLP への Adam の
+      5ステップの学習ループ）、`TchLiveHandles` が開始時の値に戻り、最後には 0。
 - **mock で確認できること**（`tests/mock/mock_tch.c` を拡張。配線のみ）：カウンタ構造体
   上の `ato_*` スタブ（グループごとの追加数、zero_grad と step の回数を `mock_opt_*`
   として公開）→ 構築と遅延追加の回数。名前を記録する `at_save_multi` → `.`→`|` の変換と
@@ -1472,6 +1570,457 @@ type
   の配線。`add_scalar` 上の `TSequential` / `TFuncModule` のチェーン。そこで確認できない
   もの：数値に関わるすべて（分布、QR、`linear`、`conv2d`、`batch_norm`、backward、
   `step`）。これは上の本物の libtorch のテストで確認します。
+
+#### 4.6.8 JIT（`TchJit`）、`wrappers/jit.rs`、`nn/mod.rs`、`tests/jit_tests.rs`、`torch_api.cpp` より
+
+クラウドセッション5で、同じ tch-rs のコミットに対して設計しました。フォークの
+`torch_api.{h,cpp}` の `atm_*`/`ati_*` の領域は上流とバイト単位で同一です（`diff` で
+確認）。本物の libtorch が必要なものは **(H19)**〜**(H25)**、クラウドの FPC 3.2.2 で
+計測したものは*実測*と記します。下のインターフェース全体（`TIValue`、`TJitModule`、
+`TTrainableJitModule`、`Jit*` 関数）は、本体をスタブにした使い捨てのユニットとして本物の
+`Tch`/`TchNN` に対してコンパイルしました（*実測*、HANDOFF の M8）：エラーはなく、テストが
+使う呼び出し形は解決します。
+
+**範囲（マイルストーン3）。** TorchScript モジュールの読み込み、実行、保存、トレース。
+`ati_tag` の値 0〜13（None、Tensor、Double、Int、Bool、Tuple、IntList、DoubleList、
+BoolList、String、TensorList、GenericList、GenericDict）に対する `TIValue` と、入力専用の
+2つの値 StringList と Device。`TTrainableJitModule`。TorchScript のソースから作る
+スクリプト化モジュール（下記の3関数のフォーク追加）。プロファイリング／fuser の
+スイッチ。**先送り**（L2 の行も含めて）：TorchScript のオブジェクト（タグ 14 —
+`ati_object_method_`、`ati_object_getattr_`、`ati_clone`、`atm_create_class_`。tch-rs の
+`Object`、テスト `jit6` と `jit_double_free`、資材 `foo6.pt`/`foo7.pt`）。オブジェクトは
+C の `IValue` を生かし続けるので `TTensorHandle` のような参照カウント付きハンドルが必要で、
+微調整の用途には要らないからです。それと `atm_fuser_cuda_*`（CUDA と一緒に）。
+
+**L2（`TchSys.pas`）。** `PTorchModule = Pointer`（`torch::jit::script::Module*`）、
+`PTorchIValue = Pointer`（`torch::jit::IValue*`）、`PPTorchIValue = ^PTorchIValue`。
+external は `torch_api.h` のとおりで、型は2章のもの（`int` に `cint`、C++ の `bool` に
+`Boolean`、`csize_t`、`PChar`、`PPChar`、`PInt64`、`PDouble`）。`atm_named_parameters` は
+load コールバックと同じシグネチャなので `TTorchLoadCallback` を再利用します：
+
+```pascal
+function  atm_load(filename: PChar): PTorchModule; cdecl; external LibTch;
+function  atm_load_on_device(filename: PChar; device: cint): PTorchModule; cdecl; external LibTch;
+function  atm_load_str(data: PChar; sz: csize_t): PTorchModule; cdecl; external LibTch;
+function  atm_load_str_on_device(data: PChar; sz: csize_t; device: cint): PTorchModule; cdecl; external LibTch;
+function  atm_forward(m: PTorchModule; tensors: PPTorchTensor; ntensors: cint): PTorchTensor; cdecl; external LibTch;
+function  atm_forward_(m: PTorchModule; ivalues: PPTorchIValue; nivalues: cint): PTorchIValue; cdecl; external LibTch;
+function  atm_method(m: PTorchModule; method_name: PChar; tensors: PPTorchTensor; ntensors: cint): PTorchTensor; cdecl; external LibTch;
+function  atm_method_(m: PTorchModule; method_name: PChar; ivalues: PPTorchIValue; nivalues: cint): PTorchIValue; cdecl; external LibTch;
+procedure atm_eval(m: PTorchModule); cdecl; external LibTch;
+procedure atm_train(m: PTorchModule); cdecl; external LibTch;
+procedure atm_free(m: PTorchModule); cdecl; external LibTch;
+procedure atm_to(m: PTorchModule; device, dtype: cint; non_blocking: Boolean); cdecl; external LibTch;
+procedure atm_save(m: PTorchModule; filename: PChar); cdecl; external LibTch;
+function  atm_get_profiling_mode: cint; cdecl; external LibTch;
+procedure atm_set_profiling_mode(b: cint); cdecl; external LibTch;
+procedure atm_set_tensor_expr_fuser_enabled(b: cint); cdecl; external LibTch;
+function  atm_get_tensor_expr_fuser_enabled: Boolean; cdecl; external LibTch;
+procedure at_set_graph_executor_optimize(b: Boolean); cdecl; external LibTch;
+procedure atm_named_parameters(m: PTorchModule; data: Pointer; f: TTorchLoadCallback); cdecl; external LibTch;
+function  atm_create_for_tracing(modl_name: PChar; inputs: PPTorchTensor; ninputs: cint): PTorchModule; cdecl; external LibTch;
+procedure atm_end_tracing(m: PTorchModule; fn_name: PChar; outputs: PPTorchTensor; noutputs: cint); cdecl; external LibTch;
+// フォークの追加（下記）
+function  atm_create(modl_name: PChar): PTorchModule; cdecl; external LibTch;
+procedure atm_register_parameter(m: PTorchModule; name: PChar; t: PTorchTensor; is_buffer: Boolean); cdecl; external LibTch;
+procedure atm_define(m: PTorchModule; src: PChar); cdecl; external LibTch;
+
+function  ati_none: PTorchIValue; cdecl; external LibTch;
+function  ati_tensor(t: PTorchTensor): PTorchIValue; cdecl; external LibTch;
+function  ati_int(v: Int64): PTorchIValue; cdecl; external LibTch;
+function  ati_double(v: Double): PTorchIValue; cdecl; external LibTch;
+function  ati_bool(v: cint): PTorchIValue; cdecl; external LibTch;
+function  ati_string(s: PChar): PTorchIValue; cdecl; external LibTch;
+function  ati_tuple(ivalues: PPTorchIValue; n: cint): PTorchIValue; cdecl; external LibTch;
+function  ati_generic_list(ivalues: PPTorchIValue; n: cint): PTorchIValue; cdecl; external LibTch;
+function  ati_generic_dict(ivalues: PPTorchIValue; npairs: cint): PTorchIValue; cdecl; external LibTch;  // 2*npairs 個の ivalue：k0, v0, k1, v1, ...
+function  ati_int_list(v: PInt64; n: cint): PTorchIValue; cdecl; external LibTch;
+function  ati_double_list(v: PDouble; n: cint): PTorchIValue; cdecl; external LibTch;
+function  ati_bool_list(v: PChar; n: cint): PTorchIValue; cdecl; external LibTch;   // 0/1 のバイト
+function  ati_string_list(v: PPChar; n: cint): PTorchIValue; cdecl; external LibTch;
+function  ati_tensor_list(v: PPTorchTensor; n: cint): PTorchIValue; cdecl; external LibTch;
+function  ati_device(device: cint): PTorchIValue; cdecl; external LibTch;
+function  ati_tag(i: PTorchIValue): cint; cdecl; external LibTch;
+function  ati_to_tensor(i: PTorchIValue): PTorchTensor; cdecl; external LibTch;
+function  ati_to_int(i: PTorchIValue): Int64; cdecl; external LibTch;
+function  ati_to_double(i: PTorchIValue): Double; cdecl; external LibTch;
+function  ati_to_string(i: PTorchIValue): PChar; cdecl; external LibTch;   // strdup 済み：tchf_free
+function  ati_to_bool(i: PTorchIValue): cint; cdecl; external LibTch;
+function  ati_length(i: PTorchIValue): cint; cdecl; external LibTch;
+function  ati_tuple_length(i: PTorchIValue): cint; cdecl; external LibTch;
+procedure ati_to_tuple(i: PTorchIValue; outputs: PPTorchIValue; n: cint); cdecl; external LibTch;
+procedure ati_to_generic_list(i: PTorchIValue; outputs: PPTorchIValue; n: cint); cdecl; external LibTch;
+procedure ati_to_generic_dict(i: PTorchIValue; outputs: PPTorchIValue; npairs: cint); cdecl; external LibTch;  // 2*npairs 個を書く
+procedure ati_to_int_list(i: PTorchIValue; outputs: PInt64; n: cint); cdecl; external LibTch;
+procedure ati_to_double_list(i: PTorchIValue; outputs: PDouble; n: cint); cdecl; external LibTch;
+procedure ati_to_bool_list(i: PTorchIValue; outputs: PChar; n: cint); cdecl; external LibTch;
+procedure ati_to_tensor_list(i: PTorchIValue; outputs: PPTorchTensor; n: cint); cdecl; external LibTch;
+procedure ati_free(i: PTorchIValue); cdecl; external LibTch;
+```
+
+`atm_free`、`ati_free`、`at_set_graph_executor_optimize` 以外はすべて `PROTECT` 付きなので
+毎回 `TchCheck`。コンストラクタはエラー時に nil を返し、ポインタを見る前に `TchCheck` が
+例外にします（`ati_to_bool`/`ati_to_int` はエラー時に -1 を返すが、これも同じ検査で
+拾う）。C に渡すすべての `tensor` は先に `TchCheckArg` を通します（4.2）。宣言しないもの
+（4.6.3 の「使わない入口は宣言しない」規則）：`atm_create_class_`、`ati_object_method_`、
+`ati_object_getattr_`、`ati_clone`、`atm_fuser_cuda_set_enabled`、
+`atm_fuser_cuda_is_enabled`。
+
+**フォークの追加**（3関数。autocast と `ato_set_momentum_group` の修正と同じくパッチ。
+`torch_api.h` では `atm_create_for_tracing` の隣に宣言）：
+
+```c
+module atm_create(char *modl_name) {
+  PROTECT(auto m = new torch::jit::script::Module(modl_name);
+          m->register_attribute("training", c10::BoolType::get(), true);
+          return m;)
+  return nullptr;
+}
+void atm_register_parameter(module m, char *name, tensor t, bool is_buffer) {
+  PROTECT(m->register_parameter(name, *t, is_buffer);)
+}
+void atm_define(module m, char *src) { PROTECT(m->define(src);) }
+```
+
+理由：tch-rs のテスト用モジュールは `tests/create_jit_models.py` で作られています。
+Python なしで、パラメータを持つモジュール、テンソル以外のシグネチャのメソッド、
+`training` フラグをテスト時に作る唯一の方法が `torch::jit::Module::define` — libtorch の
+TorchScript コンパイラ、公開 C++ API — です。`atm_create_for_tracing` ではできません：
+トレース中の関数内で使ったテンソルは定数になり、grad を要求するテンソルはそもそも定数
+としてトレースできません。`training` を登録するのは、`Module::train()` がこの属性のない
+モジュールを黙って飛ばし（`module.cpp`。assert は上流でコメントアウト）、メソッド内の
+`self.training` にも必要だからです。Python の `ScriptModule` も持っています。**(H20)**：
+ビルドでき、下のテストのとおりに振る舞う。これは機能でもあります（Pascal からの
+TorchScript）。`CreateEmpty`/`RegisterParameter`/`Define` として公開し、tch-rs からの差異
+として明示します。
+
+**`TIValue`。** タグの値は `ati_tag` にある分はそれと同じにします（*実測*：
+`TIValueTag(12) = ivGenericList`）ので、`FromC` は範囲検査のあとキャストするだけです。
+自分自身の配列は `TTensorArray` と同じく入れ子の型で（H10）：
+
+```pascal
+type
+  TIValueTag = (ivNone = 0, ivTensor = 1, ivDouble = 2, ivInt = 3, ivBool = 4, ivTuple = 5,
+    ivIntList = 6, ivDoubleList = 7, ivBoolList = 8, ivString = 9, ivTensorList = 10,
+    ivGenericList = 12, ivGenericDict = 13,
+    ivStringList = 20, ivDevice = 21);   // 入力専用：ati_tag の値がない（下記）
+  TBooleanArray = array of Boolean;      // これを使う record より前に
+
+  TIValue = record
+  public type
+    TIValueArray = array of TIValue;
+  public
+    Tag: TIValueTag;              // Default(TIValue) は None
+    Tensor: TTensor;              // ivTensor
+    I: Int64;                     // ivInt
+    D: Double;                    // ivDouble
+    B: Boolean;                   // ivBool
+    S: String;                    // ivString
+    Ints: TInt64Array;            // ivIntList
+    Doubles: TDoubleArray;        // ivDoubleList
+    Bools: TBooleanArray;         // ivBoolList
+    Strings: TStringArray;        // ivStringList（入力専用）
+    Tensors: TTensorArray;        // ivTensorList
+    Items: TIValueArray;          // ivTuple, ivGenericList。ivGenericDict: k0, v0, k1, v1, ...（C 側と同じく平坦）
+    Dev: TDevice;                 // ivDevice（入力専用）
+    class function None: TIValue; static;
+    class function FromTensor(const T: TTensor): TIValue; static;
+    class function FromInt(V: Int64): TIValue; static;
+    class function FromDouble(V: Double): TIValue; static;
+    class function FromBool(V: Boolean): TIValue; static;
+    class function FromString(const V: String): TIValue; static;
+    class function FromDevice(const V: TDevice): TIValue; static;
+    class function Tuple(const A: array of TIValue): TIValue; static;
+    class function IntList(const A: array of Int64): TIValue; static;      // TIValue の中では Tch の IntList にユニット名が要る
+    class function DoubleList(const A: array of Double): TIValue; static;
+    class function BoolList(const A: array of Boolean): TIValue; static;
+    class function StringList(const A: array of String): TIValue; static;
+    class function TensorList(const A: array of TTensor): TIValue; static;
+    class function GenericList(const A: array of TIValue): TIValue; static;
+    class function GenericDict(const KeysAndValues: array of TIValue): TIValue; static;  // 偶数個。でなければ ETorchError
+    class operator :=(const V: TTensor): TIValue;
+    class operator :=(V: Int64): TIValue;
+    class operator :=(V: Double): TIValue;
+    class operator :=(V: Boolean): TIValue;
+    class operator :=(const V: String): TIValue;
+    function IsNone: Boolean;
+    function TagName: String;                                 // 'Tensor', 'Tuple', ...（tch-rs の type_str）
+    function AsTensor: TTensor;        // タグが合わなければ ETorchError('ivalue: expected Tensor, got Tuple')
+    function AsInt: Int64;  function AsDouble: Double;  function AsBool: Boolean;  function AsString: String;
+    function AsIntList: TInt64Array;  function AsDoubleList: TDoubleArray;
+    function AsBoolList: TBooleanArray;  function AsTensorList: TTensorArray;
+    function Count: Integer;           // タプル／リスト：Length(Items)。辞書：Length(Items) div 2。型付きリスト：その長さ
+    function Item(Index: Integer): TIValue;                   // ivTuple または ivGenericList（tch-rs も両方を展開する）
+    function Key(Index: Integer): TIValue;  function Value(Index: Integer): TIValue;   // ivGenericDict
+    function ToC: PTorchIValue;                               // 新しい C の ivalue。呼び出し側が所有（ati_free）
+    class function FromC(P: PTorchIValue): TIValue; static;   // P を消費する（どの経路でも ati_free）
+  end;
+  TIValueArray = TIValue.TIValueArray;
+```
+
+- *実測*（M5）：明示したタグ値を持つ record がコンパイルでき、入れ子にできる。`V := 42`
+  / `2.5` / `0.9` / `True` / `'foo'` / record は `:=` 演算子を通して期待どおりのタグになる。
+  そして **`array of TIValue` 引数に渡した `[T, 42, 1.5]` は、これらの演算子を通して
+  要素ごとに変換される**ので、`M.ForwardIV([X, 42, 1.5])` と書けます。配列からの演算子は
+  意図的に置きません（曖昧になる）。名前付きのコンストラクタで足ります。
+- 意味論は 4.6 のとおり：コピーは `Items` を共有する。変更しないものとして扱う。
+- **`ToC`**（tch-rs の `to_c`）、タグごとに：`ati_none`。`TchCheckArg` の後の
+  `ati_tensor(T.Raw)`。`ati_int`/`ati_double`/`ati_bool(Ord(B))`。`ati_string(PChar(S))`。
+  型付きリストは record 自身の配列の上で（`ati_bool_list(PChar(@Bools[0]), n)` —
+  `SizeOf(Boolean) = 1`、実測、値は 0/1。`ati_string_list` は `Strings` から作った
+  `array of PChar` の上で。`ati_tensor_list` は `Raw` の上で、各要素を `TchCheckArg`）。
+  `ati_device(Dev.ToC)`。コンテナ：まず子を nil で初期化した `array of PTorchIValue` に
+  変換し、`ati_tuple` / `ati_generic_list` / `ati_generic_dict(…, Length(Items) div 2)` で
+  作り、`finally` で nil でない子をすべて解放する — C のコンテナは `IValue` をコピーして
+  いる（tch-rs も解放する）。奇数個の辞書は `ETorchError`。空の配列は `nil` を渡す
+  （空の配列の `@A[0]` は決して使わない。`ati_tuple(nullptr, 0)` は問題ない）。各 `ati_*`
+  の後に `TchCheck`。
+- **`FromC`**（tch-rs の `from_c`）：`try … finally ati_free(P)`。`nil` は `ETorchError`。
+  `Tag := ati_tag(P); TchCheck` — 14 は `ETorchError('ivalue: TorchScript objects are not
+  supported yet')`、列挙の外の他の値も例外（Device に対しては C 自身が "unsupported tag"
+  を投げる）。その後：Tensor → `TchCheck` の後の `TTensor.FromRaw(ati_to_tensor(P))`。
+  スカラー → `ati_to_int`/`double`/`bool` + `TchCheck`。String → `ati_to_string`、
+  `StrPas`、`tchf_free`（`strdup` 済み、2章）。型付きリスト → `N := ati_length`、`N` 個の
+  バッファ、`ati_to_*_list(P, PtrOrNil(buf), N)`（BoolList は `Byte` のバッファを通して
+  `<> 0`）。TensorList → nil で初期化した `PTorchTensor` のスロット、エラー時は
+  `TchCheckSlots`（Tch.pas）、でなければ各要素を `FromRaw`。Tuple / GenericList → `N :=
+  ati_tuple_length` / `ati_length`、`ati_to_tuple` / `ati_to_generic_list` を nil で
+  初期化した `array of PTorchIValue` に、そして子ごとに `C := Cs[K]; Cs[K] := nil;
+  Items[K] := FromC(C)` として、後の変換が例外を投げたときに `finally` がまだ消費して
+  いない子を `ati_free` できるようにする。GenericDict → `N := ati_length`（ペア数）、`2·N`
+  個のスロット、`ati_to_generic_dict(P, Cs, N)`、同じ消費の仕方。C 側はサイズを検査して
+  スロットを書く前に例外を投げ、`new` は途中で `bad_alloc` を出し得るので、スロットは nil
+  で初期化する（4.2 の固定 N 出力の規則）。
+- **入力専用の値。** `ivStringList` は `c10::List<string>` を作り、`ati_tag` はそれを 12
+  と報告します：String 要素の GenericList として戻ってきます（tch-rs の `jit5` が
+  まさにそれを期待している）。`ivDevice` には `ati_tag` の値がなく、Device の出力は
+  `ati_tag` から `ETorchNativeError` になります。GenericDict のペアは挿入順で戻ります：
+  `c10::Dict` は順序を保つハッシュマップで、tch-rs の往復テストもそれに依存しています
+  **(H24)**。
+
+**`TJitModule`**（tch-rs の `CModule`）：
+
+```pascal
+type
+  TTraceFunc   = function(const Inputs: TTensorArray): TTensorArray;
+  TTraceMethod = function(const Inputs: TTensorArray): TTensorArray of object;
+
+  TJitModule = class
+  private
+    FModule: PTorchModule;
+    {$push}{$warn 3018 off}
+    constructor CreateRaw(M: PTorchModule);          // 所有権を取る。M <> nil（TchCheck 済み）
+    {$pop}
+  public
+    constructor Create(const FileName: String); overload;                           // atm_load
+    constructor Create(const FileName: String; const ADevice: TDevice); overload;   // atm_load_on_device
+    constructor CreateFromStream(S: TStream); overload;                             // atm_load_str
+    constructor CreateFromStream(S: TStream; const ADevice: TDevice); overload;     // atm_load_str_on_device
+    constructor CreateEmpty(const ModuleName: String);                              // atm_create（フォーク）
+    class function CreateByTracing(const ModuleName, FnName: String;
+      const Inputs: array of TTensor; Fn: TTraceFunc): TJitModule; overload; static;
+    class function CreateByTracing(const ModuleName, FnName: String;
+      const Inputs: array of TTensor; Fn: TTraceMethod): TJitModule; overload; static;
+    destructor Destroy; override;                                                   // atm_free
+    function Forward(const Inputs: array of TTensor): TTensor;                      // atm_forward
+    function ForwardIV(const Inputs: array of TIValue): TIValue;                    // atm_forward_
+    function Method(const Name: String; const Inputs: array of TTensor): TTensor;   // atm_method
+    function MethodIV(const Name: String; const Inputs: array of TIValue): TIValue; // atm_method_
+    procedure SetEval;                                                              // atm_eval
+    procedure SetTrain;                                                             // atm_train
+    procedure ToDevice(const ADevice: TDevice; AKind: TKind; NonBlocking: Boolean = False);  // atm_to
+    procedure Save(const FileName: String);                                         // atm_save
+    function NamedParameters: TNamedTensorArray;                                    // atm_named_parameters
+    procedure RegisterParameter(const Name: String; const T: TTensor; IsBuffer: Boolean = False);  // フォーク
+    procedure Define(const Source: String);                                         // フォーク：TorchScript のソース
+    property Raw: PTorchModule read FModule;
+  end;
+
+function  JitGetProfilingMode: Boolean;              procedure JitSetProfilingMode(B: Boolean);
+function  JitGetTensorExprFuserEnabled: Boolean;     procedure JitSetTensorExprFuserEnabled(B: Boolean);
+procedure JitSetGraphExecutorOptimize(B: Boolean);
+```
+
+- `Forward`/`Method` はテンソルを、`ForwardIV`/`MethodIV` は `TIValue` を返します。これは
+  C 側の分け方です（タプルの結果に対して `atm_forward` は "forward did not return a
+  tensor" を投げる。下のテストはこのメッセージに依存する）。テンソルの入力：各要素を
+  `TchCheckArg`、`Raw` の `array of PTorchTensor`、空なら `nil`。IValue の入力：各要素を
+  `ToC` で nil 初期化した配列に、呼び出し、`TchCheck`、`FromC(結果)`。入力は `finally` で
+  解放します（tch-rs も呼び出しの後に解放する）。
+- `NamedParameters`：4.6.3 の `LoadCallback` とまったく同じ `cdecl` のトランポリンを、
+  `TchJit` 内の独自の `TParamContext` で（`TchNN` の private な補助を公開するより15行の
+  重複を選ぶ）。名前はそのまま（`|`→`.` は残すが無害）。呼び出しの後に無条件で
+  `get_and_reset_last_err`、取得した例外は再 raise。バッファはパラメータではない：
+  `foo.pt` の `value` は空のリストになります。
+- `CreateByTracing`：`atm_create_for_tracing(Name, inputs)`、`TchCheck`。`Outputs :=
+  Fn(TTensorArray としての Inputs)`（同じハンドル。tch-rs もクロージャに `inputs` を
+  渡す）。`atm_end_tracing(M, FnName, outputs, n)`、`TchCheck`。`Fn` が例外を投げたら：
+  libtorch のトレース状態はグローバルで、libtch に「中断」の入口はないので、ハンドラは
+  `atm_end_tracing(M, PChar(FnName), nil, 0)` を呼び、エラースロットを空にし
+  （`get_and_reset_last_err` → `tchf_free`）、`atm_free(M)` して再 raise します — できる
+  範囲で、**(H23)**：その後の `CreateByTracing` が動く（でなければ "cannot nest tracing
+  calls"）。
+- `CreateFromStream` は `S.Size - S.Position` バイトを `TBytes` に読み、
+  `atm_load_str(@Buf[0], Length(Buf))` を呼びます（C は `std::string` にコピーする）。
+  空のストリームは呼び出しの前に `ETorchError`。
+- `ToDevice` は tch-rs の `to(device, kind, non_blocking)` を保ちます：`atm_to` の dtype
+  は省略できません。
+- `Define(Source)`：TorchScript のテキスト。`def` は0桁目、本体は4スペース、行は `#10`
+  で結合。1回の呼び出しに複数の `def` があってもよい。コンパイルエラーは
+  `ETorchNativeError` として届きます。
+- グローバル：`atm_get_profiling_mode <> 0`、`atm_set_profiling_mode(Ord(B))`、
+  `atm_set_tensor_expr_fuser_enabled(Ord(B))`、`atm_get_tensor_expr_fuser_enabled`
+  （C++ の `bool` → `Boolean`）、`at_set_graph_executor_optimize(B)`（`PROTECT` なし。
+  検査するものはない）。
+
+**`TTrainableJitModule`**（tch-rs の `TrainableCModule`、`nn/mod.rs`）：
+
+```pascal
+type
+  TJitMode = (jmUnknown, jmTrain, jmEval);
+  TTrainableJitModule = class(TModule)
+  private
+    FInner: TJitModule;           // 所有する
+    FMode: TJitMode;
+    procedure RegisterInto(const P: TVarPath);
+  public
+    constructor Create(const FileName: String; const P: TVarPath);       // atm_load_on_device(P.Device)
+    constructor CreateFromStream(S: TStream; const P: TVarPath);
+    destructor Destroy; override;
+    function Forward(const X: TTensor; Train: Boolean = False): TTensor; override;
+    function ForwardIV(const Inputs: array of TIValue): TIValue;
+    function Method(const Name: String; const Inputs: array of TTensor): TTensor;
+    function MethodIV(const Name: String; const Inputs: array of TIValue): TIValue;
+    procedure Save(const FileName: String);
+    procedure SetTrain;  procedure SetEval;                                // FMode も設定する
+    property Inner: TJitModule read FInner;
+  end;
+```
+
+- 登録 = tch-rs の `TrainableCModule::load`：`FInner.NamedParameters` の各 `(Name, T)` に
+  ついて `P.Add(StringReplace(Name, '.', '_', [rfReplaceAll]), T, T.RequiresGrad)` —
+  変数名は `.` を拒否するので `.`→`_`（`encoder.layer1.weight` → `P` の接頭辞の下の
+  `encoder_layer1_weight`）。学習対象 = 読み込んだテンソルの `requires_grad`。`Add` は
+  ハンドルを共有します：ストアの要素はモジュールのパラメータ*そのもの*です
+  （`new torch::Tensor(v)` は `TensorImpl` を共有する）。よってストアへの `TOptimizer`
+  はスクリプト化モジュールをその場で更新し、`SetDevice`/`SetKind`（`set_data`）は
+  それを動かし、`Save` は学習済みの値を書きます **(H21)**。ストアの kind は適用しません
+  （tch-rs と同じ）。デバイスは `atm_load_on_device` による `P.Device`。
+- `Forward(X, Train)` = `FInner.Forward([X])`。tch-rs は `train` を無視します
+  （`forward_t(&self, xs, _train)`：`set_train` には `&mut self` が要る）。差異（明示）：
+  Pascal 版はこれを適用します — `FMode` が `jmUnknown` か `Train` と食い違うときに
+  `atm_train`/`atm_eval` を呼んで記憶する — ので、dropout や batch-norm を持つ
+  スクリプト化モデルも `TSequential` の `Train` の下で `TchNN` のレイヤーと同じように
+  振る舞います。読み込んだモジュールの `training` フラグは Python が保存したままなので、
+  最初の `Forward` までは `jmUnknown`。`SetTrain`/`SetEval` も `FMode` を設定します。
+
+**Python なしのテスト資材（決定）：次の両方。** それぞれ、もう一方にできないことのために。
+1. **tch-rs の `tests/foo.pt` … `foo8.pt` を `tests/jit/models/` に取り込む**（9ファイル、
+   15 KB、PyTorch の zip 形式バージョン3。ライセンスは我々と同じ MIT OR Apache-2.0。
+   CLAUDE.md に従い tch-rs の2つのライセンスファイルを隣にコピーし、コミットメッセージに
+   出典として `tch-rs 4227b89b tests/foo*.pt` と `tests/create_jit_models.py` を書く）。
+   本物の Python が書き出したファイル — それこそが用途 — で、`jit_tests.rs` が期待値を
+   与えます。`foo6.pt`/`foo7.pt` はオブジェクト待ち。内容（zip の `code/__torch__.py`
+   から）：`foo` は `2x + y + value`、バッファ `value = [42.0]`。`foo1` は `2x + y`。`foo2`
+   は `(2x + y, x - y)`。`foo3` は要素の積。`foo4` は `Tuple[float, float, int]` →
+   `x0 + x1·x2`。`foo5` は `List[str]` → 各文字列の末尾1文字を除いたもの。`foo8` は
+   `generate(Dict[str, Tensor])` → `(d['foo'], d['bar'])`。**(H19)**：libtorch 2.13 で
+   読み込め（tch-rs の CI はこのコミットでそうしている）、下の数値を与える。
+2. **Pascal でモジュールを作る**。パラメータや `self.training` が要るところは
+   `CreateEmpty` + `RegisterParameter` + `Define`（フォーク、H20）で、tch-rs の
+   `create_traced` には `CreateByTracing` で。トレースだけを唯一の手段にする案は却下：
+   パラメータも、タプルも、テンソル以外のシグネチャも作れない。
+
+**`tests/jit/jit_test.pas`**（本物の libtorch。tch-rs のテストと同じくリポジトリの
+ルートから実行。0次元の入力は `TTensor.scalar_tensor(42, kInt64, TDevice.Cpu)`。ファイル
+は `tests/jit/models/` の下）、手計算できる数値：
+1. `foo.pt`（`jit`）：`x = [3, 1, 4, 1, 5]`、`y = [7]`（kFloat）：`Forward([x, y]) = 2x +
+   y + 42 = [55, 51, 57, 51, 59]`。`Method('forward', …)` でも同じ。`NamedParameters` は空
+   （`value` はバッファ）。`Create(file, TDevice.Cpu)` も同じ結果。
+2. `foo1.pt`（`jit1`）：0次元 kInt64 の `42` と `1337` → `2·42 + 1337 = 1421`、kind は
+   `kInt64`。`Forward` と `Method('forward')` で。
+3. `foo2.pt`（`jit2`）：`ForwardIV([42 のテンソル, 1337 のテンソル])` → `Tag = ivTuple`、
+   `Count = 2`、`Item(0).AsTensor` = `1421`、`Item(1)` = `42 - 1337 = -1295`。`MethodIV`
+   でも同じ。タプルへの `AsTensor` は両方のタグを含む `ETorchError`。テンソル API の
+   `Forward` は `ETorchNativeError` "forward did not return a tensor"。
+4. `foo3.pt`（`jit3`）：`[1, 2, 3, 4, 5]` → `120`（0次元）。
+5. `foo4.pt`（`jit4`）：`ForwardIV([TIValue.Tuple([2.0, 3.0, 4])])` → `ivDouble` の
+   `2 + 3·4 = 14`。`NamedParameters` は空。
+6. `foo5.pt`（`jit5`）：`ForwardIV([TIValue.StringList(['foo', 'bar', 'foobar'])])` →
+   3つの `ivString` の `ivGenericList`：`'fo'`、`'ba'`、`'fooba'`。
+7. `foo8.pt`（`specialized_dict`、tch-rs issue 597）：`MethodIV('generate',
+   [TIValue.GenericDict(['bar', T[1, 7], 'foo', T[1, 2, 3]])])` → タプル `([1, 2, 3],
+   [1, 7])`。**(H22)**：`ati_generic_dict` はすべてのキーが文字列ですべての値がテンソルの
+   とき `Dict[str, Tensor]` に特化し、メソッドのスキーマはそれを要求する。
+8. 往復（tch-rs の `ivalue_round_trip`。公開した `ToC`/`FromC` を通して）：`None`。`True`、
+   `False`。`-1`、`42`、`15`。`''`、`'foobar'`。`Tuple([42, Pi])`。`IntList([42, 1337])`。
+   `DoubleList([e, Pi, 299792458.00001])`。`Tuple([BoolList([T, F, T, T]), DoubleList(…)])`。
+   `GenericList([42, 'foobar'])`。`GenericDict([42, 'foobar', 'foo', 'bar'])` は同じ順で
+   戻る（H24）。加えて `Tensor` `[1, 2, 3]`（値と kind を保つ）、空の `Tuple([])`（nil
+   ポインタの経路）、`ivString` の `ivGenericList` として戻る `StringList(['a', 'b'])`。
+   奇数個の `GenericDict` は `ETorchError`。
+9. トレース（`create_traced`）：`CreateByTracing('MyModule', 'MyFn', [0次元 kDouble の
+   0.0, 1.0], @AddFn)`、`AddFn = [Inputs[0] + Inputs[1]]`。一時ファイルに `Save`、`Create`
+   で読み戻し、`Method('MyFn', [[1, 2, 3, 4, 5], [41, 1335, Pi - 3, 4, 5]])`（kDouble）=
+   `[42, 1337, Pi, 8, 10]` と正確に一致（`Pi - 3` は Sterbenz の補題により正確なので
+   `(Pi - 3) + 3 = Pi`）。`Method('nope', …)` は `ETorchNativeError`。`ETorchError` を
+   投げるクロージャはそれを伝播させ、その後の2回目の `CreateByTracing` は動く（H23）。
+10. ソースからのスクリプト化モジュール（H20）：`M := TJitModule.CreateEmpty('Lin')`。
+    `RegisterParameter('weight', requires_grad 付きの zeros [1, 3])`、`('bias',
+    requires_grad 付きの zeros [1])`、`('scale', ones [1], grad なし)`。`Define('def
+    forward(self, x):'#10'    return (torch.matmul(x, torch.t(self.weight)) + self.bias) *
+    self.scale'#10)`。`Forward([[1, 2, 3]]) = 0`。`NamedParameters` = `weight`、`bias`、
+    `scale`（3つ、登録順）。一時的な `.pt` に `Save`。次に `J :=
+    TTrainableJitModule.Create(file, VS.Root / 'jit')`：`VS.Count = 3`（`jit.weight`、
+    `jit.bias`、`jit.scale`）、`TrainableVariables` は2つ（`scale` は grad なし）。
+    `Sgd(VS, 0.1)`、`X = [[1, 2, 3]]`、`Y = [[1]]`、`mse_loss = 1`。1回の `BackwardStep`：
+    `∂/∂w = -2·x·(1 - 0) = [-2, -4, -6]`、`∂/∂b = -2` → `w = [0.2, 0.4, 0.6]`、`b = 0.2`
+    で **`J.Forward(X) = 0.2 + 0.8 + 1.8 + 0.2 = 3.0`**（H21：モジュールがストアの
+    ステップを見る）。`J.Save`、`TJitModule` として読み戻し、`Forward([X]) = 3.0`。
+11. Train フラグ（H20）：`CreateEmpty('Mode')`、`Define('def forward(self, x):'#10'    if
+    self.training:'#10'        return x * 2'#10'    return x'#10)`：新しいモジュールは
+    `Forward([X]) = 2X`（`training` の既定は True）、`SetEval` → `X`、`SetTrain` → `2X`。
+    保存して `TTrainableJitModule` として読み戻す：`Forward(X, True) = 2X`、`Forward(X) =
+    X`、再び `Forward(X, True) = 2X`。
+12. グローバル：新しいプロセスで `JitGetProfilingMode` は True **(H25)**、
+    `JitSetProfilingMode(False)` の後は False、再び True。
+    `JitSetTensorExprFuserEnabled(True/False)` を読み戻す。
+    `JitSetGraphExecutorOptimize(True)` は例外を出さない。
+13. エラーとハンドル：`TJitModule.Create('tests/jit/models/missing.pt')` →
+    `ETorchNativeError`。`Define('def forward(self, x): return')` → `ETorchNativeError`。
+    すべてのモジュール、ストア、オプティマイザを解放したあと `TchLiveHandles` は開始時の
+    値に戻り、最後には 0。
+
+**モック**（`tests/mock/mock_tch.c`、配線のみ。`tests/mock/jit_mock_test.pas`）：`ivalue`
+は実際のペイロードを持つタグ付き構造体で、`mock_live_ivalues` カウンタ付き（`ati_*` は
+タグ 0〜13 について忠実に実装、文字列リストの `ati_tag` は 12 を報告）→ 項目8の往復を
+すべてモックで、その後 `mock_live_ivalues = 0`、奇数個の辞書、nil ポインタ。`module`
+構造体と `mock_live_modules`：`atm_load*` は名前に `missing` を含むと失敗、
+`atm_forward`/`atm_method` は最初のテンソルのコピーを返す（ないときはエラー）、
+`atm_forward_`/`atm_method_` は入力のクローンのタプルを返しメソッド名を記録する
+（`mock_last_method`）、`atm_eval`/`atm_train` → `mock_module_training`、`atm_to` は
+デバイスと dtype を、`atm_save` はファイル名を記録、`atm_named_parameters` は `weight`
+`[2, 3]`（grad あり）と `sub.bias` `[2]`（grad なし）でコールバック →
+`TTrainableJitModule` は `jit.weight` を学習対象として、`jit.sub_bias` を学習対象でなく
+登録する。`atm_create_for_tracing` / `atm_end_tracing` は呼び出し回数を数える（例外を
+投げるクロージャの経路は `atm_end_tracing` を出力 0 で1回呼ぶ）。`atm_create` /
+`atm_register_parameter` / `atm_define` は回数と最後のソースを記録。`atm_free` は減らす。
+確認できないもの：TorchScript そのものと、項目1〜11のすべての数値。
+
+**仮説（本物の libtorch が必要）：**
+- **(H19)** 取り込んだ `foo*.pt` は libtorch 2.13 で読み込め、項目1〜7の数値を与える。
+- **(H20)** フォークの追加：`Module::define` は上の2つのソース（`torch.matmul`、`torch.t`、
+  `self.training`）を libtorch 2.13 でコンパイルし、`register_attribute("training", Bool,
+  true)` で `self.training` と `atm_train`/`atm_eval` が働き、`named_parameters` は登録した
+  3つのパラメータ（バッファではない）をその `requires_grad` とともに返す。
+- **(H21)** パラメータの共有：ストアへの1回の SGD ステップの後に `J.Forward(X) = 3.0`
+  で、保存したモジュールは学習済みの値で読み戻せる。
+- **(H22)** `ati_generic_dict` の `Dict[str, Tensor]` への特化が `foo8.pt` の `generate`
+  に受け入れられる。
+- **(H23)** 例外を投げるクロージャの後の `atm_end_tracing(M, name, nil, 0)` でトレースは
+  引き続き使える。
+- **(H24)** `GenericDict` の往復は挿入順を保つ。
+- **(H25)** プロファイリングモードは既定で on。
 
 ### 4.7 勾配モードと全体設定
 
@@ -1605,3 +2154,11 @@ Pascal の配列からテンソルを作る、データを読み戻す、表示�
 JIT を除く 4.6 を実装。`tests/nn/nn_test.pas`（本物の libtorch）は 4.6.7 の数値すべてで
 通り、H13〜H18 は解決（結果は上の各仮説の横）。配線は `tests/mock/nn_mock_test.pas` が
 確認する。次は JIT（`TchJit`）、その後 CUDA。
+
+**マイルストーン3（クラウドセッション5、2026-10-10 で設計）：JIT。** 4.6.8 のとおりの
+`src/TchJit.pas` — タグ 0〜13 の `TIValue`、`TJitModule`、`TTrainableJitModule`、トレース、
+3関数のフォーク追加による TorchScript のソースからのスクリプト化モジュール、
+プロファイリング／fuser のスイッチ — と、`tests/jit/models/` に取り込む tch-rs の
+`tests/foo*.pt`、`tests/jit/jit_test.pas`、モックのスタブ。TorchScript のオブジェクト
+（タグ 14）と `atm_fuser_cuda_*` は先送り。同じローカルセッションで 4.3 の `FromArray` の
+改訂と 4.6.7 の積み残しも適用する。順序と仮説 H19〜H25 は HANDOFF_jp.md にあります。

@@ -4,6 +4,140 @@ Japanese version: [HANDOFF_jp.md](HANDOFF_jp.md)
 
 Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 
+## Cloud session 5 (2026-10-10): JIT designed, `FromArray` revised, local session 3 reviewed
+
+The request below ("Handing back to the cloud, end of local session 3") is
+answered for items 1–3; item 4 (milestone 3 layers, CUDA/ROCm) is
+untouched. Design only: nothing committed, no code outside the scratchpad.
+Summary:
+
+1. **JIT (DESIGN 4.6.8).** L2: `PTorchModule`, `PTorchIValue`, the 21
+   `atm_*`/`at_set_graph_executor_optimize` and 31 `ati_*` externals listed
+   there (`atm_named_parameters` reuses `TTorchLoadCallback`). Not declared:
+   TorchScript objects (tag 14: `ati_object_*`, `ati_clone`,
+   `atm_create_class_`, tests `jit6`/`jit_double_free`, `foo6.pt`/`foo7.pt`
+   — a later milestone, they need a refcounted handle) and `atm_fuser_cuda_*`
+   (CUDA). `TIValue`: tag values = `ati_tag`'s 0–13 plus input-only
+   `ivStringList`/`ivDevice`; static constructors, implicit `:=` from
+   `TTensor`/`Int64`/`Double`/`Boolean`/`String`, `As*`/`Item`/`Key`/`Value`
+   accessors; `ToC` (caller frees) / `FromC` (consumes) with nil-initialised
+   child slots and `finally` cleanup; `GenericDict` as flat key/value
+   `Items`. `TJitModule`: `Create(file[, device])`, `CreateFromStream`,
+   `CreateByTracing`, `CreateEmpty` + `RegisterParameter` + `Define` (fork
+   addition `atm_create`/`atm_register_parameter`/`atm_define`: three
+   one-line functions over `Module::define`, `register_parameter` and a
+   `training` attribute), `Forward`/`Method` (tensor), `ForwardIV`/`MethodIV`
+   (ivalue), `SetEval`/`SetTrain`, `ToDevice(device, kind)`, `Save`,
+   `NamedParameters` (4.6.3's trampoline, duplicated in `TchJit`), the
+   `Jit*` globals. `TTrainableJitModule = class(TModule)`:
+   `atm_load_on_device(P.Device)`, `P.Add(name with '.'→'_', T,
+   T.RequiresGrad)`, shared handles; `Forward(X, Train)` applies `Train`
+   through `atm_train`/`atm_eval` when it changes (stated deviation: tch-rs
+   ignores it). **Test assets:** vendor tch-rs's `tests/foo*.pt` into
+   `tests/jit/models/` (license files next to them) **and** build the
+   parameterised / `self.training` modules from TorchScript source in the
+   test; tracing alone cannot produce parameters. Thirteen test groups with
+   hand-checkable numbers in 4.6.8.
+2. **`FromArray` (DESIGN 4.3).** Drop the `Single` overload; the
+   `Double`/`Int64`/`Byte`/`Boolean` overloads get a trailing `AKind` with
+   the natural default (`kFloat`/`kInt64`/`kUInt8`/`kBool`);
+   `FromSingleArray` for `Single` buffers (as `FromInt32Array`). Measured:
+   every real literal then resolves to `Double` (float32 tensor by default,
+   PyTorch's rule and the same bits as Python); `[1, 2]` stays `Int64`; a
+   `Single` variable inside a literal converts, an `array of Single`
+   variable needs the named function.
+3. **Review of local session 3.** lr 1e-10: `‖g‖² = 80.955² + 8.974² =
+   6634.2`, `49 · 1e-10 · 6634.2 = 3.25e-5`, confirmed; the measured
+   `-3.24e-5` is within the float32 resolution of a loss near 23 (1.9e-6).
+   4.6.7 test 7 corrected to tch-rs's *add* / *add_partial* layouts (`t123`
+   once). `TVarPath.Group`, the `FullName` validation (`TryGet` raises on
+   `.`/`|`) and the `AddEntry` nil check confirmed. `CreateRaw` stays
+   private; warning 3018 silenced with `{$push}{$warn 3018 off} … {$pop}`
+   (measured: `strict private` warns too). All extra tests adopted into
+   4.6.7; one to add (the half-precision half of
+   `save_and_load_partial_var_store_incomplete_file`).
+
+**Measurements in the cloud (FPC 3.2.2; scratchpad only):**
+- M4: open-array literals against `FromArray` overload sets (table in 4.3):
+  a real literal is `Single` only if exactly representable in binary32 —
+  `[1.0, 2.0]`, `[2.5]`, `[1.0, 0.1]` pick `Single`, `[0.9, -1.9]`,
+  `[3.14]`, `[0.1]` are ambiguous; without the `Single` overload all resolve
+  to `Double`; the `AKind` defaults change nothing in the resolution.
+- M5: `TIValue` record with explicit tag values (`TIValueTag(12) =
+  ivGenericList`), nested tuples, implicit `:=` from `Int64`/`Double`/
+  `Boolean`/`String`/record; **`[T, 42, 1.5]` converts element-wise into an
+  `array of TIValue` argument** through those operators; `SizeOf(Boolean) =
+  1`.
+- M6: FPC warns `(3018) Constructor should be public` for `private` and
+  `strict private` constructors; `{$push}{$warn 3018 off} … {$pop}` removes
+  it.
+- M7: the fork's `atm_*`/`ati_*` region of `torch_api.{h,cpp}` is identical
+  to upstream 4227b89b (`diff`); the `foo*.pt` are zip format version 3 and
+  their TorchScript (`code/__torch__.py`) is summarised in 4.6.8.
+- M8: the whole 4.6.8 interface (`TIValue`, `TJitModule`,
+  `TTrainableJitModule`, the `Jit*` functions) compiled as a throwaway unit
+  with stub bodies against the real `Tch`/`TchNN` units: no errors, no
+  warning from the pragma-wrapped `CreateRaw`, and the test call shapes
+  `ForwardIV([X, 42, 1.5])`, `Tuple([2.0, 3.0, 4])`, `GenericDict(['bar', X,
+  'foo', X])`, `StringList([...])` resolve.
+
+**New hypotheses (need real libtorch):**
+- **(H19)** the vendored `tests/jit/models/foo*.pt` load with libtorch 2.13
+  and give `jit_tests.rs`'s numbers (4.6.8 items 1–7).
+- **(H20)** fork addition: `Module::define` compiles the two TorchScript
+  sources of 4.6.8 (`torch.matmul`, `torch.t`, `self.training`); the
+  registered `training` attribute makes `self.training` and
+  `atm_train`/`atm_eval` work; `named_parameters` returns the registered
+  parameters with their `requires_grad`.
+- **(H21)** parameter sharing: after one SGD step on the var-store,
+  `TTrainableJitModule.Forward(X) = 3.0`, and `Save` + reload keeps the
+  trained values.
+- **(H22)** `ati_generic_dict`'s `Dict[str, Tensor]` specialisation is
+  accepted by `foo8.pt`'s `generate`.
+- **(H23)** `atm_end_tracing(M, name, nil, 0)` after a raising trace
+  closure leaves tracing usable for the next `CreateByTracing`.
+- **(H24)** a `GenericDict` round trip keeps insertion order (`c10::Dict`
+  is order-preserving).
+- **(H25)** `JitGetProfilingMode` is True in a fresh process.
+
+**Local session, in this order (mechanical):**
+1. `FromArray` revision (DESIGN 4.3): `src/Tch.pas` — drop the
+   `array of Single` overload, add `AKind` defaults to the four others
+   (`kFloat` fast path: convert to a `Single` buffer in Pascal; otherwise
+   `totype`), add `FromSingleArray`. Tests: `tests/api/api_test.pas`
+   (`TDoubleArray.Create(0.25, 0.5)` is now `kFloat` — pass `kDouble` or
+   change the expectation; add `FromArray([0.9, -1.9])`, `FromArray([1, 2],
+   kFloat)`, `FromSingleArray`), `tests/nn/nn_test.pas` (the `Double(…)`
+   casts can go), `tests/compiler/h2_fromarray.pas` (the new set; `[0.9,
+   -1.9]`, `[3.14]`, `[1.0, 0.1]` → Double) plus a new
+   `xfail_h2_single.pas` showing `[0.9, -1.9]` ambiguous with both `Single`
+   and `Double` overloads. Run `tests/compiler/run.sh`, `tests/api`,
+   `tests/nn`, `tests/mock/run.sh`.
+2. 4.6.7 follow-ups: `{$push}{$warn 3018 off}` / `{$pop}` around
+   `TOptimizer.CreateRaw`; add the half-precision `LoadPartial` check of
+   4.6.7 item 7d to `TestSaveLoad`.
+3. Fork patch: `atm_create`, `atm_register_parameter`, `atm_define` in
+   `csrc/libtch/torch_api.{h,cpp}` (code in 4.6.8); rebuild libtch;
+   `tests/abi`, `tests/mock/run.sh` (the mock gets its stubs in step 7; the
+   test programs reference only what they use).
+4. Vendor `tests/jit/models/foo.pt` … `foo8.pt` plus `LICENSE-MIT` and
+   `LICENSE-APACHE` from tch-rs 4227b89b (`tests/`); commit message names
+   the source files and `tests/create_jit_models.py`.
+5. `src/TchSys.pas`: the JIT types and externals of 4.6.8.
+6. `src/TchJit.pas`, in this order so each part compiles alone: `TIValue`
+   (record, constructors, operators, accessors) → `ToC`/`FromC` →
+   `TJitModule` (load/free/forward/method/eval/train/to/save) →
+   `NamedParameters` trampoline → `CreateByTracing` → `CreateEmpty` /
+   `RegisterParameter` / `Define` → `Jit*` globals → `TTrainableJitModule`.
+7. Mock: `atm_*`/`ati_*` stubs in `tests/mock/mock_tch.c` (4.6.8 "Mock"),
+   `tests/mock/jit_mock_test.pas`, add it to `run.sh`.
+8. `tests/jit/jit_test.pas` with the thirteen groups of 4.6.8, checking
+   H19–H25 as they come up; record each result next to the (Hn) in
+   DESIGN.md.
+9. Update DESIGN/HANDOFF (en + jp); then hand TorchScript objects (tag
+   14), the milestone 3 layers (4.6.5 deferred list) and CUDA/ROCm back to
+   a design session if needed.
+
 ## Local session 3 (2026-10-10): milestone 2 implemented
 
 Steps 1–5 of cloud session 4's list (below) are done; every test passes.
@@ -49,7 +183,7 @@ Steps 1–5 of cloud session 4's list (below) are done; every test passes.
   `FromArray`; `[1.0, 0.1]` silently picks `Single`. Workaround in the
   tests: `[Double(0.9), -1.9]`.
 
-## Handing back to the cloud (2026-10-10, end of local session 3)
+## Handing back to the cloud (2026-10-10, end of local session 3) — answered in cloud session 5 above
 
 **Design only** (CLAUDE.md). Mark what needs real libtorch as H19, ...
 
@@ -681,9 +815,13 @@ build commands in each test's header and in "Local progress".
   added; no `overload` directive is needed in `objfpc` (measured), but
   tchgen uses `overload;` as the marker for deliberate overloads
   (DESIGN.md 4.4). Still open: `topk(k)`-style defaults for out-param ops.
-- **`FromArray` with real literals** (local session 3, H2 addendum in
-  DESIGN 4.3): the first element decides the element type; `[0.9, …]` is
-  ambiguous, `[1.0, 0.1]` rounds to `Single`. Handed to the cloud above.
+- **`FromArray` with real literals: decided** (cloud session 5, H2
+  addendum in DESIGN 4.3). The first element decides the element type and
+  a real literal is `Single` only when exactly representable, so `[0.9, …]`
+  was ambiguous and `[1.0, 0.1]` rounded to `Single`. The `Single` overload
+  is dropped, the others take `AKind` with the natural default (`kFloat`
+  for `Double`), and `FromSingleArray` covers `Single` buffers. To be
+  implemented in local session 4 (step 1 above).
 - **Equality and containers: decided** (cloud session 4). `=` stays
   un-overloaded for `TTensor`. `TchNN` needs only an append-only
   `array of TVarEntry`, a `TDictionary<String, Integer>` name index and

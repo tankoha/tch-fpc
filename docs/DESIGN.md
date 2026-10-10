@@ -588,14 +588,55 @@ function IntList(const A: array of Int64): TOptIntList;  // present, possibly em
   those parameters get `= kNone` defaults. Same for `LayoutOption` with
   `ltNone`. `Int64Option`/`DoubleOption` keep the records: there is no
   spare value in `Int64`/`Double` to mean "none".
-- **`FromArray` overloads (decided, H2 follow-up).** `array of Single`,
-  `array of Double`, `array of Int64`, `array of Byte` and
-  `array of Boolean`: measured, `[1, 2]` picks `Int64`, `[1.0, 2.0]`
-  `Single`, `[True, False]` `Boolean`, no ambiguity. `Int32` is dropped
-  (ambiguous with `Int64`, H2); `Int32` data go through
-  `FromInt32Array` (named `FromInt32s` in earlier drafts), `Int16`/`Int8`
-  through `FromBytes`. Hand-written, first milestone; implemented in local
-  session 2.
+- **`FromArray` overloads (decided, H2 follow-up; revised in cloud session
+  5).** First decision (cloud session 3, implemented in local session 2):
+  `array of Single`, `array of Double`, `array of Int64`, `array of Byte`,
+  `array of Boolean`; `Int32` dropped (ambiguous with `Int64`, H2), `Int32`
+  data through `FromInt32Array`, `Int16`/`Int8` through `FromBytes`.
+  **H2 addendum, measured** (local session 3, cloud session 5; FPC 3.2.2):
+  an open-array constructor takes its element type from its **first**
+  element, and a real literal is typed `Single` only when its value is
+  exactly representable in binary32. With both `Single` and `Double`
+  overloads: `[1.0, 2.0]`, `[2.5]`, `[0.75]`, `[100.0]`, `[1.5e2]` pick
+  `Single`, and so does `[1.0, 0.1]` — `0.1` and a `Double` variable in
+  `[1.5, D]` are rounded to `Single` silently; `[0.9, -1.9]`, `[3.14]`,
+  `[0.1]`, `[1e-3]`, `[0.3]`, `[0.1, 1.0]` are compile errors ("Can't
+  determine which overloaded function to call"). Whether a literal
+  compiles thus depends on the binary expansion of its first element.
+  **Revised decision:** drop the `Single` overload and give the four
+  remaining overloads a trailing kind with the natural default:
+
+  ```pascal
+  class function FromArray(const A: array of Double;  AKind: TKind = kFloat): TTensor; overload; static;
+  class function FromArray(const A: array of Int64;   AKind: TKind = kInt64): TTensor; overload; static;
+  class function FromArray(const A: array of Byte;    AKind: TKind = kUInt8): TTensor; overload; static;
+  class function FromArray(const A: array of Boolean; AKind: TKind = kBool):  TTensor; overload; static;
+  class function FromSingleArray(const A: array of Single; AKind: TKind = kFloat): TTensor; static;
+  ```
+
+  Measured with exactly this set: `[1.0, 2.0]`, `[0.9, -1.9]`, `[1.0, 0.1]`,
+  `[3.14]`, `[1.5, 2]`, `[D, 1.5]`, `[1.5, D]` and `[S]` (a `Single`
+  variable) all resolve to `Double`; `[1, 2]`, `[1, 5000000000]`, `[N, 2]`
+  stay `Int64`; `[Byte(200), 1]` `Byte`; `[True, False]` `Boolean`;
+  `FromArray([0.9, -1.9], kDouble)` and `FromArray([1, 2], kFloat)` pass the
+  kind through. An `array of Single` *variable* no longer matches any
+  overload, hence `FromSingleArray` (the same treatment `Int32` got).
+  `[1, 2.5]` remains an error (an `Int64` array, then `Single`): write
+  `[1.0, 2.5]`. Rule to document for users: a literal array is typed by its
+  first element; an integer first element makes an integer array.
+  - The `kFloat` default keeps PyTorch's `torch.tensor([1.0, 2.0])` default
+    (float32) and produces the same bits as Python does (decimal → binary64
+    → binary32); the kind parameter replaces a `.to_dtype` on the result.
+  - Implementation: `Double` with `AKind = kFloat` converts into a `Single`
+    buffer in Pascal and calls `at_tensor_of_data` once (no second tensor);
+    every other combination creates the natural kind and applies
+    `totype(AKind)` when it differs. `FromSingleArray` is the old `Single`
+    body plus the kind.
+  - Existing callers: `tests/api` expects `TDoubleArray.Create(0.25, 0.5)`
+    to give `kDouble` (now `kFloat` unless `kDouble` is passed), `tests/nn`
+    casts `[Double(0.9), -1.9]` (no longer needed), and
+    `tests/compiler/h2_fromarray.pas` documents the old set — all updated
+    in local session 4 (HANDOFF).
 - **Element sizes (local session 2, measured).** `KindElementSize(AKind)`
   is a Pascal table, checked against libtorch's `element_size()` for all
   46 kinds by `tests/api` (libtch's `at_copy_data` rejects a wrong size):
@@ -802,6 +843,8 @@ gen/
   tchgen.pas                 Pascal emitter (section 5)
 csrc/libtch/                 forked C wrapper + CMakeLists.txt
 tests/mock/                  mock libtch + test of the generated layer (no libtorch)
+tests/jit/                   TchJit test (real libtorch); models/ = tch-rs's tests/foo*.pt
+                             with tch-rs's license files next to them (4.6.8)
 gen/                         gen.ml (forked) + Pascal emitter
 ```
 
@@ -888,6 +931,7 @@ type
     function Sub(const Name: String): TVarPath;               // raises on '.' in Name
     class operator /(const P: TVarPath; const Name: String): TVarPath;
     function SetGroup(G: Integer): TVarPath;
+    function Group: Integer; inline;                          // local session 3 addition, confirmed
     function Store: TVarStore; inline;
     function Device: TDevice;
     function Kind: TKind;
@@ -1048,7 +1092,9 @@ type
     FOpt: PTorchOptimizer;
     FStore: TVarStore;            // not owned; free the optimizer before the store
     FVarsInOptimizer: Integer;    // variables_in_optimizer
+    {$push}{$warn 3018 off}       // "Constructor should be public": the factories below are the API (4.6.4)
     constructor CreateRaw(AOpt: PTorchOptimizer; VS: TVarStore);
+    {$pop}
     procedure AddMissingVariables;
   public
     class function Sgd(VS: TVarStore; LR: Double; Momentum: Double = 0; Dampening: Double = 0;
@@ -1112,16 +1158,18 @@ Decisions and rationale (overall shape):
 - **JIT.** `TJitModule` is a class (few instances, explicit lifetime, like a
   file). `TIValue` is a tagged record (`Tag`, `Tensor`, `I`, `D`, `B`, `S`,
   `Items: array of TIValue`, `Tensors: TTensorArray`, ...) with static
-  constructors (`TIValue.Tuple([...])`) and `As*` accessors that raise on a
-  tag mismatch. **(H10)** A record containing a dynamic array of its own type
-  must compile on 3.2.2; the fallback is an fpjson-style class hierarchy.
-  **(H10) resolved** (step 7): it compiles and nests (tuple of tuples).
-  Semantics to document: `W := V` shares `Items` (dynamic arrays are
-  refcounted, not copy-on-write), so writing `W.Items[0]` changes `V` too.
-  `TIValue` should be treated as immutable after construction.
-  `TTrainableJitModule` registers `NamedParameters` into a `TVarPath` and
-  derives from `TModule`, so a scripted model can be fine-tuned with
-  `TOptimizer` like any other layer. Not part of milestone 2.
+  constructors (`TIValue.Tuple([...])`), implicit `:=` operators from
+  `TTensor`, `Int64`, `Double`, `Boolean` and `String`, and `As*` accessors
+  that raise on a tag mismatch. **(H10)** A record containing a dynamic
+  array of its own type must compile on 3.2.2; the fallback is an
+  fpjson-style class hierarchy. **(H10) resolved** (step 7): it compiles and
+  nests (tuple of tuples). Semantics to document: `W := V` shares `Items`
+  (dynamic arrays are refcounted, not copy-on-write), so writing
+  `W.Items[0]` changes `V` too. `TIValue` should be treated as immutable
+  after construction. `TTrainableJitModule` registers `NamedParameters`
+  into a `TVarPath` and derives from `TModule`, so a scripted model can be
+  fine-tuned with `TOptimizer` like any other layer. Not part of milestone
+  2; the mechanical design is 4.6.8 (cloud session 5).
 
 #### 4.6.1 Initialisation (`TInit`), from `src/nn/init.rs`
 
@@ -1230,7 +1278,16 @@ Decisions and rationale (overall shape):
   when the string contains `.` (tch-rs panics: "sub name cannot contain .",
   "variable name cannot contain ."). Stricter than tch-rs, stated: `|` is
   rejected too (it would come back as `.` after a save/load round trip) and
-  so is the empty string.
+  so is the empty string. The check lives in `TVarPath.FullName`, which
+  every path operation goes through, so `TVarPath.TryGet('a.b')` raises
+  instead of returning False (tch-rs's `Path::get` only joins the strings;
+  a dotted name can never have been added, so raising is the consistent
+  choice); the store-level `TVarStore.TryGet(FullName)` takes a full dotted
+  name and does not validate. `AddEntry` checks the tensor with
+  `TchCheckArg` (4.2: `set_requires_grad` would otherwise be the first C
+  call on a nil handle), and `TVarPath.Group` reads the group next to
+  `Device`/`Kind`. These three are local session 3 additions, confirmed in
+  cloud session 5.
 - **`GetOrAdd(Name, Dims, Init)`** (`Entry::or_var`): returns the existing
   tensor by full name whatever `Dims` and `Init` say (tch-rs test
   `var_store_entry`: a second `or_zeros(&[1, 5, 9])` returns the `[3, 1, 4]`
@@ -1383,7 +1440,13 @@ Decisions and rationale (overall shape):
   `ato_add_parameters(FOpt, Tensor.Raw, Group)` for every `FTrainable`
   entry in order, `FVarsInOptimizer := Length(FStore.FTrainable)`.
   `ato_add_parameters` creates param groups up to `group`, each a clone of
-  the defaults, so groups may be sparse (as in tch-rs).
+  the defaults, so groups may be sparse (as in tch-rs). `CreateRaw(AOpt,
+  VS)` is a private constructor used by the four class functions; FPC 3.2.2
+  warns `(3018) Constructor should be public` about it (measured in cloud
+  session 5: for `strict private` too). Decision: keep it private — the
+  factories are the API and a public raw-pointer constructor is not — and
+  silence the warning with `{$push}{$warn 3018 off} … {$pop}` around the
+  declaration (measured: no warning left).
 - **Lazy add** (`add_missing_variables`): `ZeroGrad`, `Step` and the three
   `BackwardStep*` first add `FStore.FTrainable[FVarsInOptimizer..]` with
   their groups and update the count; `ClipGrad*` and the setters do not.
@@ -1491,63 +1554,121 @@ so `.ot` files interchange.
   (4.5). `TchJit.pas` comes with the JIT milestone.
 - **`TchSys.pas` additions:** `PTorchOptimizer`, `TTorchLoadCallback`,
   `at_save_multi`, `at_load_callback_with_device`,
-  `at_loadz_callback_with_device`, the thirteen `ato_*` of 4.6.4.
-  **`Tch.pas` addition:** `TTensor.CopyFrom(const Src: TTensor)` over
-  `at_copy_`. **Fork patch:** `ato_set_momentum_group` `} else if`
-  (4.6.4), then rebuild `libtch.so`.
-- **`tests/nn/nn_test.pas`** (real libtorch), hand-checkable numbers:
+  `at_loadz_callback_with_device`, the fourteen `ato_*` of 4.6.4 (thirteen
+  plus `ato_free`). **`Tch.pas` addition:** `TTensor.CopyFrom(const Src:
+  TTensor)` over `at_copy_`. **Fork patch:** `ato_set_momentum_group`
+  `} else if` (4.6.4), then rebuild `libtch.so`.
+- **`tests/nn/nn_test.pas`** (real libtorch; build line in its header),
+  hand-checkable numbers. This list says what the test does since local
+  session 3, as reviewed in cloud session 5 (the additions beyond cloud
+  session 4's list are adopted; one addition is still to be made, in 7d):
   1. Init: `KaimingUniform` on `[4, 16]`: every value in
-     `±sqrt(6/16) = ±0.6124`, mean within 0.1 of 0; `Constant(3)` all 3;
-     `Orthogonal` `[3, 5]` and `[5, 3]` (H14), result shape = `Dims`.
-  2. Store: `a.b.t2` naming through `Sub`; `Sub('x.y')` and `Zeros('a.b',
-     …)` raise; adding `t123` twice gives `Count = 4` with the second named
-     `a.b.ccc.t123__3` (tch-rs `save_and_load_var_store`); `GetOrAdd` of an
-     existing name returns the `[3, 1, 4]` tensor whatever dims are asked;
-     `TrainableVariables` in registration order; `Freeze` →
-     `RequiresGrad = False`, `Unfreeze` → True; `Freeze; Step` changes
-     nothing (H18).
+     `±sqrt(6/16) = ±0.6124`, mean within 0.1 of 0; `FanForDims` of
+     `[8, 3, 5, 5]` = 75 (in) / 200 (out); `Constant(3)` all 3,
+     `Constant(1)` keeps the asked kind; `Orthogonal` `[3, 5]`, `[5, 3]` and
+     `[2, 3, 2]` with gain 2 (H14), result shape = `Dims`, 1-d raises.
+     `Apply` (H17): `fill_` on a trainable leaf without the guard raises,
+     `Apply` of every `TInit` kind succeeds and the variable still requires
+     grad.
+  2. Store: `a.b.t2` naming through `Sub` and `/`; `Sub('x.y')`,
+     `Zeros('a.b', …)`, `Zeros('a|b', …)` and `Sub('')` raise and add
+     nothing; adding `t123` twice gives `Count = 4` with the second named
+     `a.b.ccc.t123__3` (tch-rs `save_and_load_var_store`); `TryGet` by full
+     name, through a path, and of a missing name; `GetOrAdd` of an existing
+     name returns the `[3, 1, 4]` tensor whatever dims are asked;
+     `ZerosNoTrain` does not require grad; `TrainableVariables` in
+     registration order; `Freeze` → `RequiresGrad = False`, `Unfreeze` →
+     True; `VarCopy`. `Freeze; Step` changes nothing (H18). `SetKind(kDouble)`
+     after creating a `TLinear` and an SGD optimizer: the layer's `Weight`
+     is `kDouble`, the step gives the hand value `[0.9, 0.8]` and stays
+     `kDouble` (H13); `SetDevice(Cpu)` keeps the handle usable;
+     `TVarPath.SetKind(kFloat)` on the `lin` sub-tree converts `weight` and
+     `bias` only.
   3. Linear regression (tch-rs `optimizer_test`): `xs = 1..14` as
      `[14, 1]` float, `ys = 0.42·xs + 1.337`, `TLinear(1, 1)` with both
      inits `Constant(0)`, `Sgd(VS, 0)` then `SetLearningRate(1e-2)`. Initial
      `mse_loss` = `mean((0.42x + 1.337)²) = (0.1764·1015 + 1.12308·105 +
      14·1.787569) / 14 = 22.99967`. After **one** step: `w = 0.80955`,
-     `b = 0.08974` (`∂/∂w = -2/14·Σx·y = -80.955`, `∂/∂b = -2/14·Σy =
-     -8.974`), to 1e-3 in float32. After 49 `BackwardStep`s loss < 0.25;
-     `Apply(Constant(0))` on both resets the loss to the initial value;
-     `SetLearningRate(1e-10)` and 49 more steps: tch-rs checks
-     `final - initial < 1e-5` (**signed**). An absolute bound of 1e-5 does
-     not hold: the loss drops by `49 · 1e-10 · (80.955² + 8.974²) =
-     3.25e-5`, measured `-3.24e-5` (local session 3); the test checks both.
+     `b = 0.08974` (`∂/∂w = -2/14·Σx·y = -2/14·566.685 = -80.955`,
+     `∂/∂b = -2/14·Σy = -2/14·62.818 = -8.974`), to 1e-3 in float32. After
+     49 `BackwardStep`s loss < 0.25; `Apply(Constant(0))` on both resets the
+     loss to the initial value; `SetLearningRate(1e-10)` and 49 more steps:
+     tch-rs checks `final - initial < 1e-5` (**signed**). An absolute bound
+     of 1e-5 does not hold: with the gradient essentially constant, each
+     step lowers the loss by `lr·‖g‖² = 1e-10 · (80.955² + 8.974²) =
+     1e-10 · 6634.2 = 6.634e-7`, so 49 steps give `3.25e-5`; measured
+     `-3.24e-5` (local session 3), within the float32 resolution of a loss
+     near 23 (ulp 1.9e-6). The test checks both: the signed tch-rs bound
+     and `Near(L - Initial, -3.25e-5, 5e-6)`. Arithmetic confirmed in cloud
+     session 5. Also: `TLinear` with `Bias False` registers one variable,
+     `Bias.IsNil`, forward `[4, 3] → [4, 2]`.
   4. Adam: parameter `p = [1, -2]`, `loss = sum(p²)`, `Adam(VS, 0.1)`, one
      `BackwardStep` → `p = [0.9, -1.9]` to 1e-6: Adam's first step is
-     `-lr·g/(|g| + eps)`, i.e. `lr·sign(g)`.
-  5. Gradient clipping: the numbers of 4.6.4.
+     `-lr·g/(|g| + eps)`, i.e. `lr·sign(g)`. AdamW with the default weight
+     decay 0.01 on the same `p`: PyTorch decays first, `p ← p·(1 - lr·wd) =
+     [0.999, -1.998]`, then the Adam step `lr·sign(g)` → **`[0.899,
+     -1.898]`** to 1e-6 (local session 3 addition, arithmetic confirmed).
+     RmsProp step and `SetMomentum`, SGD `SetMomentumGroup`, the Adam setters
+     raise nothing; `SetMomentumGroup(0, 0.8)` on Adam raises nothing with
+     the patched fork (H16; `build/nn_test h16` runs this check alone).
+  5. Gradient clipping: the numbers of 4.6.4; `ClipGradNorm` with no
+     gradients exits quietly; `BackwardStepClip(4)` steps with the clipped
+     gradient (`v2 = 1 - 4`).
   6. Lazy add: create the optimizer, then add a trainable variable, one
-     `BackwardStep` changes it; a variable in group 1 with
-     `SetLearningRateGroup(1, 0)` does not move while group 0 does.
-  7. Save → Load (tch-rs `save_and_load_var_store`): under `NoGradGuard`
-     `u += 42`, `v *= 2`; `Save` to a temp `.ot`; a second store with the
-     same layout `Load`s it: means 42 and 2; nested names round-trip through
-     `|`. `Load` into a store with an extra variable raises `ETorchError`
-     naming it; `LoadPartial` returns `['a.b.t2']` (tch-rs
-     `…_incomplete_file`); `SetFloatKind(kHalf)`, save, load into a float
-     store → variables are `kHalf` with the same means (H15).
+     `BackwardStep` changes it and `TrainableVariables` sees it; a variable
+     in group 1 with `SetLearningRateGroup(1, 0)` does not move while group
+     0 does.
+  7. Save → Load, with the layouts of tch-rs's `tests/var_store.rs`:
+     *full* (`save_and_load_var_store`: `a.b.t2 [3]`, `t1 [4]`,
+     `a.b.ccc.t123 [3]` **twice** → `t123__3`), *add* (`t1`, `t123` once)
+     and *add_partial* (`a.b.t2`, `t1`, `t123` once).
+     (a) Two full-layout stores; under `NoGradGuard` `u += 42`, `v *= 2`;
+     `Save` to a temp `.ot`; the second store `Load`s it: means 42 and 2,
+     nested names round-trip through `|`, the loaded variable still
+     requires grad. (b) `Load` into a full-layout store with an extra
+     `extra.x` raises `ETorchError` naming it and leaves the store unchanged
+     (tch-rs `save_and_load_var_store_incomplete_file`, `should_panic`);
+     `LoadPartial` there returns `['extra.x']` and loads the rest.
+     (c) `SetFloatKind(kHalf)`, save, `Load` into a fresh float store →
+     variables `kHalf` with the same means (H15).
+     (d) tch-rs `save_and_load_partial_var_store_incomplete_file`: store 1
+     with *add*, store 2 with *add_partial*, `u1 += 42`, `LoadPartial`
+     returns **`['a.b.t2']`**, `u2 = 42`, `v2` untouched (1). Cloud session
+     4 wrote this case with the full layout, where `a.b.ccc.t123__3` would
+     be missing as well; corrected (local session 3 / cloud session 5).
+     **To add** (local session 4), the second half of that tch-rs test:
+     `SetFloatKind(kHalf)` on store 1, save, `LoadPartial` into a fresh
+     float *add_partial* store → `u2` is `kHalf` with mean 42, the missing
+     `v2` stays `kFloat` with mean 1, missing = `['a.b.t2']`.
+     (e) `Save` to `.safetensors` raises `ETorchError`; `Load` of a missing
+     file raises `ETorchNativeError`. (f) `CopyFrom`: copies by name
+     (`u2 = 7`); a name missing in the source raises `ETorchError` naming it.
   8. Layers: `TConv2D(1, 1, 3)` with `Padding 1`, `Bias False`, weights
      filled with 1 on `[[1, 2], [3, 4]]` (NCHW `[1, 1, 2, 2]`): zeros
      padding → `[10, 10, 10, 10]`, reflect → `[27, 24, 21, 18]`, circular
      → `[27, 24, 21, 18]`, replicate → `[18, 21, 24, 27]` (tch-rs `conv`
-     test). `TBatchNorm(1, 40)` registers 4 variables (2 with `Affine`
-     False), forward on `[10, 40]` in train mode runs; `[10, 40, 3, 3]`
-     raises. `TLayerNorm([2])` fit (tch-rs `layer_norm_parameters_test`:
-     `xs = [[42, 42], [42, 24]]`, SGD lr 1.0, initial loss > 1, after 49
-     steps < 0.25). `TEmbedding(10, 4)` on `randint(10, [5, 7])` gives
-     `[5, 7, 4]` and the `PaddingIdx` row equals `Weight`'s row. `TLinear`
-     registers `weight` and `bias` (`Count` 2, or 1 without bias).
-  9. Sequential: `AddFn(@Relu)` on `[1, -1, 2]` → `[1, 0, 2]`; a
-     `TTensorFuncT` that records `Train` sees the flag passed by
-     `Forward(X, True)`; `ForwardAll` returns one tensor per layer.
+     test); `TConv2D(4, 6, 3)` registers `c.bias` then `c.weight` and maps
+     `[2, 4, 8, 8] → [2, 6, 6, 6]`. `TBatchNorm(1, 40)` registers 4
+     variables (`running_mean`, `running_var` not trainable; 2 with
+     `Affine` False), forward on `[10, 40]` in train mode runs and changes
+     the running stats; `[10, 40, 3, 3]` raises; `BatchNorm2d` eval forward
+     keeps the shape. `TLayerNorm([2])` fit (tch-rs
+     `layer_norm_parameters_test`: `xs = [[42, 42], [42, 24]]`, SGD lr 1.0,
+     initial loss > 1, after 49 steps < 0.25, reset restores the initial
+     loss). `TEmbedding(10, 4)` on `randint(10, [5, 7])` gives `[5, 7, 4]`
+     and the `PaddingIdx` row equals `Weight`'s row. `TLinear` registers
+     `weight` and `bias` (`Count` 2, or 1 without bias).
+  9. Sequential: an empty sequential returns the same handle and
+     `ForwardAll` of it is `[X]`; `AddFn(@Relu)` on `[1, -1, 2]` →
+     `[1, 0, 2]`; the four `AddFn` overloads chained (function,
+     function+Train, method, method+Train on a `Factor = 3` object):
+     `Forward(X, True)` = `[9, 0, 18]` and the `TTensorFuncT` sees `Train`,
+     `Forward(X)` = `[3, 0, 6]`; `ForwardAll` returns one tensor per layer,
+     `ForwardAll(N = 2)` two; `Items[0] is TFuncModule`. An MLP of two
+     `TLinear` and a ReLU: `[4, 3] → [4, 2]`, 4 variables.
   10. `TchLiveHandles` returns to its starting value after freeing the
-      optimizer, the layers and the store, in that order.
+      optimizer, the layers and the store, in that order (a 5-step Adam
+      training loop over an MLP in between), and is 0 at the very end.
 - **What the mock can cover** (extend `tests/mock/mock_tch.c`, plumbing
   only): `ato_*` stubs over a counter struct (adds per group, zero_grad and
   step counts, exposed as `mock_opt_*`) → construction and lazy-add counts;
@@ -1560,6 +1681,503 @@ so `.ot` files interchange.
   `TSequential` / `TFuncModule` chaining over `add_scalar`. Not coverable
   there: anything numerical (distributions, QR, `linear`, `conv2d`,
   `batch_norm`, backward, `step`), which is the real-libtorch test above.
+
+#### 4.6.8 JIT (`TchJit`), from `wrappers/jit.rs`, `nn/mod.rs`, `tests/jit_tests.rs` and `torch_api.cpp`
+
+Designed in cloud session 5 against the same tch-rs commit. The
+`atm_*`/`ati_*` region of the fork's `torch_api.{h,cpp}` is byte-identical
+to upstream (checked with `diff`). What needs real libtorch is
+**(H19)**–**(H25)**; what was measured on FPC 3.2.2 in the cloud is marked
+*measured*. The complete interface below (`TIValue`, `TJitModule`,
+`TTrainableJitModule`, the `Jit*` functions) was compiled as a throwaway
+unit with stub bodies against the real `Tch`/`TchNN` units (*measured*, M8
+in HANDOFF): no errors, and the call shapes used by the tests resolve.
+
+**Scope (milestone 3).** Loading, running, saving and tracing TorchScript
+modules; `TIValue` for `ati_tag` values 0–13 (None, Tensor, Double, Int,
+Bool, Tuple, IntList, DoubleList, BoolList, String, TensorList,
+GenericList, GenericDict) plus the two input-only values StringList and
+Device; `TTrainableJitModule`; scripted modules built from TorchScript
+source (a three-function fork addition, below); the profiling/fuser
+switches. **Deferred**, with their L2 lines: TorchScript objects (tag 14 —
+`ati_object_method_`, `ati_object_getattr_`, `ati_clone`,
+`atm_create_class_`; tch-rs `Object`, tests `jit6` and `jit_double_free`,
+assets `foo6.pt`/`foo7.pt`), because an object keeps its C `IValue` alive
+and needs a refcounted handle like `TTensorHandle`, and nothing in the
+fine-tuning use case needs them; and `atm_fuser_cuda_*` (with CUDA).
+
+**L2 (`TchSys.pas`).** `PTorchModule = Pointer` (`torch::jit::script::
+Module*`), `PTorchIValue = Pointer` (`torch::jit::IValue*`),
+`PPTorchIValue = ^PTorchIValue`. Externals exactly as `torch_api.h`, with
+section 2's types (`cint` for `int`, `Boolean` for C++ `bool`, `csize_t`,
+`PChar`, `PPChar`, `PInt64`, `PDouble`); `atm_named_parameters` has the
+load callback's signature and reuses `TTorchLoadCallback`:
+
+```pascal
+function  atm_load(filename: PChar): PTorchModule; cdecl; external LibTch;
+function  atm_load_on_device(filename: PChar; device: cint): PTorchModule; cdecl; external LibTch;
+function  atm_load_str(data: PChar; sz: csize_t): PTorchModule; cdecl; external LibTch;
+function  atm_load_str_on_device(data: PChar; sz: csize_t; device: cint): PTorchModule; cdecl; external LibTch;
+function  atm_forward(m: PTorchModule; tensors: PPTorchTensor; ntensors: cint): PTorchTensor; cdecl; external LibTch;
+function  atm_forward_(m: PTorchModule; ivalues: PPTorchIValue; nivalues: cint): PTorchIValue; cdecl; external LibTch;
+function  atm_method(m: PTorchModule; method_name: PChar; tensors: PPTorchTensor; ntensors: cint): PTorchTensor; cdecl; external LibTch;
+function  atm_method_(m: PTorchModule; method_name: PChar; ivalues: PPTorchIValue; nivalues: cint): PTorchIValue; cdecl; external LibTch;
+procedure atm_eval(m: PTorchModule); cdecl; external LibTch;
+procedure atm_train(m: PTorchModule); cdecl; external LibTch;
+procedure atm_free(m: PTorchModule); cdecl; external LibTch;
+procedure atm_to(m: PTorchModule; device, dtype: cint; non_blocking: Boolean); cdecl; external LibTch;
+procedure atm_save(m: PTorchModule; filename: PChar); cdecl; external LibTch;
+function  atm_get_profiling_mode: cint; cdecl; external LibTch;
+procedure atm_set_profiling_mode(b: cint); cdecl; external LibTch;
+procedure atm_set_tensor_expr_fuser_enabled(b: cint); cdecl; external LibTch;
+function  atm_get_tensor_expr_fuser_enabled: Boolean; cdecl; external LibTch;
+procedure at_set_graph_executor_optimize(b: Boolean); cdecl; external LibTch;
+procedure atm_named_parameters(m: PTorchModule; data: Pointer; f: TTorchLoadCallback); cdecl; external LibTch;
+function  atm_create_for_tracing(modl_name: PChar; inputs: PPTorchTensor; ninputs: cint): PTorchModule; cdecl; external LibTch;
+procedure atm_end_tracing(m: PTorchModule; fn_name: PChar; outputs: PPTorchTensor; noutputs: cint); cdecl; external LibTch;
+// fork additions (below)
+function  atm_create(modl_name: PChar): PTorchModule; cdecl; external LibTch;
+procedure atm_register_parameter(m: PTorchModule; name: PChar; t: PTorchTensor; is_buffer: Boolean); cdecl; external LibTch;
+procedure atm_define(m: PTorchModule; src: PChar); cdecl; external LibTch;
+
+function  ati_none: PTorchIValue; cdecl; external LibTch;
+function  ati_tensor(t: PTorchTensor): PTorchIValue; cdecl; external LibTch;
+function  ati_int(v: Int64): PTorchIValue; cdecl; external LibTch;
+function  ati_double(v: Double): PTorchIValue; cdecl; external LibTch;
+function  ati_bool(v: cint): PTorchIValue; cdecl; external LibTch;
+function  ati_string(s: PChar): PTorchIValue; cdecl; external LibTch;
+function  ati_tuple(ivalues: PPTorchIValue; n: cint): PTorchIValue; cdecl; external LibTch;
+function  ati_generic_list(ivalues: PPTorchIValue; n: cint): PTorchIValue; cdecl; external LibTch;
+function  ati_generic_dict(ivalues: PPTorchIValue; npairs: cint): PTorchIValue; cdecl; external LibTch;  // 2*npairs ivalues: k0, v0, k1, v1, ...
+function  ati_int_list(v: PInt64; n: cint): PTorchIValue; cdecl; external LibTch;
+function  ati_double_list(v: PDouble; n: cint): PTorchIValue; cdecl; external LibTch;
+function  ati_bool_list(v: PChar; n: cint): PTorchIValue; cdecl; external LibTch;   // bytes 0/1
+function  ati_string_list(v: PPChar; n: cint): PTorchIValue; cdecl; external LibTch;
+function  ati_tensor_list(v: PPTorchTensor; n: cint): PTorchIValue; cdecl; external LibTch;
+function  ati_device(device: cint): PTorchIValue; cdecl; external LibTch;
+function  ati_tag(i: PTorchIValue): cint; cdecl; external LibTch;
+function  ati_to_tensor(i: PTorchIValue): PTorchTensor; cdecl; external LibTch;
+function  ati_to_int(i: PTorchIValue): Int64; cdecl; external LibTch;
+function  ati_to_double(i: PTorchIValue): Double; cdecl; external LibTch;
+function  ati_to_string(i: PTorchIValue): PChar; cdecl; external LibTch;   // strdup'd: tchf_free
+function  ati_to_bool(i: PTorchIValue): cint; cdecl; external LibTch;
+function  ati_length(i: PTorchIValue): cint; cdecl; external LibTch;
+function  ati_tuple_length(i: PTorchIValue): cint; cdecl; external LibTch;
+procedure ati_to_tuple(i: PTorchIValue; outputs: PPTorchIValue; n: cint); cdecl; external LibTch;
+procedure ati_to_generic_list(i: PTorchIValue; outputs: PPTorchIValue; n: cint); cdecl; external LibTch;
+procedure ati_to_generic_dict(i: PTorchIValue; outputs: PPTorchIValue; npairs: cint); cdecl; external LibTch;  // writes 2*npairs
+procedure ati_to_int_list(i: PTorchIValue; outputs: PInt64; n: cint); cdecl; external LibTch;
+procedure ati_to_double_list(i: PTorchIValue; outputs: PDouble; n: cint); cdecl; external LibTch;
+procedure ati_to_bool_list(i: PTorchIValue; outputs: PChar; n: cint); cdecl; external LibTch;
+procedure ati_to_tensor_list(i: PTorchIValue; outputs: PPTorchTensor; n: cint); cdecl; external LibTch;
+procedure ati_free(i: PTorchIValue); cdecl; external LibTch;
+```
+
+All are `PROTECT`ed except `atm_free`, `ati_free` and
+`at_set_graph_executor_optimize`, so `TchCheck` after each; constructors
+return nil on error and `TchCheck` raises before the pointer is looked at
+(`ati_to_bool`/`ati_to_int` return -1 on error, also covered). Every
+`tensor` handed to C goes through `TchCheckArg` first (4.2). Not declared,
+as in 4.6.3's rule for unused entry points: `atm_create_class_`,
+`ati_object_method_`, `ati_object_getattr_`, `ati_clone`,
+`atm_fuser_cuda_set_enabled`, `atm_fuser_cuda_is_enabled`.
+
+**Fork addition** (three functions, patched like the autocast and
+`ato_set_momentum_group` fixes; declared in `torch_api.h` next to
+`atm_create_for_tracing`):
+
+```c
+module atm_create(char *modl_name) {
+  PROTECT(auto m = new torch::jit::script::Module(modl_name);
+          m->register_attribute("training", c10::BoolType::get(), true);
+          return m;)
+  return nullptr;
+}
+void atm_register_parameter(module m, char *name, tensor t, bool is_buffer) {
+  PROTECT(m->register_parameter(name, *t, is_buffer);)
+}
+void atm_define(module m, char *src) { PROTECT(m->define(src);) }
+```
+
+Why: tch-rs's test modules come from `tests/create_jit_models.py`. Without
+Python, `torch::jit::Module::define` — libtorch's TorchScript compiler,
+public C++ API — is the only way to build, at test time, a module with
+parameters, methods with non-tensor signatures or a `training` flag.
+`atm_create_for_tracing` cannot: a tensor used inside a traced function
+becomes a constant, and a tensor that requires grad cannot be traced as a
+constant at all. `training` is registered because `Module::train()`
+silently skips modules without that attribute (`module.cpp`, the assert is
+commented out upstream) and `self.training` in a method needs it; Python's
+`ScriptModule` has it too. **(H20)**: builds and behaves as described in
+the tests below. It is also a feature (TorchScript from Pascal), exposed
+as `CreateEmpty`/`RegisterParameter`/`Define` and stated as a deviation
+from tch-rs.
+
+**`TIValue`.** Tag values equal `ati_tag`'s where one exists (*measured*:
+`TIValueTag(12) = ivGenericList`), so `FromC` casts after a range check.
+Nested type for the array of itself, as `TTensorArray` (H10):
+
+```pascal
+type
+  TIValueTag = (ivNone = 0, ivTensor = 1, ivDouble = 2, ivInt = 3, ivBool = 4, ivTuple = 5,
+    ivIntList = 6, ivDoubleList = 7, ivBoolList = 8, ivString = 9, ivTensorList = 10,
+    ivGenericList = 12, ivGenericDict = 13,
+    ivStringList = 20, ivDevice = 21);   // input only: no ati_tag value (see below)
+  TBooleanArray = array of Boolean;      // before the record that uses it
+
+  TIValue = record
+  public type
+    TIValueArray = array of TIValue;
+  public
+    Tag: TIValueTag;              // Default(TIValue) is None
+    Tensor: TTensor;              // ivTensor
+    I: Int64;                     // ivInt
+    D: Double;                    // ivDouble
+    B: Boolean;                   // ivBool
+    S: String;                    // ivString
+    Ints: TInt64Array;            // ivIntList
+    Doubles: TDoubleArray;        // ivDoubleList
+    Bools: TBooleanArray;         // ivBoolList
+    Strings: TStringArray;        // ivStringList (input only)
+    Tensors: TTensorArray;        // ivTensorList
+    Items: TIValueArray;          // ivTuple, ivGenericList; ivGenericDict: k0, v0, k1, v1, ... (flat, as the C side)
+    Dev: TDevice;                 // ivDevice (input only)
+    class function None: TIValue; static;
+    class function FromTensor(const T: TTensor): TIValue; static;
+    class function FromInt(V: Int64): TIValue; static;
+    class function FromDouble(V: Double): TIValue; static;
+    class function FromBool(V: Boolean): TIValue; static;
+    class function FromString(const V: String): TIValue; static;
+    class function FromDevice(const V: TDevice): TIValue; static;
+    class function Tuple(const A: array of TIValue): TIValue; static;
+    class function IntList(const A: array of Int64): TIValue; static;      // inside TIValue, Tch's IntList needs the unit prefix
+    class function DoubleList(const A: array of Double): TIValue; static;
+    class function BoolList(const A: array of Boolean): TIValue; static;
+    class function StringList(const A: array of String): TIValue; static;
+    class function TensorList(const A: array of TTensor): TIValue; static;
+    class function GenericList(const A: array of TIValue): TIValue; static;
+    class function GenericDict(const KeysAndValues: array of TIValue): TIValue; static;  // even length, else ETorchError
+    class operator :=(const V: TTensor): TIValue;
+    class operator :=(V: Int64): TIValue;
+    class operator :=(V: Double): TIValue;
+    class operator :=(V: Boolean): TIValue;
+    class operator :=(const V: String): TIValue;
+    function IsNone: Boolean;
+    function TagName: String;                                 // 'Tensor', 'Tuple', ... (tch-rs type_str)
+    function AsTensor: TTensor;        // ETorchError('ivalue: expected Tensor, got Tuple') on a mismatch
+    function AsInt: Int64;  function AsDouble: Double;  function AsBool: Boolean;  function AsString: String;
+    function AsIntList: TInt64Array;  function AsDoubleList: TDoubleArray;
+    function AsBoolList: TBooleanArray;  function AsTensorList: TTensorArray;
+    function Count: Integer;           // tuple/list: Length(Items); dict: Length(Items) div 2; typed lists: their length
+    function Item(Index: Integer): TIValue;                   // ivTuple or ivGenericList (tch-rs unpacks both)
+    function Key(Index: Integer): TIValue;  function Value(Index: Integer): TIValue;   // ivGenericDict
+    function ToC: PTorchIValue;                               // new C ivalue, owned by the caller (ati_free)
+    class function FromC(P: PTorchIValue): TIValue; static;   // consumes P (ati_free on every path)
+  end;
+  TIValueArray = TIValue.TIValueArray;
+```
+
+- *Measured* (M5): the record compiles with explicit tag values and nests;
+  `V := 42` / `2.5` / `0.9` / `True` / `'foo'` / a record give the expected
+  tags through the `:=` operators; and **`[T, 42, 1.5]` passed to an
+  `array of TIValue` parameter converts element-wise** through them, so
+  `M.ForwardIV([X, 42, 1.5])` is legal. There is deliberately no operator
+  from arrays (ambiguous); the named constructors cover them.
+- Semantics as in 4.6: copies share `Items`, treat as immutable.
+- **`ToC`** (tch-rs `to_c`), per tag: `ati_none`; `ati_tensor(T.Raw)` after
+  `TchCheckArg`; `ati_int`/`ati_double`/`ati_bool(Ord(B))`;
+  `ati_string(PChar(S))`; typed lists over the record's own arrays
+  (`ati_bool_list(PChar(@Bools[0]), n)` — `SizeOf(Boolean) = 1`, measured,
+  values 0/1; `ati_string_list` over an `array of PChar` built from
+  `Strings`; `ati_tensor_list` over `Raw`s, each `TchCheckArg`ed);
+  `ati_device(Dev.ToC)`. Containers: convert the children first into a
+  nil-initialised `array of PTorchIValue`, build with `ati_tuple` /
+  `ati_generic_list` / `ati_generic_dict(…, Length(Items) div 2)`, and free
+  every non-nil child in a `finally` — the C container copied the `IValue`s
+  (tch-rs frees them too). An odd dict raises `ETorchError`. An empty array
+  passes `nil` (never `@A[0]` of an empty array; `ati_tuple(nullptr, 0)` is
+  fine). `TchCheck` after each `ati_*`.
+- **`FromC`** (tch-rs `from_c`): `try … finally ati_free(P)`; `nil` raises
+  `ETorchError`; `Tag := ati_tag(P); TchCheck` — 14 raises
+  `ETorchError('ivalue: TorchScript objects are not supported yet')`, any
+  other value outside the enum raises too (C itself throws
+  "unsupported tag" for a Device). Then: Tensor →
+  `TTensor.FromRaw(ati_to_tensor(P))` after `TchCheck`; scalars →
+  `ati_to_int`/`double`/`bool` + `TchCheck`; String → `ati_to_string`,
+  `StrPas`, `tchf_free` (it is `strdup`'d, section 2); typed lists → `N :=
+  ati_length`, a buffer of `N`, `ati_to_*_list(P, PtrOrNil(buf), N)`
+  (BoolList through a `Byte` buffer, `<> 0`); TensorList → nil-initialised
+  `PTorchTensor` slots, `TchCheckSlots` (Tch.pas) on error, else `FromRaw`
+  each; Tuple / GenericList → `N := ati_tuple_length` / `ati_length`,
+  `ati_to_tuple` / `ati_to_generic_list` into nil-initialised
+  `array of PTorchIValue`, then for each child `C := Cs[K]; Cs[K] := nil;
+  Items[K] := FromC(C)` so that a `finally` can `ati_free` the children not
+  yet consumed when a later conversion raises; GenericDict → `N :=
+  ati_length` (pairs), `2·N` slots, `ati_to_generic_dict(P, Cs, N)`, the
+  same consumption. The C side checks the size and throws before writing
+  any slot, and `new` can fail with `bad_alloc` part-way, hence the
+  nil-initialised slots (4.2's fixed-N rule).
+- **Input-only values.** `ivStringList` builds a `c10::List<string>`, which
+  `ati_tag` reports as 12: it comes back as a GenericList of String items
+  (tch-rs's `jit5` expects exactly that). `ivDevice` has no `ati_tag`
+  value; a Device output raises `ETorchNativeError` from `ati_tag`.
+  GenericDict pairs come back in insertion order: `c10::Dict` is an
+  order-preserving hash map, which tch-rs's round-trip test relies on
+  **(H24)**.
+
+**`TJitModule`** (tch-rs `CModule`):
+
+```pascal
+type
+  TTraceFunc   = function(const Inputs: TTensorArray): TTensorArray;
+  TTraceMethod = function(const Inputs: TTensorArray): TTensorArray of object;
+
+  TJitModule = class
+  private
+    FModule: PTorchModule;
+    {$push}{$warn 3018 off}
+    constructor CreateRaw(M: PTorchModule);          // takes ownership; M <> nil (TchCheck ran)
+    {$pop}
+  public
+    constructor Create(const FileName: String); overload;                           // atm_load
+    constructor Create(const FileName: String; const ADevice: TDevice); overload;   // atm_load_on_device
+    constructor CreateFromStream(S: TStream); overload;                             // atm_load_str
+    constructor CreateFromStream(S: TStream; const ADevice: TDevice); overload;     // atm_load_str_on_device
+    constructor CreateEmpty(const ModuleName: String);                              // atm_create (fork)
+    class function CreateByTracing(const ModuleName, FnName: String;
+      const Inputs: array of TTensor; Fn: TTraceFunc): TJitModule; overload; static;
+    class function CreateByTracing(const ModuleName, FnName: String;
+      const Inputs: array of TTensor; Fn: TTraceMethod): TJitModule; overload; static;
+    destructor Destroy; override;                                                   // atm_free
+    function Forward(const Inputs: array of TTensor): TTensor;                      // atm_forward
+    function ForwardIV(const Inputs: array of TIValue): TIValue;                    // atm_forward_
+    function Method(const Name: String; const Inputs: array of TTensor): TTensor;   // atm_method
+    function MethodIV(const Name: String; const Inputs: array of TIValue): TIValue; // atm_method_
+    procedure SetEval;                                                              // atm_eval
+    procedure SetTrain;                                                             // atm_train
+    procedure ToDevice(const ADevice: TDevice; AKind: TKind; NonBlocking: Boolean = False);  // atm_to
+    procedure Save(const FileName: String);                                         // atm_save
+    function NamedParameters: TNamedTensorArray;                                    // atm_named_parameters
+    procedure RegisterParameter(const Name: String; const T: TTensor; IsBuffer: Boolean = False);  // fork
+    procedure Define(const Source: String);                                         // fork: TorchScript source
+    property Raw: PTorchModule read FModule;
+  end;
+
+function  JitGetProfilingMode: Boolean;              procedure JitSetProfilingMode(B: Boolean);
+function  JitGetTensorExprFuserEnabled: Boolean;     procedure JitSetTensorExprFuserEnabled(B: Boolean);
+procedure JitSetGraphExecutorOptimize(B: Boolean);
+```
+
+- `Forward`/`Method` return a tensor, `ForwardIV`/`MethodIV` a `TIValue`:
+  that is the C split (`atm_forward` throws "forward did not return a
+  tensor" for a tuple result; the test below relies on that message).
+  Tensor inputs: `TchCheckArg` each, an `array of PTorchTensor` of `Raw`s,
+  `nil` when empty. IValue inputs: `ToC` each into a nil-initialised array,
+  call, `TchCheck`, `FromC(result)`; the inputs are freed in a `finally`
+  (tch-rs frees them after the call).
+- `NamedParameters`: a `cdecl` trampoline exactly as 4.6.3's `LoadCallback`
+  with its own `TParamContext` in `TchJit` (fifteen lines duplicated rather
+  than exporting `TchNN`'s private helper); names verbatim (`|`→`.` kept,
+  harmless); `get_and_reset_last_err` unconditionally after the call, the
+  acquired exception re-raised. Buffers are not parameters: `foo.pt`'s
+  `value` gives an empty list.
+- `CreateByTracing`: `atm_create_for_tracing(Name, inputs)`, `TchCheck`;
+  `Outputs := Fn(Inputs as TTensorArray)` (the same handles, as tch-rs
+  passes `inputs` to the closure); `atm_end_tracing(M, FnName, outputs,
+  n)`, `TchCheck`. If `Fn` raises: libtorch's tracing state is global and
+  libtch has no "abandon" entry point, so the handler calls
+  `atm_end_tracing(M, PChar(FnName), nil, 0)`, clears the error slot
+  (`get_and_reset_last_err` → `tchf_free`), `atm_free(M)` and re-raises —
+  best effort, **(H23)**: a later `CreateByTracing` works ("cannot nest
+  tracing calls" otherwise).
+- `CreateFromStream` reads `S.Size - S.Position` bytes into a `TBytes` and
+  calls `atm_load_str(@Buf[0], Length(Buf))` (C copies into a
+  `std::string`); an empty stream raises `ETorchError` before the call.
+- `ToDevice` keeps tch-rs's `to(device, kind, non_blocking)`: `atm_to` has
+  no optional dtype.
+- `Define(Source)`: TorchScript text, `def` at column 0, 4-space bodies,
+  lines joined with `#10`; several `def`s in one call are fine. A compile
+  error arrives as `ETorchNativeError`.
+- Globals: `atm_get_profiling_mode <> 0`, `atm_set_profiling_mode(Ord(B))`,
+  `atm_set_tensor_expr_fuser_enabled(Ord(B))`,
+  `atm_get_tensor_expr_fuser_enabled` (C++ `bool` → `Boolean`),
+  `at_set_graph_executor_optimize(B)` (no `PROTECT`, nothing to check).
+
+**`TTrainableJitModule`** (tch-rs `TrainableCModule`, `nn/mod.rs`):
+
+```pascal
+type
+  TJitMode = (jmUnknown, jmTrain, jmEval);
+  TTrainableJitModule = class(TModule)
+  private
+    FInner: TJitModule;           // owned
+    FMode: TJitMode;
+    procedure RegisterInto(const P: TVarPath);
+  public
+    constructor Create(const FileName: String; const P: TVarPath);       // atm_load_on_device(P.Device)
+    constructor CreateFromStream(S: TStream; const P: TVarPath);
+    destructor Destroy; override;
+    function Forward(const X: TTensor; Train: Boolean = False): TTensor; override;
+    function ForwardIV(const Inputs: array of TIValue): TIValue;
+    function Method(const Name: String; const Inputs: array of TTensor): TTensor;
+    function MethodIV(const Name: String; const Inputs: array of TIValue): TIValue;
+    procedure Save(const FileName: String);
+    procedure SetTrain;  procedure SetEval;                                // also set FMode
+    property Inner: TJitModule read FInner;
+  end;
+```
+
+- Registration = tch-rs `TrainableCModule::load`: for every `(Name, T)` of
+  `FInner.NamedParameters`, `P.Add(StringReplace(Name, '.', '_',
+  [rfReplaceAll]), T, T.RequiresGrad)` — `.`→`_` because variable names
+  reject `.` (`encoder.layer1.weight` → `encoder_layer1_weight` under `P`'s
+  prefix); trainable = the loaded tensor's `requires_grad`. `Add` shares
+  the handle: the store entry *is* the module's parameter
+  (`new torch::Tensor(v)` shares the `TensorImpl`), so a `TOptimizer` on
+  the store updates the scripted module in place, `SetDevice`/`SetKind`
+  (`set_data`) move it, and `Save` writes the trained values **(H21)**.
+  The store's kind is not applied (as tch-rs); the device is `P.Device`
+  through `atm_load_on_device`.
+- `Forward(X, Train)` = `FInner.Forward([X])`. tch-rs ignores `train`
+  (`forward_t(&self, xs, _train)`: `set_train` needs `&mut self`).
+  Deviation, stated: the Pascal version applies it — when `FMode` is
+  `jmUnknown` or disagrees with `Train`, call `atm_train`/`atm_eval` and
+  remember — so a scripted model with dropout or batch-norm behaves like
+  the `TchNN` layers under `TSequential`'s `Train`. A loaded module's
+  `training` flag is whatever Python saved, hence `jmUnknown` until the
+  first `Forward`; `SetTrain`/`SetEval` set `FMode` too.
+
+**Test assets without Python (decision): both of the following**, each for
+what the other cannot do.
+1. **Vendor tch-rs's `tests/foo.pt` … `foo8.pt`** into `tests/jit/models/`
+   (nine files, 15 KB, PyTorch zip format version 3; license MIT OR
+   Apache-2.0 like ours; per CLAUDE.md tch-rs's two license files are
+   copied next to them and the commit message names `tch-rs 4227b89b
+   tests/foo*.pt` and `tests/create_jit_models.py` as the source). They
+   are real Python-exported files — the use case — and `jit_tests.rs`
+   gives the expectations; `foo6.pt`/`foo7.pt` wait for objects. Contents
+   (read from the zips' `code/__torch__.py`): `foo` `2x + y + value` with
+   the buffer `value = [42.0]`; `foo1` `2x + y`; `foo2` `(2x + y, x - y)`;
+   `foo3` the product of the elements; `foo4` `Tuple[float, float, int]`
+   → `x0 + x1·x2`; `foo5` `List[str]` → each string minus its last char;
+   `foo8` `generate(Dict[str, Tensor])` → `(d['foo'], d['bar'])`. **(H19)**:
+   they load with libtorch 2.13 (tch-rs's CI does so at this commit) and
+   give the numbers below.
+2. **Build modules in Pascal** with `CreateEmpty` + `RegisterParameter` +
+   `Define` (fork, H20) where parameters or `self.training` are needed, and
+   `CreateByTracing` for tch-rs's `create_traced`. Tracing alone was
+   rejected as the only route: no parameters, no tuples, no non-tensor
+   signatures.
+
+**`tests/jit/jit_test.pas`** (real libtorch; run from the repo root like
+tch-rs's tests; 0-d inputs as `TTensor.scalar_tensor(42, kInt64,
+TDevice.Cpu)`; files under `tests/jit/models/`), hand-checkable numbers:
+1. `foo.pt` (`jit`): `x = [3, 1, 4, 1, 5]`, `y = [7]` (kFloat):
+   `Forward([x, y]) = 2x + y + 42 = [55, 51, 57, 51, 59]`; the same through
+   `Method('forward', …)`; `NamedParameters` is empty (`value` is a
+   buffer); `Create(file, TDevice.Cpu)` gives the same result.
+2. `foo1.pt` (`jit1`): 0-d kInt64 `42` and `1337` → `2·42 + 1337 = 1421`,
+   kind `kInt64`, through `Forward` and `Method('forward')`.
+3. `foo2.pt` (`jit2`): `ForwardIV([42-tensor, 1337-tensor])` → `Tag =
+   ivTuple`, `Count = 2`, `Item(0).AsTensor` = `1421`, `Item(1)` = `42 -
+   1337 = -1295`; the same through `MethodIV`; `AsTensor` on the tuple
+   raises `ETorchError` naming both tags; `Forward` (tensor API) on it
+   raises `ETorchNativeError` "forward did not return a tensor".
+4. `foo3.pt` (`jit3`): `[1, 2, 3, 4, 5]` → `120` (0-d).
+5. `foo4.pt` (`jit4`): `ForwardIV([TIValue.Tuple([2.0, 3.0, 4])])` →
+   `ivDouble` `2 + 3·4 = 14`; `NamedParameters` empty.
+6. `foo5.pt` (`jit5`): `ForwardIV([TIValue.StringList(['foo', 'bar',
+   'foobar'])])` → `ivGenericList` of three `ivString`: `'fo'`, `'ba'`,
+   `'fooba'`.
+7. `foo8.pt` (`specialized_dict`, tch-rs issue 597):
+   `MethodIV('generate', [TIValue.GenericDict(['bar', T[1, 7], 'foo',
+   T[1, 2, 3]])])` → tuple `([1, 2, 3], [1, 7])`. **(H22)**:
+   `ati_generic_dict` specialises to `Dict[str, Tensor]` when every key is
+   a string and every value a tensor, which the method's schema requires.
+8. Round trips (tch-rs `ivalue_round_trip`, through the public
+   `ToC`/`FromC`): `None`; `True`, `False`; `-1`, `42`, `15`; `''`,
+   `'foobar'`; `Tuple([42, Pi])`; `IntList([42, 1337])`; `DoubleList([e,
+   Pi, 299792458.00001])`; `Tuple([BoolList([T, F, T, T]), DoubleList(…)])`;
+   `GenericList([42, 'foobar'])`; `GenericDict([42, 'foobar', 'foo',
+   'bar'])` back in the same order (H24); plus a `Tensor` `[1, 2, 3]`
+   (values and kind kept), the empty `Tuple([])` (nil-pointer path) and
+   `StringList(['a', 'b'])` coming back as `ivGenericList` of `ivString`.
+   An odd-length `GenericDict` raises `ETorchError`.
+9. Tracing (`create_traced`): `CreateByTracing('MyModule', 'MyFn', [0.0,
+   1.0 as 0-d kDouble], @AddFn)` with `AddFn = [Inputs[0] + Inputs[1]]`;
+   `Save` to a temp file, `Create` it back, `Method('MyFn', [[1, 2, 3, 4,
+   5], [41, 1335, Pi - 3, 4, 5]])` (kDouble) = `[42, 1337, Pi, 8, 10]`
+   exactly (`Pi - 3` is exact by Sterbenz's lemma, so `(Pi - 3) + 3 = Pi`);
+   `Method('nope', …)` raises `ETorchNativeError`; a closure that raises
+   `ETorchError` propagates it, and a second `CreateByTracing` afterwards
+   works (H23).
+10. Scripted module from source (H20): `M := TJitModule.CreateEmpty('Lin')`;
+    `RegisterParameter('weight', zeros [1, 3] with requires_grad)`,
+    `('bias', zeros [1] with requires_grad)`, `('scale', ones [1], no
+    grad)`; `Define('def forward(self, x):'#10'    return (torch.matmul(x,
+    torch.t(self.weight)) + self.bias) * self.scale'#10)`; `Forward([[1, 2,
+    3]]) = 0`; `NamedParameters` = `weight`, `bias`, `scale` (three, in
+    registration order); `Save` to a temp `.pt`. Then `J :=
+    TTrainableJitModule.Create(file, VS.Root / 'jit')`: `VS.Count = 3`
+    (`jit.weight`, `jit.bias`, `jit.scale`), `TrainableVariables` two
+    (`scale` has no grad); `Sgd(VS, 0.1)`, `X = [[1, 2, 3]]`, `Y = [[1]]`,
+    `mse_loss = 1`; one `BackwardStep`: `∂/∂w = -2·x·(1 - 0) = [-2, -4,
+    -6]`, `∂/∂b = -2` → `w = [0.2, 0.4, 0.6]`, `b = 0.2` and
+    **`J.Forward(X) = 0.2 + 0.8 + 1.8 + 0.2 = 3.0`** (H21: the module sees
+    the store's step); `J.Save`, reload as `TJitModule`, `Forward([X]) =
+    3.0`.
+11. Train flag (H20): `CreateEmpty('Mode')`, `Define('def forward(self,
+    x):'#10'    if self.training:'#10'        return x * 2'#10'    return
+    x'#10)`: fresh module `Forward([X]) = 2X` (`training` defaults to
+    True), `SetEval` → `X`, `SetTrain` → `2X`; saved and reloaded as a
+    `TTrainableJitModule`: `Forward(X, True) = 2X`, `Forward(X) = X`,
+    `Forward(X, True) = 2X` again.
+12. Globals: `JitGetProfilingMode` True in a fresh process **(H25)**, False
+    after `JitSetProfilingMode(False)`, True again;
+    `JitSetTensorExprFuserEnabled(True/False)` read back;
+    `JitSetGraphExecutorOptimize(True)` raises nothing.
+13. Errors and handles: `TJitModule.Create('tests/jit/models/missing.pt')`
+    → `ETorchNativeError`; `Define('def forward(self, x): return')` →
+    `ETorchNativeError`; `TchLiveHandles` back to the start after freeing
+    every module, store and optimizer, and 0 at the very end.
+
+**Mock** (`tests/mock/mock_tch.c`, plumbing only; `tests/mock/
+jit_mock_test.pas`): `ivalue` as a tagged struct with real payloads and a
+`mock_live_ivalues` counter (`ati_*` implemented faithfully for tags 0–13,
+`ati_tag` of a string list reporting 12) → every round trip of item 8 on
+the mock, `mock_live_ivalues = 0` afterwards, odd dict, nil pointer;
+`module` struct with `mock_live_modules`: `atm_load*` fail when the name
+contains `missing`, `atm_forward`/`atm_method` return a copy of the first
+tensor (error when there is none), `atm_forward_`/`atm_method_` return a
+tuple of clones of the inputs and record the method name
+(`mock_last_method`), `atm_eval`/`atm_train` → `mock_module_training`,
+`atm_to` records device and dtype, `atm_save` the file name,
+`atm_named_parameters` calls back with `weight` `[2, 3]` (requires grad)
+and `sub.bias` `[2]` (no grad) → `TTrainableJitModule` registers
+`jit.weight` trainable and `jit.sub_bias` not; `atm_create_for_tracing` /
+`atm_end_tracing` count calls (the raising-closure path calls
+`atm_end_tracing` once with 0 outputs); `atm_create` /
+`atm_register_parameter` / `atm_define` record counts and the last source;
+`atm_free` decrements. Not coverable: TorchScript itself and every number
+of items 1–11.
+
+**Hypotheses (need real libtorch):**
+- **(H19)** the vendored `foo*.pt` load with libtorch 2.13 and give the
+  numbers of items 1–7.
+- **(H20)** fork addition: `Module::define` compiles the two sources above
+  in libtorch 2.13 (`torch.matmul`, `torch.t`, `self.training`),
+  `register_attribute("training", Bool, true)` makes `self.training` and
+  `atm_train`/`atm_eval` work, `named_parameters` returns the three
+  registered parameters (not buffers) with their `requires_grad`.
+- **(H21)** parameter sharing: after one SGD step on the store
+  `J.Forward(X) = 3.0`, and the saved module reloads with the trained
+  values.
+- **(H22)** `ati_generic_dict`'s `Dict[str, Tensor]` specialisation is
+  accepted by `foo8.pt`'s `generate`.
+- **(H23)** `atm_end_tracing(M, name, nil, 0)` after a raising closure
+  leaves tracing usable.
+- **(H24)** a `GenericDict` round trip keeps insertion order.
+- **(H25)** profiling mode is on by default.
 
 ### 4.7 Grad mode and global settings
 
@@ -1702,3 +2320,13 @@ implements 4.6 except JIT; `tests/nn/nn_test.pas` (real libtorch) passes
 with every number of 4.6.7 and H13–H18 resolved (results next to each
 hypothesis above); `tests/mock/nn_mock_test.pas` covers the plumbing.
 Next: JIT (`TchJit`), then CUDA.
+
+**Milestone 3 (designed in cloud session 5, 2026-10-10): JIT.**
+`src/TchJit.pas` as in 4.6.8 — `TIValue` for tags 0–13, `TJitModule`,
+`TTrainableJitModule`, tracing, scripted modules from TorchScript source
+through a three-function fork addition, the profiling/fuser switches —
+with tch-rs's `tests/foo*.pt` vendored into `tests/jit/models/`,
+`tests/jit/jit_test.pas` and the mock stubs. TorchScript objects (tag 14)
+and `atm_fuser_cuda_*` are deferred. The same local session also applies
+the `FromArray` revision of 4.3 and the 4.6.7 follow-ups. Order and the
+hypotheses H19–H25 are in HANDOFF.md.

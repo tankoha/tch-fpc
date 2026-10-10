@@ -85,6 +85,24 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
   - **(H5) resolved:** the mask survives a caught integer `EDivByZero`.
   - DESIGN.md 4.2 updated accordingly.
 
+- **Step 6 done.** First code: `src/TchSys.pas` (hand-written externals,
+  plus stand-ins for the few `atg_*` the tests need) and `src/Tch.pas`
+  (`TTensor`/`TTensorHandle`, `TchCheck`, nil-argument check, FPU mask in
+  `initialization`, `TchLiveHandles` counter; stand-in ops `add`, `mul`,
+  `cat`, `max_dim`, `ones` in the generator's shape). Test:
+  `tests/ownership/ownership_test.pas`, all passing.
+  - `B := A; A := Default(TTensor)` keeps B alive; `A := A + B` correct.
+  - 10^6 x `D := (A + B) * C`: handle count and RSS flat (~1.5 s total).
+  - **(H1) resolved:** temporaries live until their slot is reused or the
+    routine exits, not until the end of the statement.
+  - **(H6) resolved:** `cat([A, B], 0)` and `cat` of temporaries: correct,
+    no leak, no double free.
+  - **(H8) resolved:** receiver passed as `out` gives `ETorchError`; a
+    previous value in an `out` variable is released.
+  - New problem found (see open questions): generated parameter names
+    collide with `TTensor` members (`dim` vs `Dim`). The stand-ins use
+    `dim_` for now.
+
 ## Next steps (local implementation)
 
 1. **Toolchain check.** FPC 3.2.2, g++, CMake, libtorch 2.13.0 CPU
@@ -172,6 +190,26 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
   functions in the fork to the non-deprecated device-taking API, and/or
   install a `c10::WarningHandler` from libtch that forwards to a Pascal
   callback.
+- **Parameter names vs `TTensor` members (found in step 6, blocks step
+  8).** In `{$mode objfpc}` a method parameter may not have the same name
+  (case-insensitive) as a record member *declared earlier*: `add(dim: Int64)`
+  next to the hand-written `Dim` is "Duplicate identifier". Declared before
+  the member it compiles, so the outcome depends on declaration order —
+  too fragile to rely on. `{$mode delphi}` accepts it either way. Scale on
+  2.13: `dim` appears in ~250 ops; 47 parameter names equal an op name
+  (`indices` ~79 ops, `values` ~51, `index` ~53, `grad` ~40, `norm`,
+  `max`, `mean`, ...); `out` result names (`values`, `indices` of
+  `max_dim`) have the same problem. Options:
+  (a) generator appends `_` to any parameter or out-name that equals any
+  `TTensor` member, hand-written or generated (`dim_`, `indices_`):
+  robust, but `dim_` shows up in hundreds of signatures;
+  (b) rename the hand-written members so they never collide with common
+  parameter names (`Dim` → `NumDims`/`Rank`) *and* still apply (a) for the
+  op-name collisions;
+  (c) compile `Tch` in `{$mode delphi}`: changes other semantics of the
+  unit (procvar `@`, generics syntax), needs its own tests.
+  Recommendation: (a) for generated-vs-generated, plus (b) for the
+  hand-written API, since parameter names never appear at the call site.
 - **Multi-output ops**: `out` parameters (decided) — revisit whether a few
   hand-written result records (`max_dim`, `sort`, `topk`, `lstm`) are worth
   adding after writing real code. Also whether `var` instead of `out` is

@@ -317,11 +317,15 @@ Why this shape:
   `Drop`.
 - **Expressions work.** Records support `class operator` overloads in
   `{$mode objfpc}{$modeswitch advancedrecords}`; the intermediate results of
-  `(a + b) * c` are compiler-managed temporaries. **(H1)** Exactly *when* FPC
-  finalises such temporaries (end of statement vs end of the enclosing
-  routine) is not known for certain; either way a temporary slot is reused
-  and released on reassignment, so a loop does not accumulate, but a large
-  intermediate may stay alive longer than expected. Measure (HANDOFF).
+  `(a + b) * c` are compiler-managed temporaries. **(H1) resolved** (step 6,
+  FPC 3.2.2): temporaries are *not* released at the end of the statement.
+  Each expression site in a routine owns a temporary slot that keeps its
+  last value until the slot is reused (next evaluation, e.g. the next loop
+  iteration) or the routine exits. A loop therefore does not accumulate
+  (10^6 iterations: handle count and RSS flat), but a large intermediate
+  stays alive until the routine returns. Mitigation for big tensors: put
+  the expression in a small function, or split it into named variables
+  and release them with `X := Default(TTensor)`.
 - **Robust on FPC 3.2.2.** A record containing an interface field is managed
   by the compiler's long-standing interface refcounting, exercised by every
   Lazarus application. Management operators are avoided (table above).
@@ -540,9 +544,11 @@ Results: one tensor → `TTensor`; dynamic → `TTensorArray`; N fixed tensors
 → `out` parameters (see 4.4); `bool`/`int64_t`/`double` → `Boolean`/`Int64`/
 `Double`.
 
-**(H6)** Marshalling `const X: array of TTensor` built from an open-array
-constructor (`[A, B]`) relies on FPC refcounting the temporary array of
-managed records correctly; covered by the ownership test.
+**(H6) resolved** (step 6): `TTensor.cat([A, B], 0)` and
+`TTensor.cat([A + B, B, A * B], 1)` give the right shapes; 200,000 calls
+keep RSS flat and every handle is released at routine exit (no leak, no
+double free). The open-array constructor's elements are held like other
+temporaries (H1).
 
 ### 4.4 Generated op methods and naming (decision)
 
@@ -589,10 +595,12 @@ managed records correctly; covered by the ownership test.
   idiom (`DecodeDate`, `DivMod`), and a result record per op would add 246
   types. Hand-written result records can be added for the few popular ops
   (`max_dim`, `sort`, `topk`, `lstm`) once real code shows the need.
-  Caveat: FPC finalises an `out` argument on entry **(H8)**, so passing the
-  receiver or an input as an `out` argument (`t.max_dim(1, False, t, i)`)
-  releases it before the body runs; the nil-handle check then raises
+  Caveat: FPC finalises an `out` argument on entry **(H8, confirmed in
+  step 6)**, so passing the receiver or an input as an `out` argument
+  (`t.max_dim(1, False, t, i)`) releases it before the body runs; the nil-handle check then raises
   `ETorchError` rather than crashing. Document it; do not try to be clever.
+  Also confirmed: a variable holding a previous value passed as `out`
+  releases that value (handle count unchanged across the call).
 - Default arguments. gen.ml already parses each argument's `default`; the
   manifest carries it (section 5) and the Pascal emitter turns the maximal
   *trailing* run of `Bool` / `Int64` / `Double` / `String` parameters that

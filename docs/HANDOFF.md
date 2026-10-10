@@ -4,7 +4,67 @@ Japanese version: [HANDOFF_jp.md](HANDOFF_jp.md)
 
 Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 
-## Cloud session 5 (2026-10-10): JIT designed, `FromArray` revised, local session 3 reviewed
+## Local session 4 (2026-10-11): milestone 3 (JIT) implemented
+
+Steps 1–8 of cloud session 5's list (below) are done; every test passes.
+Commits `8a912eb` … `b816950`.
+
+1. **`FromArray` revision** (DESIGN 4.3): the `Single` overload is gone, the
+   four others take `AKind` (`Double` + `kFloat` rounds into a `Single`
+   buffer in Pascal), `FromSingleArray` added. `tests/compiler` has the new
+   `h2_fromarray.pas` and `xfail_h2_single.pas`; `tests/api` and `tests/nn`
+   updated. Trap found in the test: a real literal in a comparison is
+   `Extended` on x86-64, so `T.DoubleValue([0]) = 0.9` is False; compare
+   with `Double(0.9)`.
+2. **4.6.7 follow-ups:** `{$push}{$warn 3018 off}` around
+   `TOptimizer.CreateRaw` (no warning left); the half-precision
+   `LoadPartial` check added to `TestSaveLoad` (passes: `u2` `kHalf` mean
+   42, `v2` `kFloat` mean 1, missing `['a.b.t2']`).
+3. **Fork patch:** `atm_create`, `atm_register_parameter`, `atm_define` in
+   `csrc/libtch/torch_api.{h,cpp}`; libtch rebuilt; `tests/abi`, mock pass.
+4. **Vendored** `tests/jit/models/foo.pt` … `foo8.pt` with tch-rs's two
+   license files and a short README naming the source.
+5. **`src/TchSys.pas`:** the JIT types and externals of 4.6.8.
+6. **`src/TchJit.pas`:** `TIValue`, `TJitModule`, `TTrainableJitModule`,
+   `Jit*` globals. Small deviations, recorded at the end of DESIGN 4.6.8:
+   `TagName` is a `case` (FPC rejects an enum with explicit values as an
+   array index); `CreateByTracing` cleans up after *any* failure past
+   `atm_create_for_tracing`; `Item`/`Key`/`Value` range-check.
+7. **Mock:** `atm_*`/`ati_*` in `tests/mock/mock_tch.c`,
+   `tests/mock/jit_mock_test.pas` (also: a child failing in `ToC` or
+   `FromC` leaves no C ivalue behind), added to `run.sh`.
+8. **`tests/jit/jit_test.pas`:** all thirteen groups pass; **H19–H25 all
+   hold** (results next to the hypotheses at the end of DESIGN 4.6.8).
+
+- Regression: `tests/api`, `tests/nn`, `tests/generated`,
+  `tests/ownership`, `tests/abi`, `tests/compiler/run.sh`,
+  `tests/mock/run.sh` pass. `tests/fpu/run.sh` behaves as before (it is a
+  measurement: the unmasked modes crash or hang by design).
+- Not touched, as asked: milestone 3 layers and CUDA/ROCm.
+
+## Handing back (2026-10-11, end of local session 4)
+
+**Design only** (CLAUDE.md). Nothing is blocked; all of the following are
+optional next milestones. Mark what needs real libtorch as H26, ...
+
+1. **TorchScript objects (ati_tag 14).** `ati_object_method_`,
+   `ati_object_getattr_`, `ati_clone`, `atm_create_class_`; tch-rs
+   `Object`, tests `jit6` and `jit_double_free`, assets `foo6.pt`/`foo7.pt`
+   (already vendored, unused). Needs the refcounted handle DESIGN 4.6.8
+   mentions (an object keeps its C `IValue` alive), and how `TIValue`
+   carries it (copies share; `FromC` currently raises on tag 14).
+2. **Milestone 3 layers** (DESIGN 4.6.5 deferred list).
+3. **CUDA/ROCm.** Only CPU so far (H13's real device move untested;
+   `atm_fuser_cuda_*` not declared). The local machine has an AMD Radeon
+   RX 9070 (Navi 48) and `rocm-smi`; no ROCm libtorch has been tried yet.
+   So the GPU route to design first is ROCm (libtorch's HIP build reports
+   the device as CUDA).
+
+**How the next design session runs is still open:** the cloud service
+credits are used up, and the user will decide later how to send the
+design work to Fable. Until then, nothing here waits on it.
+
+## Cloud session 5 (2026-10-10): JIT designed, `FromArray` revised, local session 3 reviewed — implemented in local session 4 above
 
 The request below ("Handing back to the cloud, end of local session 3") is
 answered for items 1–3; item 4 (milestone 3 layers, CUDA/ROCm) is

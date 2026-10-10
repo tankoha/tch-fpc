@@ -4,7 +4,62 @@
 
 再開するときは最初にこれを読んでください。決定事項と理由は [DESIGN_jp.md](DESIGN_jp.md) にあります。
 
-## クラウドセッション5（2026-10-10）：JIT を設計、`FromArray` を改訂、ローカルセッション3を確認
+## ローカルセッション4（2026-10-11）：マイルストーン3（JIT）を実装
+
+下のクラウドセッション5の手順1〜8を完了。すべてのテストが通る。
+コミットは `8a912eb` … `b816950`。
+
+1. **`FromArray` の改訂**（DESIGN 4.3）：`Single` のオーバーロードを削除し、残り4つに
+   `AKind` を追加（`Double` + `kFloat` は Pascal 側で `Single` のバッファに丸める）、
+   `FromSingleArray` を追加。`tests/compiler` に新しい `h2_fromarray.pas` と
+   `xfail_h2_single.pas`、`tests/api` と `tests/nn` も更新。テストで見つけた罠：
+   x86-64 では比較式中の実数リテラルは `Extended` なので `T.DoubleValue([0]) = 0.9` は
+   False。`Double(0.9)` と比較する。
+2. **4.6.7 の積み残し：** `TOptimizer.CreateRaw` を `{$push}{$warn 3018 off}` で囲んだ
+   （警告は消えた）。半精度の `LoadPartial` の確認を `TestSaveLoad` に追加（通る：
+   `u2` は `kHalf` で平均 42、`v2` は `kFloat` で平均 1、欠けているのは `['a.b.t2']`）。
+3. **フォークへのパッチ：** `csrc/libtch/torch_api.{h,cpp}` に `atm_create`、
+   `atm_register_parameter`、`atm_define`。libtch を再ビルド、`tests/abi` とモックは通る。
+4. `tests/jit/models/foo.pt` … `foo8.pt` を tch-rs の2つのライセンスファイル、出典を書いた
+   短い README とともに**取り込み**。
+5. **`src/TchSys.pas`：** 4.6.8 の JIT の型と external。
+6. **`src/TchJit.pas`：** `TIValue`、`TJitModule`、`TTrainableJitModule`、`Jit*` の
+   グローバル。小さな逸脱（DESIGN 4.6.8 の末尾に記録）：`TagName` は `case`（値を明示
+   した列挙型を FPC は配列の添字にできない）。`CreateByTracing` は
+   `atm_create_for_tracing` 以降の *あらゆる* 失敗で後始末する。`Item`/`Key`/`Value` は
+   範囲を確認する。
+7. **モック：** `tests/mock/mock_tch.c` に `atm_*`/`ati_*`、
+   `tests/mock/jit_mock_test.pas`（`ToC` や `FromC` で子が失敗しても C の ivalue が
+   残らないことも確認）、`run.sh` に追加。
+8. **`tests/jit/jit_test.pas`：** 13 グループすべて通る。**H19〜H25 はすべて成立**
+   （結果は DESIGN 4.6.8 末尾の仮説の横）。
+
+- 回帰：`tests/api`、`tests/nn`、`tests/generated`、`tests/ownership`、`tests/abi`、
+  `tests/compiler/run.sh`、`tests/mock/run.sh` は通る。`tests/fpu/run.sh` は従来どおり
+  （計測用で、マスクしないモードは設計上クラッシュまたはハングする）。
+- 依頼どおり手を付けていないもの：マイルストーン3のレイヤー、CUDA/ROCm。
+
+## 引き継ぎ（2026-10-11、ローカルセッション4の終了時点）
+
+**設計のみ**（CLAUDE.md）。止まっているものはなく、以下はどれも任意の次の
+マイルストーン。本物の libtorch が必要なものは H26 以降として記すこと。
+
+1. **TorchScript のオブジェクト（ati_tag 14）。** `ati_object_method_`、
+   `ati_object_getattr_`、`ati_clone`、`atm_create_class_`。tch-rs の `Object`、
+   テスト `jit6` と `jit_double_free`、アセット `foo6.pt`/`foo7.pt`（取り込み済みだが
+   未使用）。DESIGN 4.6.8 にある参照カウント付きハンドル（オブジェクトは C の `IValue`
+   を生かし続ける）と、`TIValue` がそれをどう持つか（コピーは共有。現在 `FromC` は
+   タグ 14 で例外）が必要。
+2. **マイルストーン3のレイヤー**（DESIGN 4.6.5 の先送りリスト）。
+3. **CUDA/ROCm。** これまで CPU のみ（H13 の実デバイスへの移動は未検証、
+   `atm_fuser_cuda_*` は未宣言）。ローカル機には AMD Radeon RX 9070（Navi 48）と
+   `rocm-smi` がある。ROCm 版 libtorch はまだ試していない。よって先に設計する GPU の
+   経路は ROCm（libtorch の HIP ビルドはデバイスを CUDA として報告する）。
+
+**次の設計セッションの進め方は未定：** クラウドのサービスクレジットを使い切ったため、
+Fable への設計作業の渡し方はユーザーが後で決める。それまでここで待つものはない。
+
+## クラウドセッション5（2026-10-10）：JIT を設計、`FromArray` を改訂、ローカルセッション3を確認 — 上のローカルセッション4で実装済み
 
 下の依頼（「クラウドへの引き継ぎ、ローカルセッション3の終了時点」）の項目1〜3に
 回答しました。項目4（マイルストーン3のレイヤー、CUDA/ROCm）には手を付けていません。

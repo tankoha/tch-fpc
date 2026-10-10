@@ -6,8 +6,9 @@ PyTorch の C++ API (libtorch) に対する Free Pascal バインディング。
 **状態:** 実装の初期段階、CPU のみ（Linux x86-64、libtorch 2.13.0、FPC 3.2.2）。
 生成した 2,657 個の op と手書きの基本 API を持つテンソル、自動微分、`TchNN`（初期化、
 save/load 付きの var store、SGD/Adam/AdamW/RmsProp、Linear、Conv2D、BatchNorm、
-LayerNorm、Embedding、Sequential）が本物の libtorch で動く。TorchScript（JIT）と CUDA は
-まだ。API は今後も変わりうる。
+LayerNorm、Embedding、Sequential）、`TchJit`（TorchScript モジュールの読み込み、実行、
+トレース、ファインチューニング）が本物の libtorch で動く。TorchScript のオブジェクトと
+CUDA/ROCm はまだ。API は今後も変わりうる。
 
 ## 名前の付け方と tch-rs との違い
 

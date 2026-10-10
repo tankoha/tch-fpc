@@ -7,8 +7,9 @@ Free Pascal bindings for the C++ API of PyTorch (libtorch), inspired by
 FPC 3.2.2). Tensors with the 2,657 generated ops and a hand-written core
 API, autograd, and `TchNN` (initialisation, var store with save/load,
 SGD/Adam/AdamW/RmsProp, Linear, Conv2D, BatchNorm, LayerNorm, Embedding,
-Sequential) work against the real libtorch. TorchScript (JIT) and CUDA are
-not there yet; the API may still change.
+Sequential) and `TchJit` (loading, running, tracing and fine-tuning
+TorchScript modules) work against the real libtorch. TorchScript objects
+and CUDA/ROCm are not there yet; the API may still change.
 
 ## Naming, and how it differs from tch-rs
 

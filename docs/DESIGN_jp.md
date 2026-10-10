@@ -621,6 +621,14 @@ function IntList(const A: array of Int64): TOptIntList;  // 値あり（空で�
     `[Double(0.9), -1.9]` とキャストしている（不要になる）、
     `tests/compiler/h2_fromarray.pas` は旧い組を記録している — すべてローカルセッション4で
     更新します（HANDOFF）。
+  - **実施済み（ローカルセッション4）。** このとおり実装。`tests/compiler` に新しい
+    `h2_fromarray.pas`（上の各行を再実測）と `xfail_h2_single.pas`（両方の
+    オーバーロードがあると `[0.9, -1.9]` は曖昧）。`tests/api` は `[0.9, -1.9]` の
+    float32 のビット、`kDouble`、`[1, 2], kFloat`、`FromSingleArray` を確認し、
+    `tests/nn` は `array of Single` 変数に `FromSingleArray` を使う。テストで踏んだ罠で、
+    利用者にも伝えるべきもの：x86-64 では比較式中の実数リテラルは `Extended` なので、
+    binary64 で正確な `0.9` に対しても `T.DoubleValue([0]) = 0.9` は False。
+    `Double(0.9)` と比較する（実測）。
 - **要素サイズ（ローカルセッション2で実測）。** `KindElementSize(AKind)` は Pascal 側の
   表で、`tests/api` が 46 種すべてについて libtorch の `element_size()` と照合済み
   （libtch の `at_copy_data` はサイズが違うと拒否する）。1 バイト未満の型と
@@ -1464,7 +1472,7 @@ type
 
 - **ユニットは `TchNN.pas` 1つ**（`TchOptim` はなし）：`TOptimizer` は
   `TVarStore.FTrainable` / `FVars` を読みますが、同じユニット内なら private に
-  アクセスできます（4.5）。`TchJit.pas` は JIT のマイルストーンで。
+  アクセスできます（4.5）。`TchJit.pas` は JIT のマイルストーンで追加（4.6.8）。
 - **`TchSys.pas` への追加：** `PTorchOptimizer`、`TTorchLoadCallback`、`at_save_multi`、
   `at_load_callback_with_device`、`at_loadz_callback_with_device`、4.6.4 の14個の `ato_*`
   （13個 + `ato_free`）。**`Tch.pas` への追加：** `at_copy_` を包む
@@ -1532,7 +1540,7 @@ type
      *add_partial*、`u1 += 42`、`LoadPartial` は **`['a.b.t2']`** を返し、`u2 = 42`、`v2`
      は手つかず（1）。クラウドセッション4はこの場合を full 構成で書いたが、それだと
      `a.b.ccc.t123__3` も欠ける。訂正（ローカルセッション3／クラウドセッション5）。
-     **追加予定**（ローカルセッション4）、この tch-rs テストの後半：ストア1に
+     **追加済み**（ローカルセッション4）、この tch-rs テストの後半：ストア1に
      `SetFloatKind(kHalf)` して保存し、新しい float の *add_partial* ストアに
      `LoadPartial` → `u2` は `kHalf` で平均 42、欠けている `v2` は `kFloat` のまま平均 1、
      missing = `['a.b.t2']`。(e) `.safetensors` への `Save` は `ETorchError`。存在しない
@@ -2022,6 +2030,34 @@ type
 - **(H24)** `GenericDict` の往復は挿入順を保つ。
 - **(H25)** プロファイリングモードは既定で on。
 
+**結果（ローカルセッション4、libtorch 2.13.0 CPU）：H19〜H25 はすべて成立。**
+`tests/jit/jit_test.pas` は上の項目 1〜13 を書かれたとおりに通る：
+- **(H19) 解決：** 使う7つのモデルはすべて読み込め（`CreateFromStream` と
+  `Create(file, TDevice.Cpu)` でも）、`jit_tests.rs` の数値になる。
+- **(H20) 解決：** `Module::define` は両方のソースをコンパイルする。新しい
+  `CreateEmpty` のモジュールは `self.training` の分岐を通り、`SetEval`/`SetTrain` で
+  切り替わる。`NamedParameters` は `weight`、`bias`、`scale` を登録順に
+  `requires_grad` 付きで返す。
+- **(H21) 解決：** ストア上で SGD を1ステップ回すと `w = [0.2, 0.4, 0.6]`、`b = 0.2`、
+  `J.Forward(X) = 3.0`。`J.Save` で保存したモジュールを読み直しても `Forward = 3.0`。
+- **(H22) 解決：** `foo8.pt` の `generate` は特化した辞書を受け入れる。
+- **(H23) 解決：** 例外を投げるクロージャの後でも、次の `CreateByTracing` は動く。
+- **(H24) 解決：** `GenericDict([42, 'foobar', 'foo', 'bar'])` は挿入順で戻る。
+- **(H25) 解決：** プログラム開始時の `JitGetProfilingMode` は True。
+
+実装メモ（上のスケッチからの小さな逸脱）：
+- `TIValueTag` は値を明示した列挙型で、FPC はそれを配列の添字に使えない
+  （"enums with assignments cannot be used as array index"、実測）ので、`TagName`
+  は `case` で書いた。
+- `CreateByTracing` の後始末（`atm_end_tracing(M, FnName, nil, 0)`、エラースロットの
+  クリア、`atm_free`）は、`Fn` の例外に限らず `atm_create_for_tracing` 以降の
+  *あらゆる* 失敗で走る。出力の nil テンソルや（トレース状態を戻す前の）
+  `atm_end_tracing` の失敗でもトレースが残るため。
+- `FromC` はポインタを包む前に `ati_to_tensor` を確認する。`Item`、`Key`、`Value` は
+  範囲外の添字で `ETorchError`。
+- モック（`tests/mock/jit_mock_test.pas`）は、`ToC`（nil テンソル）や `FromC`
+  （Device）で子が失敗しても C の ivalue が残らないことも確認する。
+
 ### 4.7 勾配モードと全体設定
 
 ```pascal
@@ -2162,3 +2198,9 @@ JIT を除く 4.6 を実装。`tests/nn/nn_test.pas`（本物の libtorch）は 
 `tests/foo*.pt`、`tests/jit/jit_test.pas`、モックのスタブ。TorchScript のオブジェクト
 （タグ 14）と `atm_fuser_cuda_*` は先送り。同じローカルセッションで 4.3 の `FromArray` の
 改訂と 4.6.7 の積み残しも適用する。順序と仮説 H19〜H25 は HANDOFF_jp.md にあります。
+
+**状況（ローカルセッション4、2026-10-11）：マイルストーン3完了。** `src/TchJit.pas` が
+4.6.8 を実装し、フォーク追加は `csrc/libtch` に。`tests/jit/jit_test.pas` は項目 1〜13 を
+通り、H19〜H25 は成立（結果は 4.6.8 の末尾）。配線は `tests/mock/jit_mock_test.pas` が
+確認する。`FromArray` の改訂（4.3）と 4.6.7 の積み残しも反映済み。残り：TorchScript の
+オブジェクト（タグ 14）、マイルストーン3のレイヤー（4.6.5 の先送りリスト）、CUDA/ROCm。

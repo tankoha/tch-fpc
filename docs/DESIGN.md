@@ -637,6 +637,15 @@ function IntList(const A: array of Int64): TOptIntList;  // present, possibly em
     casts `[Double(0.9), -1.9]` (no longer needed), and
     `tests/compiler/h2_fromarray.pas` documents the old set — all updated
     in local session 4 (HANDOFF).
+  - **Done (local session 4).** Implemented exactly so; `tests/compiler`
+    has the new `h2_fromarray.pas` (every row above measured again) and
+    `xfail_h2_single.pas` (`[0.9, -1.9]` ambiguous with both overloads);
+    `tests/api` checks the float32 bits of `[0.9, -1.9]`, the `kDouble`,
+    `[1, 2], kFloat` and `FromSingleArray` cases; `tests/nn` uses
+    `FromSingleArray` for its `array of Single` variable. One trap met in
+    the test, worth telling users: on x86-64 a real literal in a comparison
+    is `Extended`, so `T.DoubleValue([0]) = 0.9` is False for an exact
+    binary64 `0.9`; compare with `Double(0.9)` (measured).
 - **Element sizes (local session 2, measured).** `KindElementSize(AKind)`
   is a Pascal table, checked against libtorch's `element_size()` for all
   46 kinds by `tests/api` (libtch's `at_copy_data` rejects a wrong size):
@@ -1551,7 +1560,7 @@ so `.ot` files interchange.
 
 - **One unit `TchNN.pas`** (no `TchOptim`): `TOptimizer` reads
   `TVarStore.FTrainable` / `FVars`, which same-unit private access allows
-  (4.5). `TchJit.pas` comes with the JIT milestone.
+  (4.5). `TchJit.pas` came with the JIT milestone (4.6.8).
 - **`TchSys.pas` additions:** `PTorchOptimizer`, `TTorchLoadCallback`,
   `at_save_multi`, `at_load_callback_with_device`,
   `at_loadz_callback_with_device`, the fourteen `ato_*` of 4.6.4 (thirteen
@@ -1636,7 +1645,7 @@ so `.ot` files interchange.
      returns **`['a.b.t2']`**, `u2 = 42`, `v2` untouched (1). Cloud session
      4 wrote this case with the full layout, where `a.b.ccc.t123__3` would
      be missing as well; corrected (local session 3 / cloud session 5).
-     **To add** (local session 4), the second half of that tch-rs test:
+     **Added** (local session 4), the second half of that tch-rs test:
      `SetFloatKind(kHalf)` on store 1, save, `LoadPartial` into a fresh
      float *add_partial* store → `u2` is `kHalf` with mean 42, the missing
      `v2` stays `kFloat` with mean 1, missing = `['a.b.t2']`.
@@ -2179,6 +2188,40 @@ of items 1–11.
 - **(H24)** a `GenericDict` round trip keeps insertion order.
 - **(H25)** profiling mode is on by default.
 
+**Results (local session 4, libtorch 2.13.0 CPU): H19–H25 all hold.**
+`tests/jit/jit_test.pas` passes every item 1–13 above as written:
+- **(H19) resolved:** all seven used models load (also through
+  `CreateFromStream` and `Create(file, TDevice.Cpu)`) and give
+  `jit_tests.rs`'s numbers.
+- **(H20) resolved:** `Module::define` compiles both sources; a fresh
+  `CreateEmpty` module runs the `self.training` branch, `SetEval`/
+  `SetTrain` switch it; `NamedParameters` returns `weight`, `bias`,
+  `scale` in registration order with their `requires_grad`.
+- **(H21) resolved:** `w = [0.2, 0.4, 0.6]`, `b = 0.2`,
+  `J.Forward(X) = 3.0` after one SGD step on the store, and the module
+  saved by `J.Save` reloads with `Forward = 3.0`.
+- **(H22) resolved:** `foo8.pt`'s `generate` accepts the specialised dict.
+- **(H23) resolved:** after a raising closure, the next `CreateByTracing`
+  works.
+- **(H24) resolved:** `GenericDict([42, 'foobar', 'foo', 'bar'])` comes back
+  in insertion order.
+- **(H25) resolved:** `JitGetProfilingMode` is True at program start.
+
+Implementation notes (deviations from the sketch above, all small):
+- `TIValueTag` has explicit values, and FPC rejects such an enum as an
+  array index ("enums with assignments cannot be used as array index",
+  measured), so `TagName` is a `case`.
+- `CreateByTracing`'s cleanup (`atm_end_tracing(M, FnName, nil, 0)`, clear
+  the slot, `atm_free`) runs for *any* failure after
+  `atm_create_for_tracing`, not only a raising `Fn`: a nil output tensor or
+  a failing `atm_end_tracing` (before it resets the tracing state) would
+  leave tracing on as well.
+- `FromC` checks `ati_to_tensor` before wrapping the pointer; `Item`,
+  `Key` and `Value` raise `ETorchError` on an index out of range.
+- The mock (`tests/mock/jit_mock_test.pas`) additionally checks that a
+  child failing in `ToC` (nil tensor) or in `FromC` (Device) leaves no C
+  ivalue behind.
+
 ### 4.7 Grad mode and global settings
 
 ```pascal
@@ -2330,3 +2373,11 @@ with tch-rs's `tests/foo*.pt` vendored into `tests/jit/models/`,
 and `atm_fuser_cuda_*` are deferred. The same local session also applies
 the `FromArray` revision of 4.3 and the 4.6.7 follow-ups. Order and the
 hypotheses H19–H25 are in HANDOFF.md.
+
+**Status (local session 4, 2026-10-11): milestone 3 done.** `src/TchJit.pas`
+implements 4.6.8 with the fork addition in `csrc/libtch`;
+`tests/jit/jit_test.pas` passes items 1–13 and H19–H25 hold (results at
+the end of 4.6.8); `tests/mock/jit_mock_test.pas` covers the plumbing. The
+`FromArray` revision (4.3) and the 4.6.7 follow-ups are in. Still open:
+TorchScript objects (tag 14), the milestone 3 layers (4.6.5 deferred
+list), CUDA/ROCm.

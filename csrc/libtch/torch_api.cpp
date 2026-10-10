@@ -1,3 +1,5 @@
+// Modified for tch-fpc from tch-rs 4227b89b72059b0651ff83a38637693574e0a2d6 (torch-sys/libtch):
+// stream adapters, stream and stb image functions removed, tchf_free added.
 #include "torch_api.h"
 #include <ATen/autocast_mode.h>
 #include <stdexcept>
@@ -13,15 +15,6 @@
 #include <torch/torch.h>
 #include <vector>
 
-#define STB_IMAGE_IMPLEMENTATION
-#include "stb_image.h"
-
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#include "stb_image_write.h"
-
-#define STB_IMAGE_RESIZE_IMPLEMENTATION
-#include "stb_image_resize.h"
-
 thread_local char *torch_last_err = nullptr;
 
 char *get_and_reset_last_err() {
@@ -29,6 +22,8 @@ char *get_and_reset_last_err() {
   torch_last_err = nullptr;
   return tmp;
 }
+
+void tchf_free(void *p) { free(p); }
 
 void at_manual_seed(int64_t seed) { torch::manual_seed(seed); }
 
@@ -269,85 +264,7 @@ char *at_to_string(tensor t, int line_size) {
 
 void at_copy_(tensor dst, tensor src) { PROTECT(dst->copy_(*src);) }
 
-namespace {
-class WriteStreamAdapter {
-private:
-  void *_stream_ptr;
-
-public:
-  WriteStreamAdapter(void *stream_ptr) : _stream_ptr(stream_ptr) {}
-
-  ~WriteStreamAdapter() { tch_write_stream_destructor(_stream_ptr); }
-
-  size_t save(const void *data, size_t size) {
-    size_t out_size = 0;
-    if (!tch_write_stream_write(_stream_ptr, static_cast<const uint8_t *>(data),
-                                size, &out_size)) {
-      throw std::ios_base::failure("tch_write_stream_write has returned error");
-    }
-    return out_size;
-  }
-};
-
-class ReadStreamAdapter : public caffe2::serialize::ReadAdapterInterface {
-private:
-  void *_stream_ptr;
-
-public:
-  ReadStreamAdapter(void *stream_ptr) : _stream_ptr(stream_ptr) {}
-
-  virtual ~ReadStreamAdapter() { tch_read_stream_destructor(_stream_ptr); }
-
-  virtual size_t size() const {
-    uint64_t current = 0;
-    if (!tch_read_stream_stream_position(_stream_ptr, &current)) {
-      throw std::ios_base::failure(
-          "tch_read_stream_stream_position has returned error");
-    }
-
-    uint64_t size = 0;
-    if (!tch_read_stream_seek_end(_stream_ptr, 0, &size)) {
-      throw std::ios_base::failure(
-          "tch_read_stream_seek_end has returned error");
-    }
-
-    uint64_t dummy = 0;
-    if (!tch_read_stream_seek_start(_stream_ptr, current, &dummy)) {
-      throw std::ios_base::failure(
-          "tch_read_stream_seek_start has returned error");
-    }
-
-    return size;
-  }
-
-  virtual size_t read(uint64_t pos, void *buf, size_t n,
-                      const char *what) const {
-    uint64_t dummy = 0;
-    if (!tch_read_stream_seek_start(_stream_ptr, pos, &dummy)) {
-      throw std::ios_base::failure(
-          "tch_read_stream_seek_start has returned error");
-    }
-
-    size_t size = 0;
-    if (!tch_read_stream_read(_stream_ptr, static_cast<uint8_t *>(buf), n,
-                              &size)) {
-      throw std::ios_base::failure("tch_read_stream_read has returned error");
-    }
-
-    return size;
-  }
-};
-} // namespace
-
 void at_save(tensor t, char *filename) { PROTECT(torch::save(*t, filename);) }
-
-void at_save_to_stream(tensor t, void *stream_ptr) {
-  PROTECT(auto adapter = std::shared_ptr<WriteStreamAdapter>(
-              new WriteStreamAdapter(stream_ptr));
-          torch::save(*t, [adapter](const void *data, size_t size) {
-            return adapter->save(data, size);
-          });)
-}
 
 void at_save_multi(tensor *tensors, char **tensor_names, int ntensors,
                    char *filename) {
@@ -355,18 +272,6 @@ void at_save_multi(tensor *tensors, char **tensor_names, int ntensors,
           for (int i = 0; i < ntensors; ++i) archive.write(
               std::string(tensor_names[i]), *(tensors[i]), /* buffer=*/false);
           archive.save_to(filename);)
-}
-
-void at_save_multi_to_stream(tensor *tensors, char **tensor_names, int ntensors,
-                             void *stream_ptr) {
-  PROTECT(auto adapter = std::shared_ptr<WriteStreamAdapter>(
-              new WriteStreamAdapter(stream_ptr));
-          torch::serialize::OutputArchive archive;
-          for (int i = 0; i < ntensors; ++i) archive.write(
-              std::string(tensor_names[i]), *(tensors[i]), /* buffer=*/false);
-          archive.save_to([adapter](const void *data, size_t size) {
-            return adapter->save(data, size);
-          });)
 }
 
 void at_load_multi(tensor *tensors, char **tensor_names, int ntensors,
@@ -419,21 +324,6 @@ void at_load_callback_with_device(char *filename, void *data,
           })
 }
 
-void at_load_from_stream_callback(void *stream_ptr, void *data,
-                                  void (*f)(void *, char *, tensor),
-                                  bool enable_device_id, int device_id) {
-  PROTECT(
-      auto adapter = std::shared_ptr<caffe2::serialize::ReadAdapterInterface>(
-          new ReadStreamAdapter(stream_ptr));
-      auto module = enable_device_id
-                        ? torch::jit::load(adapter, device_of_int(device_id))
-                        : torch::jit::load(adapter);
-      for (const auto &p : module.named_parameters()) {
-        auto v = p.value;
-        f(data, (char *)p.name.c_str(), new torch::Tensor(v));
-      })
-}
-
 void at_load_multi_(tensor *tensors, char **tensor_names, int ntensors,
                     char *filename) {
   PROTECT(torch::NoGradGuard no_grad; torch::serialize::InputArchive archive;
@@ -454,73 +344,6 @@ tensor at_load(char *filename) {
   PROTECT(torch::Tensor tensor; torch::load(tensor, filename);
           return new torch::Tensor(tensor);)
   return nullptr;
-}
-
-tensor at_load_from_stream(void *stream_ptr) {
-  PROTECT(torch::NoGradGuard no_grad; torch::Tensor tensor;
-          auto adapter =
-              std::shared_ptr<caffe2::serialize::ReadAdapterInterface>(
-                  new ReadStreamAdapter(stream_ptr));
-          torch::load(
-              tensor,
-              [adapter](uint64_t pos, void *buf, size_t nbytes) {
-                return adapter->read(pos, buf, nbytes, "tensor");
-              },
-              [adapter]() { return adapter->size(); });
-          return new torch::Tensor(tensor);)
-  return nullptr;
-}
-
-tensor at_load_image(char *filename) {
-  PROTECT(
-      int w = -1; int h = -1; int c = -1;
-      void *data = stbi_load(filename, &w, &h, &c, 3);
-      if (data == nullptr) throw std::invalid_argument(stbi_failure_reason());
-      torch::Tensor tensor = torch::zeros({h, w, 3}, at::ScalarType::Byte);
-      memcpy(tensor.data_ptr(), data, h * w * 3); free(data);
-      return new torch::Tensor(tensor);)
-  return nullptr;
-}
-
-tensor at_load_image_from_memory(unsigned char *img_data, size_t img_size) {
-  PROTECT(
-      int w = -1; int h = -1; int c = -1;
-      void *data = stbi_load_from_memory(img_data, img_size, &w, &h, &c, 3);
-      if (data == nullptr) throw std::invalid_argument(stbi_failure_reason());
-      torch::Tensor tensor = torch::zeros({h, w, 3}, at::ScalarType::Byte);
-      memcpy(tensor.data_ptr(), data, h * w * 3); free(data);
-      return new torch::Tensor(tensor);)
-  return nullptr;
-}
-
-bool ends_with(const char *str, const char *suffix) {
-  int suffix_len = strlen(suffix);
-  int str_len = strlen(str);
-  if (str_len < suffix_len)
-    return false;
-  for (int i = 1; i <= suffix_len; ++i)
-    if (str[str_len - i] != suffix[suffix_len - i])
-      return false;
-  return true;
-}
-
-int at_save_image(tensor tensor, char *filename) {
-  PROTECT(auto sizes = tensor->sizes();
-          if (tensor->device().type() != at::kCPU) throw std::invalid_argument(
-              "the input tensor has to be on cpu");
-          if (sizes.size() != 3) throw std::invalid_argument(
-              "invalid number of dimensions, should be 3");
-          int h = sizes[0]; int w = sizes[1]; int c = sizes[2];
-          auto tmp_tensor = tensor->contiguous();
-          void *tensor_data = tmp_tensor.data_ptr();
-          if (ends_with(filename, ".jpg")) return stbi_write_jpg(
-              filename, w, h, c, tensor_data, 90);
-          if (ends_with(filename, ".bmp")) return stbi_write_bmp(
-              filename, w, h, c, tensor_data);
-          if (ends_with(filename, ".tga")) return stbi_write_tga(
-              filename, w, h, c, tensor_data);
-          return stbi_write_png(filename, w, h, c, tensor_data, 0);)
-  return -1;
 }
 
 int at_get_num_interop_threads() {
@@ -557,23 +380,6 @@ void at_set_qengine(int qengine_id) {
           qengines.end()) {
         at::globalContext().setQEngine(qengine);
       } else throw std::invalid_argument("unsupported qengine");)
-}
-
-tensor at_resize_image(tensor tensor, int out_w, int out_h) {
-  PROTECT(
-      auto sizes = tensor->sizes();
-      if (tensor->device().type() != at::kCPU) throw std::invalid_argument(
-          "the input tensor has to be on cpu");
-      if (sizes.size() != 3) throw std::invalid_argument(
-          "invalid number of dimensions, should be 3");
-      int h = sizes[0]; int w = sizes[1]; int c = sizes[2];
-      auto tmp_tensor = tensor->contiguous();
-      const unsigned char *tensor_data = (unsigned char *)tmp_tensor.data_ptr();
-      torch::Tensor out = torch::zeros({out_h, out_w, c}, at::ScalarType::Byte);
-      stbir_resize_uint8(tensor_data, w, h, 0, (unsigned char *)out.data_ptr(),
-                         out_w, out_h, 0, c);
-      return new torch::Tensor(out);)
-  return nullptr;
 }
 
 void at_free(tensor t) { delete (t); }

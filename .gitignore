@@ -9,3 +9,5 @@ lib/
 backup/
 # libtorch is downloaded locally, never committed
 libtorch/
+# CMake build trees
+build/

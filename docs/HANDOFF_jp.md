@@ -73,7 +73,7 @@ FPC 3.2.2 を入れ、OCaml は apt から（`yaml` は入らなかった：opam
   `tests/compiler/run.sh` も引き続き通る。`tests/ownership/ownership_test.pas` は
   コンパイルできる（ここではリンクしていない。`ones` は `TDevice.Cpu` を取るようになった）。
 
-## ローカルセッション2（2026-10-10）：下の手順1〜5完了
+## ローカルセッション2（2026-10-10）：下の手順1〜6完了
 
 - **1.** autocast のパッチ入りで libtch を再ビルド。`tests/abi` は合格し、
   `[W` の警告行はもう出ない（`at_autocast_*` を呼ぶたびに出ていた非推奨 API の
@@ -101,7 +101,31 @@ FPC 3.2.2 を入れ、OCaml は apt から（`yaml` は入らなかった：opam
     `Message` から始まり `Exception raised from` を含む。
   - 終了時 `TchLiveHandles = 0`。
 
-次：手順6（マイルストーン1の手書き API）。
+- **6. 完了：マイルストーン1の手書き API**（`src/Tch.pas`）。テストは
+  `tests/api/api_test.pas`（ビルド方法はファイル先頭）、全件合格：
+  - `Numel`、`Device`、`ShallowClone`、`Copy`。`FromArray`（Single、Double、Int64、
+    Byte、Boolean）、`FromInt32Array`、`FromBytes`。`To{Single,Double,Int64}Array`
+    （先に変換）、`CopyData`（自分の kind のまま）。
+  - 演算子：テンソル同士の `+ - * /`、単項 `-`、`** Double`、`Double`/`Int64` との
+    `+ - * /`（左右両方）。`d - A` は `rsub_scalar`、`d / A` は `reciprocal * d`。
+    Int64 テンソルに整数の指数 `-1` で `pow` すると失敗するため（実測、DESIGN 4.1 の表）。
+  - 自動微分：`Backward(KeepGraph, CreateGraph)`、`RequiresGrad`、`ZeroGrad`。
+    `grad`/`requires_grad_` は生成 op。grad モードとグローバル設定（4.7）：
+    `SetGradEnabled`、`NoGradGuard`（代入しない呼び出しは効かないことをテスト済み）、
+    `ManualSeed`、`Set/GetNumThreads`、`CudaIsAvailable`、`CudaDeviceCount`、
+    `TDevice.CudaIfAvailable`。
+  - CPU 上のファクトリのオーバーロード `zeros/ones/empty/rand/randn(ASize; AKind = kFloat)`。
+    実測：`objfpc` では `overload` 指示子は不要。tchgen は `overload;` 付きのメンバーを
+    意図したオーバーロードとして扱い、複数行の宣言をまとめて読むようにした（DESIGN 4.4）。
+  - `KindElementSize`：46 種すべてについて libtorch と照合済み（DESIGN 4.3）。
+  - `TTensor` のメソッドで `T` という名前のローカル変数を使うと生成 op の `t` と
+    衝突する（コンパイルエラー、4.4 の落とし穴）。手書きのローカル変数は1文字の
+    op 名を避ける。
+  - `tests/mock/mock_tch.c` に新しい手書き external のスタブを追加。
+
+次：DESIGN 4.6 に沿ってオプティマイザ（`ato_*`）と VarStore/nn。4.6 がローカルで
+実装できるほど詳しいか、先にクラウドの設計セッションに戻すかをユーザーに確認する
+（クラウドは設計のみ、CLAUDE.md 参照）。
 
 ローカルセッションでやること（この順で。すべて機械的）：
 
@@ -335,8 +359,8 @@ DESIGN_jp.md の各 (Hn) の横）。手順8のための OCaml の環境はロ�
   本物の libtorch のメッセージで確認済み。
 - **26 を超える `TKind`：決定済み**（クラウドセッション3）。2.13 の 46 個全部に
   広げ、省略可能な dtype 用に `kNone = -1` を足した（DESIGN_jp.md の 4.3）。
-  未決：`FromArray`/`CopyData` がどの kind を扱うか（要素サイズ）。手書き API と
-  一緒に決める。
+  要素サイズはローカルセッション2で解決：`FromBytes`/`CopyData` はすべての kind を
+  扱い、サイズは libtorch と照合済み（DESIGN_jp.md の 4.3）。
 - **libtorch の警告：決定済み**（クラウドセッション3）。autocast の2関数のフォーク
   パッチだけ（ローカルではまだコンパイルしていない）。c10 の警告ハンドラーは
   スレッドローカルなので、Pascal のコールバックは必要になるまで保留
@@ -361,9 +385,9 @@ DESIGN_jp.md の各 (Hn) の横）。手順8のための OCaml の環境はロ�
   手書きの結果用 record を足す価値があるか。(H8) が実際に問題になるなら `var`。
 - **デフォルト引数：決定済み**（クラウドセッション3、DESIGN_jp.md の 4.4）：479 op に
   デフォルトが付く。out 引数のある op には付かない（107 op には付いたはず）。
-  未決：最初のマイルストーンに入れる手書きの便利なオーバーロード（`kFloat`/CPU を
-  既定にした `TTensor.zeros([2, 3])`、デフォルト付きの `topk(k)`）と、`objfpc`
-  モードで生成した名前をオーバーロードするのに `overload` 指示子が要るか（未測定）。
+  ローカルセッション2：`zeros`、`ones`、`empty`、`rand`、`randn` のオーバーロードを
+  追加。`objfpc` では `overload` 指示子は不要（実測）だが、tchgen は意図した
+  オーバーロードの目印に `overload;` を使う（DESIGN_jp.md の 4.4）。未決：out 引数の op に `topk(k)` 型のデフォルト。
 - **等価性とコンテナ。** `TTensor` では `=` を意図的にオーバーロードしていないので、
   FGL（`TFPGList<TTensor>`）は使えない。`TchNN` に必要なことが
   `Generics.Collections.TList<TTensor>` と素の `TTensorArray` で足りるか確認する。

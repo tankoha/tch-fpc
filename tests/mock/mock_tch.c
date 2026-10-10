@@ -326,3 +326,25 @@ void atg_to(tensor *out__, tensor self, int device) { (void)device; out__[0] = c
 void atg_totype(tensor *out__, tensor self, int scalar_type) {
   mock_tensor *m = copy_of(self); m->kind = scalar_type; out__[0] = m;
 }
+
+/* hand-written entry points that Tch.pas links against but mock_test.pas
+   does not exercise (data in/out, autograd, global settings) */
+tensor at_tensor_of_data(void *vs, int64_t *dims, size_t ndims, size_t element_size_in_bytes, int type) {
+  (void)vs; (void)dims; (void)ndims; (void)element_size_in_bytes; (void)type;
+  mock_unimpl("at_tensor_of_data"); return NULL;
+}
+void at_copy_data(tensor t, void *vs, size_t numel, size_t elt_size_in_bytes) {
+  (void)t; (void)vs; (void)numel; (void)elt_size_in_bytes; mock_unimpl("at_copy_data");
+}
+tensor at_shallow_clone(tensor t) { (void)t; mock_unimpl("at_shallow_clone"); return NULL; }
+void at_copy_(tensor dst, tensor src) { (void)dst; (void)src; mock_unimpl("at_copy_"); }
+void at_backward(tensor t, int keep_graph, int create_graph) {
+  (void)t; (void)keep_graph; (void)create_graph; mock_unimpl("at_backward");
+}
+int at_requires_grad(tensor t) { (void)t; mock_unimpl("at_requires_grad"); return -1; }
+int at_grad_set_enabled(int b) { (void)b; mock_unimpl("at_grad_set_enabled"); return -1; }
+void at_manual_seed(int64_t seed) { (void)seed; }
+int at_get_num_threads(void) { return 1; }
+void at_set_num_threads(int n_threads) { (void)n_threads; }
+int atc_cuda_device_count(void) { return 0; }
+int atc_cuda_is_available(void) { return 0; }

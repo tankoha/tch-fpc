@@ -287,18 +287,20 @@ type
     class function FromArray(const A: array of Single): TTensor; overload; static;
     class function FromArray(const A: array of Double): TTensor; overload; static;
     class function FromArray(const A: array of Int64): TTensor; overload; static;
-    class function FromArray(const A: array of Int32): TTensor; overload; static;
+    class function FromInt32Array(const A: array of Int32): TTensor; static;  // no Int32 overload (H2)
     class function FromArray(const A: array of Byte): TTensor; overload; static;
     class function FromArray(const A: array of Boolean): TTensor; overload; static;
     class function FromBytes(const Data; const Shape: array of Int64; AKind: TKind): TTensor; static;
     function ToSingleArray: TSingleArray;    // 外へコピー。型も変換する
     function ToDoubleArray: TDoubleArray;
     function ToInt64Array: TInt64Array;
+    procedure CopyData(var Dest; ACount: Int64);  // own kind, no conversion
     function DoubleValue(const Index: array of Int64): Double;
     function Int64Value(const Index: array of Int64): Int64;
     // 自動微分
-    procedure Backward;
+    procedure Backward(KeepGraph: Boolean = False; CreateGraph: Boolean = False);
     function RequiresGrad: Boolean;
+    procedure ZeroGrad;                      // grad (generated) .detach_.zero_ if defined
     // 演算子（4.1「演算子」）
     class operator +(const A, B: TTensor): TTensor;
     class operator -(const A, B: TTensor): TTensor;
@@ -381,7 +383,7 @@ type
 |---|---|---|
 | `A + B`, `A - B`, `A * B`, `A / B` | `add`, `sub`, `mul`, `div` | `*` は **要素ごと**。行列積は `A.matmul(B)` |
 | `A + d`, `A - d`, `A * d`, `A / d` | `add_scalar` など | `d: Double` と `d: Int64` を明示的なオーバーロードとして用意する **(H3)**。`TScalar` の暗黙変換は通さず、`T + 1` と `T + 1.5` がどちらもユーザー定義の変換なしで解決されるようにする |
-| `d + A`, `d - A`, `d * A`, `d / A` | 左右逆 | tch-rs と同じく `d - A` = `(-A) + d`、`d / A` = `A.pow(-1) * d` |
+| `d + A`, `d - A`, `d * A`, `d / A` | 左右逆 | `d - A` = `A.rsub_scalar(d)`（op 1回）。`d / A` は以前の `A.pow(-1) * d` ではなく `A.reciprocal * d`。ローカルセッション2で実測：Int64 テンソルに整数の指数 `-1` で `pow` すると失敗する（"Integers to negative integer powers are not allowed."）。`-1.0` なら通る。`reciprocal` は真の除算と同じく float に昇格し、`4 / Int64 テンソル` は kFloat |
 | `-A` | `neg` | |
 | `A ** d` | `pow_tensor_scalar` | FPC は `**` のオーバーロードを許す |
 
@@ -571,8 +573,14 @@ function IntList(const A: array of Int64): TOptIntList;  // 値あり（空で�
 - **`FromArray` のオーバーロード（決定、H2 の続き）。** `array of Single`、
   `array of Double`、`array of Int64`、`array of Byte`、`array of Boolean`。実測で
   `[1, 2]` は `Int64`、`[1.0, 2.0]` は `Single`、`[True, False]` は `Boolean` を選び、
-  曖昧にならない。`Int32` はやめる（`Int64` と曖昧、H2）。`Int32`/`Int16`/`Int8` の
-  データは `FromInt32s` などで。手書き、最初のマイルストーン。
+  曖昧にならない。`Int32` はやめる（`Int64` と曖昧、H2）。`Int32` の
+  データは `FromInt32Array` で（以前の草稿では `FromInt32s`）、`Int16`/`Int8` は `FromBytes` で。手書き、最初の
+  マイルストーン。ローカルセッション2で実装。
+- **要素サイズ（ローカルセッション2で実測）。** `KindElementSize(AKind)` は Pascal 側の
+  表で、`tests/api` が 46 種すべてについて libtorch の `element_size()` と照合済み
+  （libtch の `at_copy_data` はサイズが違うと拒否する）。1 バイト未満の型と
+  Float8/Float4 はすべて 1 バイト、`kNone` は `ETorchError`。よって `FromBytes` と
+  `CopyData` はどの型も受け付け、`To{Single,Double,Int64}Array` は先に `to_dtype` で変換する。
 - `IntListOption`（103 箇所）は未解決の論点でした。オープン配列も動的配列も
   「なし」と「空」を区別できない（どちらも nil／長さ0）ので、`HasValue` を持つ
   record にし、`IntList([...])` で作ることにしました。
@@ -717,6 +725,14 @@ function IntList(const A: array of Int64): TOptIntList;  // 値あり（空で�
 - `TensorOptions` 引数は明示的なまま（`options_kind: TKind; const
   options_device: TDevice`。C の名前）にします。`kFloat`/CPU を既定にした手書きの
   `TTensor.zeros([2, 3])` オーバーロードは安く作れ、tch-rs の `FLOAT_CPU` に相当します。
+  **生成された名前のオーバーロード（ローカルセッション2で実測）。** `objfpc` では
+  record のメソッドのオーバーロードに `overload` 指令は要らない（宣言のどちらにも
+  付けない／片方／両方、いずれでも `zeros([2, 3])` と `zeros([2, 3, 4], kFloat, Dev)`
+  の解決は同じ）。それでも生成 op の手書きオーバーロードには、tchgen が読む目印として
+  `overload;` を付ける：宣言に `overload;` がある手書きメンバーは意図したオーバーロード、
+  それ以外で op と同名の手書きメンバーは衝突（エラー）。このため tchgen は複数行の
+  宣言をまとめて読む（継続行をフィールドと誤認しなくなった）。マイルストーン1には
+  CPU 上の `zeros`、`ones`、`empty`、`rand`、`randn` `(ASize; AKind = kFloat)` がある。
 - **生成する本体（クラウドセッション3）。** ローカル変数はすべて `__` で終わる
   （`Outs__`、`P__`、`R__`、Scalar のハンドルとテンソルリストのポインタ配列は
   `<引数>__`）。YAML の引数名で `__` で終わるものはない（tchgen が確認）。
@@ -1052,3 +1068,11 @@ Pascal の配列からテンソルを作る、データを読み戻す、表示�
 生成された op をいくつか、エラー → `ETorchError`、一時値を 10^6 回作るループで
 リークしないこと、FPU マスクの確認。その後、自動微分（`at_backward`、
 `requires_grad_`）、オプティマイザ、VarStore/nn、JIT モジュール、CUDA の順に進めます。
+
+**状況（ローカルセッション2、2026-10-10）：マイルストーン1完了。** 手書き API は
+4.1/4.3/4.7 の草案どおり `src/Tch.pas` に実装（`FromInt32Array`、`CopyData`、
+`ZeroGrad`、`Backward(KeepGraph, CreateGraph)`、4.4 のファクトリのオーバーロードを含む）。
+テスト：`tests/generated`（本物の libtorch での生成 op）、`tests/api`（手書き API、
+要素サイズ）、それに既存の `tests/ownership`、`tests/fpu`、`tests/abi`、`tests/mock`、
+`tests/compiler`。自動微分の基本（`requires_grad_`、`Backward`、`grad`、`NoGradGuard`）は
+入った。次はオプティマイザ、VarStore/nn（4.6）、JIT、CUDA の順。

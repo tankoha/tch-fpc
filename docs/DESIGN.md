@@ -286,18 +286,20 @@ type
     class function FromArray(const A: array of Single): TTensor; overload; static;
     class function FromArray(const A: array of Double): TTensor; overload; static;
     class function FromArray(const A: array of Int64): TTensor; overload; static;
-    class function FromArray(const A: array of Int32): TTensor; overload; static;
+    class function FromInt32Array(const A: array of Int32): TTensor; static;  // no Int32 overload (H2)
     class function FromArray(const A: array of Byte): TTensor; overload; static;
     class function FromArray(const A: array of Boolean): TTensor; overload; static;
     class function FromBytes(const Data; const Shape: array of Int64; AKind: TKind): TTensor; static;
     function ToSingleArray: TSingleArray;    // copies out, converts kind
     function ToDoubleArray: TDoubleArray;
     function ToInt64Array: TInt64Array;
+    procedure CopyData(var Dest; ACount: Int64);  // own kind, no conversion
     function DoubleValue(const Index: array of Int64): Double;
     function Int64Value(const Index: array of Int64): Int64;
     // autograd
-    procedure Backward;
+    procedure Backward(KeepGraph: Boolean = False; CreateGraph: Boolean = False);
     function RequiresGrad: Boolean;
+    procedure ZeroGrad;                      // grad (generated) .detach_.zero_ if defined
     // operators (4.1 "Operators")
     class operator +(const A, B: TTensor): TTensor;
     class operator -(const A, B: TTensor): TTensor;
@@ -384,7 +386,7 @@ Operators (hand-written; map to generated ops):
 |---|---|---|
 | `A + B`, `A - B`, `A * B`, `A / B` | `add`, `sub`, `mul`, `div` | `*` is **elementwise**; matrix product is `A.matmul(B)` |
 | `A + d`, `A - d`, `A * d`, `A / d` | `add_scalar` ... | `d: Double` and `d: Int64` as explicit overloads **(H3)**, not via `TScalar`'s implicit operator, so that `T + 1` and `T + 1.5` both resolve without going through a user-defined conversion |
-| `d + A`, `d - A`, `d * A`, `d / A` | reversed | `d - A` = `(-A) + d`, `d / A` = `A.pow(-1) * d` as in tch-rs |
+| `d + A`, `d - A`, `d * A`, `d / A` | reversed | `d - A` = `A.rsub_scalar(d)` (one op). `d / A` = `A.reciprocal * d` instead of the earlier `A.pow(-1) * d`: measured in local session 2, `pow` with the integer exponent `-1` on an Int64 tensor fails ("Integers to negative integer powers are not allowed."), `-1.0` would work; `reciprocal` promotes to float like true division, and `4 / Int64 tensor` is kFloat |
 | `-A` | `neg` | |
 | `A ** d` | `pow_tensor_scalar` | FPC allows overloading `**` |
 
@@ -582,8 +584,16 @@ function IntList(const A: array of Int64): TOptIntList;  // present, possibly em
   `array of Double`, `array of Int64`, `array of Byte` and
   `array of Boolean`: measured, `[1, 2]` picks `Int64`, `[1.0, 2.0]`
   `Single`, `[True, False]` `Boolean`, no ambiguity. `Int32` is dropped
-  (ambiguous with `Int64`, H2); `Int32`/`Int16`/`Int8` data go through
-  `FromInt32s` etc. Hand-written, first milestone.
+  (ambiguous with `Int64`, H2); `Int32` data go through
+  `FromInt32Array` (named `FromInt32s` in earlier drafts), `Int16`/`Int8`
+  through `FromBytes`. Hand-written, first milestone; implemented in local
+  session 2.
+- **Element sizes (local session 2, measured).** `KindElementSize(AKind)`
+  is a Pascal table, checked against libtorch's `element_size()` for all
+  46 kinds by `tests/api` (libtch's `at_copy_data` rejects a wrong size):
+  every sub-byte and Float8/Float4 kind is 1 byte, `kNone` raises
+  `ETorchError`. So `FromBytes` and `CopyData` accept any kind;
+  `To{Single,Double,Int64}Array` convert with `to_dtype` first.
 - `IntListOption` (103 uses) was an open question: open arrays and dynamic
   arrays cannot distinguish "none" from "empty" (both are nil/zero-length),
   so a record with `HasValue` it is, built with `IntList([...])`.
@@ -742,6 +752,16 @@ temporaries (H1).
   options_device: TDevice`, the C names); a hand-written
   `TTensor.zeros([2, 3])` overload defaulting to `kFloat`/CPU is cheap and
   mirrors tch-rs's `FLOAT_CPU`.
+  **Overloading a generated name (local session 2, measured).** In
+  `objfpc` a record method overload needs no `overload` directive (with it
+  on neither, one or both declarations, `zeros([2, 3])` and
+  `zeros([2, 3, 4], kFloat, Dev)` resolve the same). Hand-written overloads
+  of generated ops still carry `overload;` as the marker tchgen reads: a
+  hand-written member whose declaration says `overload;` is a deliberate
+  overload, any other hand-written member named like an op is a collision
+  (error). tchgen reads whole multi-line declarations for this (and no
+  longer mistakes continuation lines for fields). Milestone 1 has
+  `zeros`, `ones`, `empty`, `rand`, `randn` `(ASize; AKind = kFloat)` on CPU.
 - **Generated bodies (cloud session 3).** Every local is suffixed `__`
   (`Outs__`, `P__`, `R__`, `<arg>__` for Scalar handles and tensor-list
   pointer arrays); no YAML argument name ends in `__` (checked by tchgen).
@@ -1091,3 +1111,13 @@ operators, a handful of generated ops, error → `ETorchError`, no leaks under
 a loop of 10^6 temporaries, FPU mask verified. Autograd (`at_backward`,
 `requires_grad_`), optimizers, VarStore/nn, JIT modules and CUDA follow in
 that order.
+
+**Status (local session 2, 2026-10-10): milestone 1 done.** Hand-written
+API in `src/Tch.pas` as sketched in 4.1/4.3/4.7 (with `FromInt32Array`,
+`CopyData`, `ZeroGrad`, `Backward(KeepGraph, CreateGraph)` and the factory
+overloads of 4.4); tests: `tests/generated` (generated ops on real
+libtorch), `tests/api` (hand-written API, element sizes), plus the
+earlier `tests/ownership`, `tests/fpu`, `tests/abi`, `tests/mock`,
+`tests/compiler`. Autograd basics (`requires_grad_`, `Backward`, `grad`,
+`NoGradGuard`) are in; optimizers, VarStore/nn (4.6), JIT and CUDA are
+next, in that order.

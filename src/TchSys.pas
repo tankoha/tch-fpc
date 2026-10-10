@@ -35,6 +35,26 @@ function at_double_value_at_indexes(t: PTorchTensor; indexes: PInt64;
 function at_int64_value_at_indexes(t: PTorchTensor; indexes: PInt64;
   indexes_len: cint): Int64; cdecl; external LibTch;
 
+function at_tensor_of_data(vs: Pointer; dims: PInt64; ndims: csize_t;
+  element_size_in_bytes: csize_t; type_: cint): PTorchTensor; cdecl;
+  external LibTch;
+procedure at_copy_data(t: PTorchTensor; vs: Pointer; numel: csize_t;
+  elt_size_in_bytes: csize_t); cdecl; external LibTch;
+function at_shallow_clone(t: PTorchTensor): PTorchTensor; cdecl;
+  external LibTch;
+procedure at_copy_(dst, src: PTorchTensor); cdecl; external LibTch;
+
+procedure at_backward(t: PTorchTensor; keep_graph, create_graph: cint);
+  cdecl; external LibTch;
+function at_requires_grad(t: PTorchTensor): cint; cdecl; external LibTch;
+function at_grad_set_enabled(b: cint): cint; cdecl; external LibTch;
+
+procedure at_manual_seed(seed: Int64); cdecl; external LibTch;
+function at_get_num_threads: cint; cdecl; external LibTch;
+procedure at_set_num_threads(n_threads: cint); cdecl; external LibTch;
+function atc_cuda_device_count: cint; cdecl; external LibTch;
+function atc_cuda_is_available: cint; cdecl; external LibTch;
+
 function ats_int(v: Int64): PTorchScalar; cdecl; external LibTch;
 function ats_float(v: Double): PTorchScalar; cdecl; external LibTch;
 procedure ats_free(s: PTorchScalar); cdecl; external LibTch;

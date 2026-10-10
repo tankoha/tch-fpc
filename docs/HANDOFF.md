@@ -76,7 +76,7 @@ committed code does.
   `tests/compiler/run.sh` still passes. `tests/ownership/ownership_test.pas`
   compiles (not linked here; `ones` now takes `TDevice.Cpu`).
 
-## Local session 2 (2026-10-10): steps 1-5 below done
+## Local session 2 (2026-10-10): steps 1-6 below done
 
 - **1.** libtch rebuilt with the autocast patch; `tests/abi` passes and no
   `[W` warning line is printed any more (the deprecated-API warning on every
@@ -107,7 +107,34 @@ committed code does.
     starting with `Message` and containing `Exception raised from`.
   - `TchLiveHandles = 0` at the end.
 
-Next: step 6 (hand-written API of milestone 1).
+- **6. Done: hand-written API of milestone 1** (`src/Tch.pas`), test
+  `tests/api/api_test.pas` (build line in its header), all passing:
+  - `Numel`, `Device`, `ShallowClone`, `Copy`; `FromArray` (Single,
+    Double, Int64, Byte, Boolean), `FromInt32Array`, `FromBytes`;
+    `To{Single,Double,Int64}Array` (convert first), `CopyData` (own kind).
+  - Operators: `+ - * /` on tensors, unary `-`, `** Double`, and
+    `+ - * /` with `Double`/`Int64` in both orders. `d - A` is
+    `rsub_scalar`; `d / A` is `reciprocal * d` because `pow` with integer
+    exponent `-1` fails on Int64 tensors (measured; DESIGN 4.1 table).
+  - Autograd: `Backward(KeepGraph, CreateGraph)`, `RequiresGrad`,
+    `ZeroGrad`; `grad`/`requires_grad_` are the generated ops. Grad mode
+    and globals (4.7): `SetGradEnabled`, `NoGradGuard` (bare call has no
+    effect, tested), `ManualSeed`, `Set/GetNumThreads`, `CudaIsAvailable`,
+    `CudaDeviceCount`, `TDevice.CudaIfAvailable`.
+  - Factory overloads `zeros/ones/empty/rand/randn(ASize; AKind = kFloat)`
+    on CPU. Measured: no `overload` directive needed in `objfpc`; tchgen
+    now treats `overload;` members as deliberate overloads and reads
+    multi-line declarations whole (DESIGN 4.4).
+  - `KindElementSize`: table checked against libtorch for all 46 kinds
+    (DESIGN 4.3).
+  - A local named `T` in a `TTensor` method collides with the generated
+    `t` op (compile error, the 4.4 pitfall); hand-written locals avoid
+    single-letter op names.
+  - `tests/mock/mock_tch.c` got stubs for the new hand-written externals.
+
+Next: optimizers (`ato_*`) and VarStore/nn per DESIGN 4.6. Ask the user
+whether 4.6 is detailed enough to implement locally or goes back to a
+cloud design session first (cloud sessions design only, see CLAUDE.md).
 
 Local session, in this order (all mechanical):
 
@@ -347,8 +374,8 @@ build commands in each test's header and in "Local progress".
   against a real libtorch message in local session 2.
 - **`TKind` beyond 26: decided** (cloud session 3). Extended to all 46
   values of 2.13 plus `kNone = -1` for optional dtypes (DESIGN.md 4.3).
-  Open: which kinds `FromArray`/`CopyData` support (element sizes), to be
-  decided with the hand-written API.
+  Element sizes resolved in local session 2: `FromBytes`/`CopyData`
+  accept every kind, sizes checked against libtorch (DESIGN.md 4.3).
 - **libtorch warnings: decided** (cloud session 3). Fork patch of the two
   autocast functions only (not yet compiled locally); c10's warning
   handler is thread-local, so a Pascal callback is deferred until needed
@@ -378,10 +405,10 @@ build commands in each test's header and in "Local progress".
   after writing real code, and `var` instead of `out` if (H8) bites.
 - **Default arguments: decided** (cloud session 3, DESIGN.md 4.4): 479 ops
   get defaults; ops with out parameters none (107 would have had some).
-  Open: which hand-written convenience overloads (`TTensor.zeros([2, 3])`
-  with `kFloat`/CPU, `topk(k)` with defaults) go into the first milestone,
-  and whether overloading a generated name needs the `overload` directive
-  in `objfpc` mode (not measured).
+  Local session 2: `zeros`, `ones`, `empty`, `rand`, `randn` overloads
+  added; no `overload` directive is needed in `objfpc` (measured), but
+  tchgen uses `overload;` as the marker for deliberate overloads
+  (DESIGN.md 4.4). Still open: `topk(k)`-style defaults for out-param ops.
 - **Equality and containers.** `=` is deliberately not overloaded for
   `TTensor`, which rules out FGL (`TFPGList<TTensor>`). Confirm
   `Generics.Collections.TList<TTensor>` and plain `TTensorArray` cover the

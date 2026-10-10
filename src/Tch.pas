@@ -61,6 +61,7 @@ type
     class function FromC(V: cint): TDevice; static;
     class function Cpu: TDevice; static;
     class function Cuda(AIndex: Integer = 0): TDevice; static;
+    class function CudaIfAvailable: TDevice; static;
     function IsCuda: Boolean;
   end;
 
@@ -133,9 +134,71 @@ type
     function DoubleValue(const Index: array of Int64): Double;
     function Int64Value(const Index: array of Int64): Int64;
     function SameHandle(const Other: TTensor): Boolean; inline;
+    function Numel: Int64;
+    function Device: TDevice;
+    { New handle to the same storage (B := A shares the handle itself). }
+    function ShallowClone: TTensor;
+    { New storage with a copy of the data (zeros_like + copy_). }
+    function Copy: TTensor;
 
+    { Data in: a 1-d tensor of the array's length. [1.0, 2.0] picks Single
+      (kFloat), [1, 2] Int64 (kInt64), as PyTorch's defaults (H2). Int32
+      data: FromInt32Array (an Int32 overload would make [1, 2] ambiguous). }
+    class function FromArray(const A: array of Single): TTensor; overload; static;
+    class function FromArray(const A: array of Double): TTensor; overload; static;
+    class function FromArray(const A: array of Int64): TTensor; overload; static;
+    class function FromArray(const A: array of Byte): TTensor; overload; static;
+    class function FromArray(const A: array of Boolean): TTensor; overload; static;
+    class function FromInt32Array(const A: array of Int32): TTensor; static;
+    { Count = product of AShape elements of AKind's size, read from Data. }
+    class function FromBytes(const Data; const AShape: array of Int64;
+      AKind: TKind): TTensor; static;
+    { Data out: converts to the element type first if Kind differs. }
+    function ToSingleArray: TSingleArray;
+    function ToDoubleArray: TDoubleArray;
+    function ToInt64Array: TInt64Array;
+    { Copies the first ACount elements, in this tensor's own Kind (no
+      conversion; element size from KindElementSize), to Dest. }
+    procedure CopyData(var Dest; ACount: Int64);
+
+    { Autograd. Grad, requires_grad_ and set_requires_grad are generated. }
+    procedure Backward(KeepGraph: Boolean = False; CreateGraph: Boolean = False);
+    function RequiresGrad: Boolean;
+    { Zeroes the gradient if there is one (grad.detach_.zero_). }
+    procedure ZeroGrad;
+
+    { Convenience overloads of generated factories (DESIGN.md 4.4): CPU,
+      kFloat unless given, like tch-rs's FLOAT_CPU. }
+    class function zeros(const ASize: array of Int64; AKind: TKind = kFloat): TTensor; overload; static;
+    class function ones(const ASize: array of Int64; AKind: TKind = kFloat): TTensor; overload; static;
+    class function empty(const ASize: array of Int64; AKind: TKind = kFloat): TTensor; overload; static;
+    class function rand(const ASize: array of Int64; AKind: TKind = kFloat): TTensor; overload; static;
+    class function randn(const ASize: array of Int64; AKind: TKind = kFloat): TTensor; overload; static;
+
+    { Operators (DESIGN.md 4.1). * is elementwise; use matmul for the
+      matrix product. Double and Int64 overloads in both orders (H3). }
     class operator +(const A, B: TTensor): TTensor;
+    class operator -(const A, B: TTensor): TTensor;
     class operator *(const A, B: TTensor): TTensor;
+    class operator /(const A, B: TTensor): TTensor;
+    class operator -(const A: TTensor): TTensor;
+    class operator **(const A: TTensor; B: Double): TTensor;
+    class operator +(const A: TTensor; B: Double): TTensor;
+    class operator +(const A: TTensor; B: Int64): TTensor;
+    class operator +(A: Double; const B: TTensor): TTensor;
+    class operator +(A: Int64; const B: TTensor): TTensor;
+    class operator -(const A: TTensor; B: Double): TTensor;
+    class operator -(const A: TTensor; B: Int64): TTensor;
+    class operator -(A: Double; const B: TTensor): TTensor;
+    class operator -(A: Int64; const B: TTensor): TTensor;
+    class operator *(const A: TTensor; B: Double): TTensor;
+    class operator *(const A: TTensor; B: Int64): TTensor;
+    class operator *(A: Double; const B: TTensor): TTensor;
+    class operator *(A: Int64; const B: TTensor): TTensor;
+    class operator /(const A: TTensor; B: Double): TTensor;
+    class operator /(const A: TTensor; B: Int64): TTensor;
+    class operator /(A: Double; const B: TTensor): TTensor;
+    class operator /(A: Int64; const B: TTensor): TTensor;
 
     {$I TchTensorGenerated_intf.inc}
   end;
@@ -148,6 +211,24 @@ const
   NoIntList: TOptIntList = (HasValue: False; Value: nil);
 
 function IntList(const A: array of Int64): TOptIntList;  // present, possibly empty
+
+{ Bytes per element of AKind, as libtorch's element_size(); ETorchError for
+  kNone. }
+function KindElementSize(AKind: TKind): Integer;
+
+{ Grad mode (DESIGN.md 4.7); thread-local in libtorch. Returns the
+  previous mode. }
+function SetGradEnabled(Enabled: Boolean): Boolean;
+{ Disables grad mode until the result is released, then restores the
+  previous mode. Keep it in a local: `G := NoGradGuard;` covers the rest of
+  the routine (H11). A bare `NoGradGuard;` is released at once and has no
+  effect. }
+function NoGradGuard: IInterface;
+procedure ManualSeed(Seed: Int64);
+procedure SetNumThreads(N: Integer);
+function GetNumThreads: Integer;
+function CudaIsAvailable: Boolean;
+function CudaDeviceCount: Integer;
 
 { Reads and clears libtch's error slot; raises ETorchNativeError if set. }
 procedure TchCheck; inline;
@@ -372,6 +453,14 @@ begin
   Result.Index := AIndex;
 end;
 
+class function TDevice.CudaIfAvailable: TDevice;
+begin
+  if CudaIsAvailable then
+    Result := Cuda(0)
+  else
+    Result := Cpu;
+end;
+
 function TDevice.IsCuda: Boolean;
 begin
   Result := DeviceType = dtCuda;
@@ -520,14 +609,409 @@ begin
   TchCheck;
 end;
 
+function TTensor.Numel: Int64;
+var
+  S: TInt64Array;
+  K: Integer;
+begin
+  S := Shape;
+  Result := 1;
+  for K := 0 to High(S) do
+    Result := Result * S[K];
+end;
+
+function TTensor.Device: TDevice;
+var
+  D: cint;
+begin
+  TchCheckArg(Self, 'self', 'Device');
+  D := at_device(Raw);
+  TchCheck;
+  Result := TDevice.FromC(D);
+end;
+
+function TTensor.ShallowClone: TTensor;
+var
+  P: PTorchTensor;
+begin
+  TchCheckArg(Self, 'self', 'ShallowClone');
+  P := at_shallow_clone(Raw);
+  TchCheck;
+  Result := FromRaw(P);
+end;
+
+function TTensor.Copy: TTensor;
+begin
+  Result := zeros_like;
+  at_copy_(Result.Raw, Raw);
+  TchCheck;
+end;
+
+{ Data in / out }
+
+function TensorOfData(Data: Pointer; N: Int64; ElementSize: Integer;
+  AKind: TKind): TTensor;
+var
+  P: PTorchTensor;
+begin
+  P := at_tensor_of_data(Data, @N, 1, ElementSize, Ord(AKind));
+  TchCheck;
+  Result := TTensor.FromRaw(P);
+end;
+
+class function TTensor.FromArray(const A: array of Single): TTensor;
+begin
+  Result := TensorOfData(@A, System.Length(A), SizeOf(Single), kFloat);
+end;
+
+class function TTensor.FromArray(const A: array of Double): TTensor;
+begin
+  Result := TensorOfData(@A, System.Length(A), SizeOf(Double), kDouble);
+end;
+
+class function TTensor.FromArray(const A: array of Int64): TTensor;
+begin
+  Result := TensorOfData(@A, System.Length(A), SizeOf(Int64), kInt64);
+end;
+
+class function TTensor.FromArray(const A: array of Byte): TTensor;
+begin
+  Result := TensorOfData(@A, System.Length(A), SizeOf(Byte), kUInt8);
+end;
+
+{ Pascal Boolean is one byte holding 0 or 1, the layout of c10's bool. }
+class function TTensor.FromArray(const A: array of Boolean): TTensor;
+begin
+  Result := TensorOfData(@A, System.Length(A), SizeOf(Boolean), kBool);
+end;
+
+class function TTensor.FromInt32Array(const A: array of Int32): TTensor;
+begin
+  Result := TensorOfData(@A, System.Length(A), SizeOf(Int32), kInt);
+end;
+
+class function TTensor.FromBytes(const Data; const AShape: array of Int64;
+  AKind: TKind): TTensor;
+var
+  P: PTorchTensor;
+begin
+  P := at_tensor_of_data(@Data, PInt64(AShape), System.Length(AShape),
+    KindElementSize(AKind), Ord(AKind));
+  TchCheck;
+  Result := FromRaw(P);
+end;
+
+procedure TTensor.CopyData(var Dest; ACount: Int64);
+begin
+  TchCheckArg(Self, 'self', 'CopyData');
+  if ACount < 0 then
+    raise ETorchError.CreateFmt('CopyData: negative count %d', [ACount]);
+  at_copy_data(Raw, @Dest, ACount, KindElementSize(Kind));
+  TchCheck;
+end;
+
+{ Self converted to AKind, or Self when it already is. }
+function AsKind(const T: TTensor; AKind: TKind): TTensor;
+begin
+  if T.Kind = AKind then
+    Result := T
+  else
+    Result := T.to_dtype(AKind);
+end;
+
+function TTensor.ToSingleArray: TSingleArray;
+var
+  Src: TTensor;
+begin
+  Src := AsKind(Self, kFloat);
+  Result := nil;
+  SetLength(Result, Src.Numel);
+  if System.Length(Result) > 0 then
+    Src.CopyData(Result[0], System.Length(Result));
+end;
+
+function TTensor.ToDoubleArray: TDoubleArray;
+var
+  Src: TTensor;
+begin
+  Src := AsKind(Self, kDouble);
+  Result := nil;
+  SetLength(Result, Src.Numel);
+  if System.Length(Result) > 0 then
+    Src.CopyData(Result[0], System.Length(Result));
+end;
+
+function TTensor.ToInt64Array: TInt64Array;
+var
+  Src: TTensor;
+begin
+  Src := AsKind(Self, kInt64);
+  Result := nil;
+  SetLength(Result, Src.Numel);
+  if System.Length(Result) > 0 then
+    Src.CopyData(Result[0], System.Length(Result));
+end;
+
+{ Autograd }
+
+procedure TTensor.Backward(KeepGraph: Boolean; CreateGraph: Boolean);
+begin
+  TchCheckArg(Self, 'self', 'Backward');
+  at_backward(Raw, System.Ord(KeepGraph), System.Ord(CreateGraph));
+  TchCheck;
+end;
+
+function TTensor.RequiresGrad: Boolean;
+var
+  R: cint;
+begin
+  TchCheckArg(Self, 'self', 'RequiresGrad');
+  R := at_requires_grad(Raw);
+  TchCheck;
+  Result := R <> 0;
+end;
+
+procedure TTensor.ZeroGrad;
+var
+  G: TTensor;
+begin
+  G := grad;
+  if G.Defined then
+    G.detach_.zero_;
+end;
+
+{ Factory overloads }
+
+class function TTensor.zeros(const ASize: array of Int64; AKind: TKind): TTensor;
+begin
+  Result := zeros(ASize, AKind, TDevice.Cpu);
+end;
+
+class function TTensor.ones(const ASize: array of Int64; AKind: TKind): TTensor;
+begin
+  Result := ones(ASize, AKind, TDevice.Cpu);
+end;
+
+class function TTensor.empty(const ASize: array of Int64; AKind: TKind): TTensor;
+begin
+  Result := empty(ASize, AKind, TDevice.Cpu);
+end;
+
+class function TTensor.rand(const ASize: array of Int64; AKind: TKind): TTensor;
+begin
+  Result := rand(ASize, AKind, TDevice.Cpu);
+end;
+
+class function TTensor.randn(const ASize: array of Int64; AKind: TKind): TTensor;
+begin
+  Result := randn(ASize, AKind, TDevice.Cpu);
+end;
+
+{ Operators }
+
 class operator TTensor.+(const A, B: TTensor): TTensor;
 begin
   Result := A.add(B);
 end;
 
+class operator TTensor.-(const A, B: TTensor): TTensor;
+begin
+  Result := A.sub(B);
+end;
+
 class operator TTensor.*(const A, B: TTensor): TTensor;
 begin
   Result := A.mul(B);
+end;
+
+class operator TTensor./(const A, B: TTensor): TTensor;
+begin
+  Result := A.&div(B);
+end;
+
+class operator TTensor.-(const A: TTensor): TTensor;
+begin
+  Result := A.neg;
+end;
+
+class operator TTensor.**(const A: TTensor; B: Double): TTensor;
+begin
+  Result := A.pow_tensor_scalar(B);
+end;
+
+class operator TTensor.+(const A: TTensor; B: Double): TTensor;
+begin
+  Result := A.add_scalar(B);
+end;
+
+class operator TTensor.+(const A: TTensor; B: Int64): TTensor;
+begin
+  Result := A.add_scalar(B);
+end;
+
+class operator TTensor.+(A: Double; const B: TTensor): TTensor;
+begin
+  Result := B.add_scalar(A);
+end;
+
+class operator TTensor.+(A: Int64; const B: TTensor): TTensor;
+begin
+  Result := B.add_scalar(A);
+end;
+
+class operator TTensor.-(const A: TTensor; B: Double): TTensor;
+begin
+  Result := A.sub_scalar(B);
+end;
+
+class operator TTensor.-(const A: TTensor; B: Int64): TTensor;
+begin
+  Result := A.sub_scalar(B);
+end;
+
+{ d - A is rsub (other - self), one op instead of tch-rs's (-A) + d. }
+class operator TTensor.-(A: Double; const B: TTensor): TTensor;
+begin
+  Result := B.rsub_scalar(A);
+end;
+
+class operator TTensor.-(A: Int64; const B: TTensor): TTensor;
+begin
+  Result := B.rsub_scalar(A);
+end;
+
+class operator TTensor.*(const A: TTensor; B: Double): TTensor;
+begin
+  Result := A.mul_scalar(B);
+end;
+
+class operator TTensor.*(const A: TTensor; B: Int64): TTensor;
+begin
+  Result := A.mul_scalar(B);
+end;
+
+class operator TTensor.*(A: Double; const B: TTensor): TTensor;
+begin
+  Result := B.mul_scalar(A);
+end;
+
+class operator TTensor.*(A: Int64; const B: TTensor): TTensor;
+begin
+  Result := B.mul_scalar(A);
+end;
+
+class operator TTensor./(const A: TTensor; B: Double): TTensor;
+begin
+  Result := A.div_scalar(B);
+end;
+
+class operator TTensor./(const A: TTensor; B: Int64): TTensor;
+begin
+  Result := A.div_scalar(B);
+end;
+
+{ d / A as reciprocal * d: reciprocal promotes integer tensors to float, as
+  true division does (pow(-1), tch-rs's choice, rejects integer tensors). }
+class operator TTensor./(A: Double; const B: TTensor): TTensor;
+begin
+  Result := B.reciprocal.mul_scalar(A);
+end;
+
+class operator TTensor./(A: Int64; const B: TTensor): TTensor;
+begin
+  Result := B.reciprocal.mul_scalar(A);
+end;
+
+{ Global settings (DESIGN.md 4.7) }
+
+function KindElementSize(AKind: TKind): Integer;
+begin
+  case AKind of
+    kUInt8, kInt8, kBool, kQInt8, kQUInt8, kQUInt4x2, kQUInt2x4,
+    kBits1x8, kBits2x4, kBits4x2, kBits8,
+    kFloat8e5m2, kFloat8e4m3fn, kFloat8e5m2fnuz, kFloat8e4m3fnuz,
+    kUInt1..kUInt7, kInt1..kInt7, kFloat8e8m0fnu, kFloat4e2m1fnx2:
+      Result := 1;
+    kInt16, kHalf, kBFloat16, kBits16, kUInt16:
+      Result := 2;
+    kInt, kFloat, kComplexHalf, kQInt32, kUInt32:
+      Result := 4;
+    kInt64, kDouble, kComplexFloat, kUInt64:
+      Result := 8;
+    kComplexDouble:
+      Result := 16;
+  else
+    raise ETorchError.CreateFmt('no element size for kind %d', [Ord(AKind)]);
+  end;
+end;
+
+function SetGradEnabled(Enabled: Boolean): Boolean;
+var
+  R: cint;
+begin
+  R := at_grad_set_enabled(System.Ord(Enabled));
+  TchCheck;
+  Result := R <> 0;
+end;
+
+type
+  TGradModeGuard = class(TInterfacedObject)
+  private
+    FPrevious: Boolean;
+  public
+    constructor Create;
+    destructor Destroy; override;
+  end;
+
+constructor TGradModeGuard.Create;
+begin
+  inherited Create;
+  FPrevious := SetGradEnabled(False);
+end;
+
+{ Never raises (may run during unwinding); a failure stays in the error
+  slot and surfaces at the next checked call. }
+destructor TGradModeGuard.Destroy;
+begin
+  at_grad_set_enabled(System.Ord(FPrevious));
+  inherited Destroy;
+end;
+
+function NoGradGuard: IInterface;
+begin
+  Result := TGradModeGuard.Create;
+end;
+
+procedure ManualSeed(Seed: Int64);
+begin
+  at_manual_seed(Seed);
+end;
+
+procedure SetNumThreads(N: Integer);
+begin
+  at_set_num_threads(N);
+  TchCheck;
+end;
+
+function GetNumThreads: Integer;
+begin
+  Result := at_get_num_threads;
+  TchCheck;
+end;
+
+function CudaIsAvailable: Boolean;
+var
+  R: cint;
+begin
+  R := atc_cuda_is_available;
+  TchCheck;
+  Result := R > 0;
+end;
+
+function CudaDeviceCount: Integer;
+begin
+  Result := atc_cuda_device_count;
+  TchCheck;
 end;
 
 {$I TchTensorGenerated_impl.inc}

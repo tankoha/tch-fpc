@@ -95,6 +95,9 @@ const
 var
   Ops: array of TOp;
   HandWritten: TStringList;   // TTensor members in Tch.pas, lower case
+  { hand-written members declared with `overload;` only: deliberate
+    overloads (of generated ops or of each other), not collisions }
+  Overloads: TStringList;
   OpNames: TStringList;       // generated op names, lower case
   OpsTsv, SrcDir: String;
 
@@ -735,25 +738,74 @@ begin
   EmitWrapped(L, '', Head + 'atg_' + Op.Name, Params, Tail + ' cdecl; external LibTch;');
 end;
 
+{ True if S consists of routine directives only (`inline;`, `static;
+  overload;`): the tail of the previous declaration on a line of its own. }
+function IsDirectiveLine(const S: String): Boolean;
+var
+  Parts: TStringArray;
+  W: String;
+begin
+  Parts := LowerCase(StringReplace(S, ' ', '', [rfReplaceAll])).Split([';']);
+  Result := Pos(';', S) > 0;
+  for W in Parts do
+    if (W <> '') and (W <> 'static') and (W <> 'overload') and (W <> 'inline')
+       and (W <> 'virtual') and (W <> 'abstract') and (W <> 'override')
+       and (W <> 'reintroduce') then
+      Exit(False);
+end;
+
+{ A declaration is complete when its parentheses balance and it ends in ';'. }
+function DeclComplete(const S: String): Boolean;
+var
+  C: Char;
+  Depth: Integer;
+begin
+  Depth := 0;
+  for C in S do
+    if C = '(' then
+      Inc(Depth)
+    else if C = ')' then
+      Dec(Depth);
+  Result := (Depth = 0) and (S <> '') and (S[Length(S)] = ';');
+end;
+
 { Member names declared in the TTensor record of Tch.pas (fields, methods,
   properties), lower case, so that generated names and locals can be
-  checked against them. }
+  checked against them. Members whose declaration says `overload;` go to
+  Overloads instead: deliberate overloads of generated ops are allowed. }
 procedure ScanHandWritten(const FileName: String);
 var
   Lines: TStringList;
-  I, P, Depth: Integer;
-  S, W: String;
-  InRecord, InComment: Boolean;
+  I, P: Integer;
+  S, W, Decl, LastName: String;
+  InRecord, InComment, LastOverload: Boolean;
+
+  procedure Commit;
+  begin
+    if LastName = '' then
+      Exit;
+    if LastOverload then
+      Overloads.Add(LastName)
+    else
+      HandWritten.Add(LastName);
+    LastName := '';
+  end;
+
 begin
   InComment := False;
   HandWritten := TStringList.Create;
   HandWritten.Sorted := True;
   HandWritten.Duplicates := dupIgnore;
+  Overloads := TStringList.Create;
+  Overloads.Sorted := True;
+  Overloads.Duplicates := dupIgnore;
   Lines := TStringList.Create;
   try
     Lines.LoadFromFile(FileName);
     InRecord := False;
-    Depth := 0;
+    Decl := '';
+    LastName := '';
+    LastOverload := False;
     for I := 0 to Lines.Count - 1 do
     begin
       S := Trim(Lines[I]);
@@ -779,29 +831,44 @@ begin
           InComment := True;
         Continue;
       end;
+      { continuation of a multi-line declaration, or its directives alone }
+      if (Decl <> '') or IsDirectiveLine(S) then
+      begin
+        Decl := Decl + ' ' + S;
+        if Pos('overload;', LowerCase(S)) > 0 then
+          LastOverload := True;
+        if DeclComplete(Decl) then
+          Decl := '';
+        Continue;
+      end;
+      Commit;
       W := '';
       if Pos('class function ', S) = 1 then W := Copy(S, 16, MaxInt)
       else if Pos('class procedure ', S) = 1 then W := Copy(S, 17, MaxInt)
       else if Pos('function ', S) = 1 then W := Copy(S, 10, MaxInt)
       else if Pos('procedure ', S) = 1 then W := Copy(S, 11, MaxInt)
       else if Pos('property ', S) = 1 then W := Copy(S, 10, MaxInt)
-      else if (Pos('class operator ', S) = 1) or (S = 'private') or (S = 'public')
+      else if Pos('class operator ', S) = 1 then
+        W := ''   // no name, but may continue on the next lines
+      else if (S = 'private') or (S = 'public') or (S = 'public type')
         or (S = 'strict private') or (S = 'protected') then
         Continue
       else
-        W := S;   // a field: name: Type;
+        W := S;   // a field (name: Type;) or a nested type (Name = ...;)
       P := 1;
       while (P <= Length(W)) and (W[P] in ['&', 'A'..'Z', 'a'..'z', '0'..'9', '_']) do
         Inc(P);
       W := Copy(W, 1, P - 1);
       if (W <> '') and (W[1] = '&') then
         Delete(W, 1, 1);
-      if W <> '' then
-        HandWritten.Add(LowerCase(W));
+      LastName := LowerCase(W);
+      LastOverload := Pos('overload;', LowerCase(S)) > 0;
+      if not DeclComplete(S) then
+        Decl := S;
     end;
+    Commit;
     if not InRecord then
       Fail('TTensor = record not found in ' + FileName);
-    Depth := 0;
   finally
     Lines.Free;
   end;
@@ -834,7 +901,8 @@ begin
     for J := 0 to High(Ops[I].Args) do
     begin
       N := LowerCase(Ops[I].Args[J].Name + '__');
-      if (HandWritten.IndexOf(N) >= 0) or (OpNames.IndexOf(N) >= 0) then
+      if (HandWritten.IndexOf(N) >= 0) or (Overloads.IndexOf(N) >= 0)
+         or (OpNames.IndexOf(N) >= 0) then
         Fail('local ' + N + ' in ' + Ops[I].Name + ' collides with a member');
       N := LowerCase(Ops[I].Args[J].Name);
       if Ops[I].Args[J].Name = Ops[I].Receiver then
@@ -844,7 +912,8 @@ begin
         Fail('parameter ' + N + ' in ' + Ops[I].Name + ' would shadow a name used by generated bodies');
     end;
     for N in ['outs__', 'p__', 'r__'] do
-      if (HandWritten.IndexOf(N) >= 0) or (OpNames.IndexOf(N) >= 0) then
+      if (HandWritten.IndexOf(N) >= 0) or (Overloads.IndexOf(N) >= 0)
+         or (OpNames.IndexOf(N) >= 0) then
         Fail('local ' + N + ' collides with a member');
   end;
 end;

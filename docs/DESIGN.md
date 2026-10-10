@@ -424,8 +424,11 @@ management-operator variant is the escape hatch).
   exceptions (invalid, zero-divide, overflow) *unmasked* in both the x87
   control word and MXCSR, so `0/0` raises `EInvalidOp`. libtorch, MKL and
   oneDNN assume the C default (all masked) and legitimately produce NaN/Inf;
-  with the Pascal defaults a CPU kernel that divides by zero kills the
-  program with SIGFPE. Decision: unit `Tch` calls
+  with the Pascal defaults a CPU kernel that divides by zero raises SIGFPE.
+  Measured (step 5, FPC defaults MXCSR=$1900): on the calling thread FPC
+  turns it into an `EZeroDivide` raised from inside C++ frames; in
+  libtorch's OpenMP workers it is an unhandled exception and the process
+  **hangs** in the parallel region. Decision: unit `Tch` calls
   `SetExceptionMask([exInvalidOp, exDenormalized, exZeroDivide, exOverflow,
   exUnderflow, exPrecision])` in its `initialization`, before any libtorch
   call can happen, and exports `procedure TchMaskFpuExceptions;` for threads.
@@ -433,15 +436,19 @@ management-operator variant is the escape hatch).
     and a new pthread inherits the creating thread's FP control state. So
     the pool threads end up masked *because* `Tch` masks before the first
     call. This is why the mask must be set in `initialization`, not lazily.
+    Confirmed in step 5: creating the pool unmasked and masking afterwards
+    still hangs on the next parallel 1/0.
   - Threads created from Pascal (`TThread`, `BeginThread`) are initialised by
-    the RTL; **(H4)** whether they pick up the mask set via `SetExceptionMask`
-    (which may update `Default8087CW`/`DefaultMXCSR`) or revert to the FPC
-    defaults must be measured. Until then, call `TchMaskFpuExceptions` at the
-    start of every Pascal thread that touches tensors.
-  - **(H5)** The RTL's SIGFPE handler may reset the control word after a
-    Pascal floating-point exception has been raised and caught. Verify that
-    the mask survives a caught `EZeroDivide` in Pascal code; if not,
-    re-apply it in the places that catch such exceptions.
+    the RTL. **(H4) resolved** (FPC 3.2.2, Linux x86_64): a `TThread`
+    started after `SetExceptionMask` starts with MXCSR=$1F80 / x87CW=$137F
+    (all masked), and both small and parallel tensor ops in it yield Inf.
+    `TchMaskFpuExceptions` stays exported for threads created outside the
+    RTL (e.g. by another C library) but is not required in `TThread`s.
+    `BeginThread` was not measured separately.
+  - **(H5) resolved**: after catching an integer `EDivByZero` (a real
+    SIGFPE through the RTL handler) the mask is still $1F80 and tensor 1/0
+    still yields Inf. A float `EZeroDivide` cannot occur in Pascal code
+    while everything is masked, so nothing needs re-applying.
   - Trade-off, stated plainly: in a program that uses `Tch`, plain Pascal
     `x / 0.0` yields `Inf` instead of raising. This is the C/C++/Python
     behaviour and is acceptable for a numerical library; it is documented in

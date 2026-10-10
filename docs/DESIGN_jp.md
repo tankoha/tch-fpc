@@ -422,7 +422,10 @@ type
   浮動小数点例外（不正演算、ゼロ除算、オーバーフロー）が *有効* なまま動くので、
   `0/0` は `EInvalidOp` を投げます。libtorch、MKL、oneDNN は C の既定（すべて
   マスク済み）を前提にしていて、NaN や Inf を正当に生成します。Pascal の既定のままだと、
-  ゼロ除算する CPU カーネルが SIGFPE でプログラムを落とします。決定：ユニット `Tch` は
+  ゼロ除算する CPU カーネルで SIGFPE が起きます。測定結果（手順5、FPC の既定は
+  MXCSR=$1900）：呼び出し元のスレッドでは、FPC が C++ のフレームの中から
+  `EZeroDivide` を投げます。libtorch の OpenMP ワーカーでは未処理の例外になり、
+  プロセスは並列区間で **固まります**。決定：ユニット `Tch` は
   `initialization` で、libtorch が呼ばれうるより前に
   `SetExceptionMask([exInvalidOp, exDenormalized, exZeroDivide, exOverflow,
   exUnderflow, exPrecision])` を呼び、スレッド用に
@@ -431,16 +434,18 @@ type
     pthread は生成元スレッドの浮動小数点制御状態を引き継ぎます。したがって、
     `Tch` が最初の呼び出しより前にマスクする *からこそ*、プールのスレッドも
     マスクされた状態になります。マスクを遅延ではなく `initialization` で設定しなければ
-    ならないのはこのためです。
+    ならないのはこのためです。手順5で確認済み：マスクせずにプールを作り、あとから
+    マスクしても、次の並列の 1/0 で固まります。
   - Pascal から作ったスレッド（`TThread`、`BeginThread`）は RTL が初期化します。
-    **(H4)** それらが `SetExceptionMask` で設定したマスク（`Default8087CW`/
-    `DefaultMXCSR` も更新される可能性がある）を引き継ぐのか、FPC の既定に戻るのかは
-    計測が必要です。それまでは、テンソルを扱う Pascal のスレッドは冒頭で
-    `TchMaskFpuExceptions` を呼ぶこと。
-  - **(H5)** Pascal の浮動小数点例外が発生して捕まえられたあと、RTL の SIGFPE
-    ハンドラーが制御ワードを元に戻すかもしれません。Pascal コードで `EZeroDivide` を
-    捕まえたあともマスクが残っているか確認すること。残らないなら、そういう例外を
-    捕まえる箇所でマスクをかけ直します。
+    **(H4) 解決**（FPC 3.2.2、Linux x86_64）：`SetExceptionMask` のあとに起動した
+    `TThread` は MXCSR=$1F80 / x87CW=$137F（すべてマスク）で始まり、その中での
+    小さな op も並列の op も Inf を返します。`TchMaskFpuExceptions` は RTL の外で
+    作られたスレッド（別の C ライブラリが作るものなど）のために公開したままにしますが、
+    `TThread` では不要です。`BeginThread` は個別には測っていません。
+  - **(H5) 解決**：整数の `EDivByZero`（RTL のハンドラーを通る本物の SIGFPE）を
+    捕まえたあともマスクは $1F80 のままで、テンソルの 1/0 も Inf を返します。
+    すべてマスクしている間は Pascal コードで浮動小数点の `EZeroDivide` は起きないので、
+    かけ直しは不要です。
   - トレードオフをはっきり書いておくと：`Tch` を使うプログラムでは、普通の Pascal の
     `x / 0.0` も例外ではなく `Inf` になります。これは C/C++/Python と同じ挙動で、
     数値計算ライブラリとしては許容範囲です。隠さず README に書きます。

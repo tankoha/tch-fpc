@@ -71,6 +71,20 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
     deprecated autocast API on every `at_autocast_*` call, quantized and
     ComplexHalf creation). See open questions.
 
+- **Step 5 done.** `tests/fpu/fpu_test.pas` + `tests/fpu/run.sh` (one
+  process per mode, 30 s timeout). FPC default MXCSR=$1900, x87CW=$1372;
+  after `SetExceptionMask(all)` $1F80/$137F.
+  - Unmasked, 4 elements: `EZeroDivide` raised from inside C++ frames.
+  - Unmasked, 10^7 elements: unhandled exceptions in the OpenMP workers,
+    then a **hang** (and corrupted Pascal state on the main thread).
+  - Masked first: 1/0 gives +Inf for both sizes.
+  - Pool created unmasked, masked afterwards: still hangs. Confirms that
+    the mask belongs in `Tch`'s `initialization`.
+  - **(H4) resolved:** a `TThread` started after the mask is masked too;
+    small and parallel ops in it give Inf.
+  - **(H5) resolved:** the mask survives a caught integer `EDivByZero`.
+  - DESIGN.md 4.2 updated accordingly.
+
 ## Next steps (local implementation)
 
 1. **Toolchain check.** FPC 3.2.2, g++, CMake, libtorch 2.13.0 CPU

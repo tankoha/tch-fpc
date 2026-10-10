@@ -295,7 +295,7 @@ var
 begin
   for K := 0 to 13 do
     A[K] := K + 1;
-  Result := TTensor.FromArray(A).view([14, 1]);
+  Result := TTensor.FromSingleArray(A).view([14, 1]);
 end;
 
 { 3. Linear regression (tch-rs optimizer_test) }
@@ -382,7 +382,7 @@ begin
     P := VS.Root.VarCopy('p', TTensor.FromArray([1.0, -2.0]));
     Opt := TOptimizer.Adam(VS, 0.1);
     Opt.BackwardStep((P * P).sum);
-    Check(MaxAbsDiff(P, TTensor.FromArray([Double(0.9), -1.9])) < 1e-6,
+    Check(MaxAbsDiff(P, TTensor.FromArray([0.9, -1.9])) < 1e-6,
       'Adam one step: [0.9, -1.9], got ' + Values(P));
     Opt.SetMomentum(0.8);
     Opt.SetWeightDecay(0.0);
@@ -400,7 +400,7 @@ begin
     Opt := TOptimizer.AdamW(VS, 0.1);
     Opt.BackwardStep((P * P).sum);
     { AdamW decays first: p * (1 - lr * 0.01), then lr * sign(g) }
-    Check(MaxAbsDiff(P, TTensor.FromArray([Double(0.999 - 0.1), -1.998 + 0.1])) < 1e-6,
+    Check(MaxAbsDiff(P, TTensor.FromArray([0.999 - 0.1, -1.998 + 0.1])) < 1e-6,
       'AdamW one step with default weight decay 0.01: ' + Values(P));
     FreeAndNil(Opt);
     Opt := TOptimizer.RmsProp(VS, 0.01);
@@ -619,6 +619,19 @@ begin
     Missing := VS2.LoadPartial(FileName);
     Check((Length(Missing) = 1) and (Missing[0] = 'a.b.t2'), 'LoadPartial returns [a.b.t2]');
     Check((MeanOf(U2) = 42) and (MeanOf(V2) = 1), 'u2 = 42, v2 untouched');
+    DeleteFile(FileName);
+
+    { second half of the tch-rs test: a half file into a fresh float store;
+      the loaded u2 takes the file's kind, the missing v2 keeps kFloat }
+    VS1.SetFloatKind(kHalf);
+    VS1.Save(FileName);
+    FreeAndNil(VS2);
+    VS2 := TVarStore.Create(TDevice.Cpu);
+    AddPartialLayout(VS2, U2, V2);
+    Missing := VS2.LoadPartial(FileName);
+    Check((Length(Missing) = 1) and (Missing[0] = 'a.b.t2'), 'half: LoadPartial returns [a.b.t2]');
+    Check((U2.Kind = kHalf) and (MeanOf(U2) = 42), 'half: u2 is kHalf, mean 42');
+    Check((V2.Kind = kFloat) and (MeanOf(V2) = 1), 'half: missing v2 stays kFloat, mean 1');
     DeleteFile(FileName);
 
     Raised := False;

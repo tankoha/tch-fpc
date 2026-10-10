@@ -319,7 +319,11 @@ type
     FOpt: PTorchOptimizer;
     FStore: TVarStore;            // not owned
     FVarsInOptimizer: Integer;
+    { private on purpose: optimizers come from the class functions (FPC
+      warns 3018 for any non-public constructor) }
+    {$push}{$warn 3018 off}
     constructor CreateRaw(AOpt: PTorchOptimizer; VS: TVarStore);
+    {$pop}
     procedure AddMissingVariables;
   public
     class function Sgd(VS: TVarStore; LR: Double; Momentum: Double = 0;

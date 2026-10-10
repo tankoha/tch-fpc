@@ -76,13 +76,30 @@ var
   I32: array[0..2] of Int32 = (7, -8, 9);
   Raw: array[0..3] of Double = (1.5, 2.5, 3.5, 4.5);
 begin
-  WriteLn('data in: FromArray overloads, FromInt32Array, FromBytes');
+  WriteLn('data in: FromArray overloads, FromSingleArray, FromInt32Array, FromBytes');
   T := TTensor.FromArray([1.0, 2.0]);
   Check((T.Kind = kFloat) and (ShapeStr(T) = '[2]'), '[1.0, 2.0]: kFloat, [2]');
   T := TTensor.FromArray([1, 2, 3]);
   Check((T.Kind = kInt64) and (T.Int64Value([2]) = 3), '[1, 2, 3]: kInt64');
   T := TTensor.FromArray(TDoubleArray.Create(0.25, 0.5));
-  Check((T.Kind = kDouble) and Near(T.DoubleValue([1]), 0.5), 'TDoubleArray: kDouble');
+  Check((T.Kind = kFloat) and Near(T.DoubleValue([1]), 0.5), 'TDoubleArray: kFloat by default');
+  T := TTensor.FromArray(TDoubleArray.Create(0.25, 0.5), kDouble);
+  Check((T.Kind = kDouble) and Near(T.DoubleValue([1]), 0.5), 'TDoubleArray, kDouble');
+  { 0.9 has no exact binary32 form: the literal used to be ambiguous between
+    the Single and Double overloads; now Double, rounded once to float32 }
+  T := TTensor.FromArray([0.9, -1.9]);
+  Check((T.Kind = kFloat) and (T.DoubleValue([0]) = Double(Single(0.9)))
+    and (T.DoubleValue([1]) = Double(Single(-1.9))), '[0.9, -1.9]: kFloat, float32 bits');
+  T := TTensor.FromArray([0.9, -1.9], kDouble);
+  Check((T.Kind = kDouble) and (T.DoubleValue([0]) = Double(0.9)), '[0.9, -1.9], kDouble: exact 0.9');
+  T := TTensor.FromArray([1, 2], kFloat);
+  Check((T.Kind = kFloat) and Near(T.DoubleValue([1]), 2), '[1, 2], kFloat');
+  T := TTensor.FromSingleArray(TSingleArray.Create(1.5, -2.5));
+  Check((T.Kind = kFloat) and Near(T.DoubleValue([1]), -2.5), 'FromSingleArray: kFloat');
+  T := TTensor.FromSingleArray(TSingleArray.Create(1.5, -2.5), kDouble);
+  Check((T.Kind = kDouble) and Near(T.DoubleValue([0]), 1.5), 'FromSingleArray, kDouble');
+  T := TTensor.FromArray([Byte(3)], kInt64);
+  Check((T.Kind = kInt64) and (T.Int64Value([0]) = 3), 'Byte, kInt64');
   T := TTensor.FromArray([Byte(200), Byte(1)]);
   Check((T.Kind = kUInt8) and (T.Int64Value([0]) = 200), 'Byte: kUInt8, 200');
   T := TTensor.FromArray([True, False, True]);

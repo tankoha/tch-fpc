@@ -145,14 +145,17 @@ type
       requires grad. }
     procedure CopyFrom(const Src: TTensor);
 
-    { Data in: a 1-d tensor of the array's length. [1.0, 2.0] picks Single
-      (kFloat), [1, 2] Int64 (kInt64), as PyTorch's defaults (H2). Int32
-      data: FromInt32Array (an Int32 overload would make [1, 2] ambiguous). }
-    class function FromArray(const A: array of Single): TTensor; overload; static;
-    class function FromArray(const A: array of Double): TTensor; overload; static;
-    class function FromArray(const A: array of Int64): TTensor; overload; static;
-    class function FromArray(const A: array of Byte): TTensor; overload; static;
-    class function FromArray(const A: array of Boolean): TTensor; overload; static;
+    { Data in: a 1-d tensor of the array's length, converted to AKind.
+      A literal array is typed by its first element: [1.0, 2.0] and
+      [0.9, -1.9] are Double (default kFloat, as torch.tensor), [1, 2] is
+      Int64 (kInt64); [1, 2.5] does not compile, write [1.0, 2.5] (H2).
+      Single and Int32 data: FromSingleArray / FromInt32Array (overloads
+      for them would make real or integer literals ambiguous). }
+    class function FromArray(const A: array of Double; AKind: TKind = kFloat): TTensor; overload; static;
+    class function FromArray(const A: array of Int64; AKind: TKind = kInt64): TTensor; overload; static;
+    class function FromArray(const A: array of Byte; AKind: TKind = kUInt8): TTensor; overload; static;
+    class function FromArray(const A: array of Boolean; AKind: TKind = kBool): TTensor; overload; static;
+    class function FromSingleArray(const A: array of Single; AKind: TKind = kFloat): TTensor; static;
     class function FromInt32Array(const A: array of Int32): TTensor; static;
     { Count = product of AShape elements of AKind's size, read from Data. }
     class function FromBytes(const Data; const AShape: array of Int64;
@@ -671,30 +674,54 @@ begin
   Result := TTensor.FromRaw(P);
 end;
 
-class function TTensor.FromArray(const A: array of Single): TTensor;
+{ The tensor of N elements at Data in its natural kind, then converted to
+  AKind when that differs (kNone keeps the natural kind). }
+function TensorOfDataAs(Data: Pointer; N: Int64; ElementSize: Integer;
+  ANatural, AKind: TKind): TTensor;
 begin
-  Result := TensorOfData(@A, System.Length(A), SizeOf(Single), kFloat);
+  Result := TensorOfData(Data, N, ElementSize, ANatural);
+  if (AKind <> kNone) and (AKind <> ANatural) then
+    Result := Result.to_dtype(AKind);
 end;
 
-class function TTensor.FromArray(const A: array of Double): TTensor;
+{ kFloat (the default) rounds into a Single buffer here, so one tensor is
+  created with the bits Python's torch.tensor([...]) gives. }
+class function TTensor.FromArray(const A: array of Double; AKind: TKind): TTensor;
+var
+  Buf: TSingleArray;
+  I: Integer;
 begin
-  Result := TensorOfData(@A, System.Length(A), SizeOf(Double), kDouble);
+  if AKind = kFloat then
+  begin
+    Buf := nil;
+    SetLength(Buf, System.Length(A));
+    for I := 0 to High(A) do
+      Buf[I] := A[I];
+    Result := TensorOfData(Pointer(Buf), System.Length(Buf), SizeOf(Single), kFloat);
+  end
+  else
+    Result := TensorOfDataAs(@A, System.Length(A), SizeOf(Double), kDouble, AKind);
 end;
 
-class function TTensor.FromArray(const A: array of Int64): TTensor;
+class function TTensor.FromArray(const A: array of Int64; AKind: TKind): TTensor;
 begin
-  Result := TensorOfData(@A, System.Length(A), SizeOf(Int64), kInt64);
+  Result := TensorOfDataAs(@A, System.Length(A), SizeOf(Int64), kInt64, AKind);
 end;
 
-class function TTensor.FromArray(const A: array of Byte): TTensor;
+class function TTensor.FromArray(const A: array of Byte; AKind: TKind): TTensor;
 begin
-  Result := TensorOfData(@A, System.Length(A), SizeOf(Byte), kUInt8);
+  Result := TensorOfDataAs(@A, System.Length(A), SizeOf(Byte), kUInt8, AKind);
 end;
 
 { Pascal Boolean is one byte holding 0 or 1, the layout of c10's bool. }
-class function TTensor.FromArray(const A: array of Boolean): TTensor;
+class function TTensor.FromArray(const A: array of Boolean; AKind: TKind): TTensor;
 begin
-  Result := TensorOfData(@A, System.Length(A), SizeOf(Boolean), kBool);
+  Result := TensorOfDataAs(@A, System.Length(A), SizeOf(Boolean), kBool, AKind);
+end;
+
+class function TTensor.FromSingleArray(const A: array of Single; AKind: TKind): TTensor;
+begin
+  Result := TensorOfDataAs(@A, System.Length(A), SizeOf(Single), kFloat, AKind);
 end;
 
 class function TTensor.FromInt32Array(const A: array of Int32): TTensor;

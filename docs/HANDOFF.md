@@ -103,6 +103,21 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
     collide with `TTensor` members (`dim` vs `Dim`). The stand-ins use
     `dim_` for now.
 
+- **Step 7 done.** `tests/compiler/run.sh` (h*.pas must compile and run,
+  xfail_*.pas must be rejected, plus a generated big record). All as
+  expected; details recorded in DESIGN.md next to each hypothesis.
+  - **(H2)** `[1.0, 2.0]` picks `Single`; `[1, 2]` is ambiguous with both
+    `Int32` and `Int64` overloads → drop the `Int32` overload.
+  - **(H3)** scalar operators resolve as intended; `**` and unary `-` ok.
+  - **(H7)** all escaped names compile and are callable.
+  - **(H9)** repeat the default in overrides (else `Derived.Forward(X)`
+    does not compile).
+  - **(H10)** compiles; `Items` is shared on copy (no copy-on-write).
+  - **(H11)** guard local released at routine exit; a discarded
+    `NoGradGuard;` is released immediately (pitfall).
+  - Record with 2,657 methods via `{$I}` (with a managed field): compiles
+    in about 1 s (-O2: 1.6 s); a `default` indexed property gives `T[5][2]`.
+
 ## Next steps (local implementation)
 
 1. **Toolchain check.** FPC 3.2.2, g++, CMake, libtorch 2.13.0 CPU

@@ -368,6 +368,14 @@ Semantics:
   fallback is distinct names (`FromSingles`, `FromDoubles`, ...). Data out
   has to be named by type (`ToDoubleArray`) because Pascal cannot overload on
   return type.
+  **(H2) resolved** (step 7): real literals are never ambiguous; with both
+  `Single` and `Double` overloads `[1.0, 2.0]` picks **`Single`** (Double
+  variables pick `Double`). That matches PyTorch's default float32. Integer
+  literals (`[1, 2]`) **are ambiguous when both `Int32` and `Int64`
+  overloads exist**; without `Int32` they pick `Int64` (PyTorch's default
+  int64), and the set `Single, Double, Int64, Byte, Boolean` resolves every
+  literal tried. So: no `array of Int32` overload of `FromArray`; int32
+  data goes through a named function (e.g. `FromInt32Array`) or `FromBytes`.
 
 Operators (hand-written; map to generated ops):
 
@@ -378,6 +386,11 @@ Operators (hand-written; map to generated ops):
 | `d + A`, `d - A`, `d * A`, `d / A` | reversed | `d - A` = `(-A) + d`, `d / A` = `A.pow(-1) * d` as in tch-rs |
 | `-A` | `neg` | |
 | `A ** d` | `pow_tensor_scalar` | FPC allows overloading `**` |
+
+**(H3) resolved** (step 7): with `Double` and `Int64` overloads in both
+orders, `T + 1` and `2 * T` pick `Int64`, `T + 1.5` and `2.5 * T` pick
+`Double`, an `Integer`/`Byte` variable picks `Int64`, a `Single` variable
+picks `Double`; unary `-` and `**` (record operator) work.
 
 Not overloaded: `=`, `<>`, `<`, `>` (comparisons return tensors in
 PyTorch; a Boolean result would be a lie), `@`, `in`.
@@ -583,7 +596,10 @@ temporaries (H1).
   (`t.&div(u)`, `t.&var(0)`); a `_` suffix is not an option for ops because
   the trailing underscore means in-place. Modifiers are escaped as well — a
   harmless `&` on a legal identifier avoids guessing which modifiers FPC
-  accepts as method names **(H7)**. Parameter names colliding with reserved
+  accepts as method names **(H7, resolved in step 7**: `&div`, `&var`,
+  `&to`, `&set`, `&repeat`, `&absolute`, `&alias`, `&index` compile and
+  are callable as `t.&div(u)`; `absolute`, `alias`, `index` also compile
+  without `&`). Parameter names colliding with reserved
   words or `Result`: `out` (819 uses), `end` (31), `to` (7), `result` (3);
   these get a `_` suffix (`out_`, `end_`). Friendlier hand-written aliases
   (`DivBy`, `ToDevice`, `Variance`) can be added on top where it matters.
@@ -789,7 +805,10 @@ Decisions and rationale:
   rather than enforced (same as tch-rs's lifetime `'a`, minus the compiler).
 - **One `Forward` with `Train: Boolean = False`** instead of `Module` and
   `ModuleT`. Layers that ignore `Train` just ignore it. Overrides must repeat
-  the default value for callers through the derived type to see it **(H9)**.
+  the default value for callers through the derived type to see it **(H9,
+  resolved in step 7**: with the default repeated, `Forward(X)` works
+  through base and derived references; an override without it still works
+  through the base type but `Derived.Forward(X)` is a compile error).
   A PyTorch-style `Training` flag on the module was considered and rejected
   for now: propagating it requires child registration machinery
   (`__setattr__` magic in Python) that Pascal would have to spell out.
@@ -814,6 +833,10 @@ Decisions and rationale:
   constructors (`TIValue.Tuple([...])`) and `As*` accessors that raise on a
   tag mismatch. **(H10)** A record containing a dynamic array of its own type
   must compile on 3.2.2; the fallback is an fpjson-style class hierarchy.
+  **(H10) resolved** (step 7): it compiles and nests (tuple of tuples).
+  Semantics to document: `W := V` shares `Items` (dynamic arrays are
+  refcounted, not copy-on-write), so writing `W.Items[0]` changes `V` too.
+  `TIValue` should be treated as immutable after construction.
   `TTrainableJitModule` registers `NamedParameters` into a `TVarPath` and
   derives from `TModule`, so a scripted model can be fine-tuned with
   `TOptimizer` like any other layer.
@@ -833,6 +856,12 @@ Usage: `var G: IInterface; ... G := NoGradGuard; Loss := Model.Forward(X);`.
 exit), so the guard covers the rest of the routine; a `try..finally` with
 `SetGradEnabled` is the alternative when a narrower scope matters. Autocast
 follows the same pattern later.
+**(H11) resolved** (step 7): a guard held in a local is released after the
+last statement of the routine (not at the end of an inner `begin..end`), and
+during unwinding when an exception leaves the routine. **Pitfall:**
+calling `NoGradGuard;` without assigning the result releases the guard
+immediately, before the next statement, so it has no effect. Document it
+in the API comment.
 
 ## 5. Code generation (decision)
 

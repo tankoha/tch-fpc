@@ -29,6 +29,34 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
   `Forward(X, Train = False)`) and 4.7 (grad mode). Unverified FPC 3.2.2
   behaviour is marked **(H1)**–**(H11)** in DESIGN.md and listed below.
 
+## Handing back to the cloud (2026-10-10, end of local session 1)
+
+Steps 1-7 are done and every hypothesis H1-H11 is measured (results in
+"Local progress" below and next to each (Hn) in DESIGN.md). The OCaml
+toolchain for step 8 is installed locally. The user chose to design step 8
+in the cloud. Asked of the next cloud session:
+
+1. **Design the generator (step 8)** so that local work can be mechanical:
+   - exact `ops.tsv` schema emitted by gen.ml (columns, escaping, how
+     defaults, optional/list kinds, receiver and result shape are encoded);
+   - `gen/tchgen.pas` structure and the exact Pascal it emits for each op
+     shape (fixed-N, dynamic, scalar, nothing), with the stand-ins in
+     `src/Tch.pas` (`add`, `cat`, `max_dim`, `ones`) as the reference
+     bodies that already work;
+   - naming: the parameter/out-name suffix rule (DESIGN 4.4), the `&`
+     escapes, and the op-name check against our hand-written members (see
+     the tch-rs notes under "Parameter names vs `TTensor` members").
+2. **Decide the open questions the generator touches:** native error
+   message format (`Message` vs `Detail`), `TKind` 27-45, `TORCH_WARN`
+   handling (patch `at_autocast_*` and/or a warning handler), default
+   arguments scope, and dropping the `array of Int32` `FromArray`
+   overload (H2).
+3. Update DESIGN/HANDOFF (en + jp) at the end, as usual.
+
+Local state the design can rely on: `src/TchSys.pas`, `src/Tch.pas`
+(minimal `TTensor`, `NumDims`, `TchLiveHandles`), tests under `tests/`,
+build commands in each test's header and in "Local progress".
+
 ## Local progress (2026-10-10)
 
 - **Step 1 done.** FPC 3.2.2, g++ 15.2.0, CMake 4.2.3 (reads libtorch's
@@ -248,8 +276,8 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 - **Train flag.** `Forward(X, Train)` parameter (decided) vs a PyTorch-style
   `Training` property propagated through children. Revisit once
   `TSequential` and a custom-model example exist.
-- **`TIValue` representation.** Tagged record (decided, pending H10) vs an
-  fpjson-style class hierarchy.
+- **`TIValue` representation.** Tagged record: decided, and H10 confirmed
+  it compiles (step 7). Copies share `Items`; treat as immutable.
 - **VarStore thread safety.** Documented as not thread-safe; add a
   `TCriticalSection` if a data-loader thread ever needs it.
 - **Streams / images.** If needed later: replace tch-rs's Rust-implemented

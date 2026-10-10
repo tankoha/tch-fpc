@@ -1,5 +1,7 @@
 # Handoff
 
+Japanese version: [HANDOFF_jp.md](HANDOFF_jp.md)
+
 Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 
 ## State (2026-10-10, end of cloud design session 1)

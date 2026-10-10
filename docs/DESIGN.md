@@ -1,5 +1,7 @@
 # tch-fpc design
 
+Japanese version: [DESIGN_jp.md](DESIGN_jp.md)
+
 Decisions and their rationale. Open questions and next steps live in
 [HANDOFF.md](HANDOFF.md).
 

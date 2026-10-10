@@ -827,128 +827,249 @@ tch-rs's shape and its Pascal equivalent:
 | `CModule`, `TrainableCModule`, `IValue` | TorchScript | `TJitModule = class`, `TTrainableJitModule = class(TModule)`, `TIValue` tagged record | see below |
 | `Iter2` | mini-batches | `TBatchIter` with `GetEnumerator` for `for .. in` | later |
 
-Sketch:
+The shape above was decided in cloud session 2. Cloud session 4 settled
+the seven points HANDOFF listed as not yet mechanical (initialisation
+formulas, store internals, save/load, optimizers, layers, sequential, unit
+and tests) against the same tch-rs commit; file names below are tch-rs's.
+What needs real libtorch to confirm is marked **(H13)**–**(H18)**; what was
+measured on FPC 3.2.2 in the cloud is marked *measured*. Everything lives
+in one unit, `TchNN`.
+
+Sketch (interface; bodies are described in 4.6.1–4.6.7):
 
 ```pascal
 unit TchNN;
+{$mode objfpc}{$H+}{$modeswitch advancedrecords}
+uses SysUtils, Generics.Collections, TchSys, Tch;
 type
-  TInitKind = (ikConst, ikUniform, ikRandn, ikKaimingUniform, ikKaimingNormal, ikOrthogonal);
+  // --- initialisation (tch-rs nn/init.rs) ---
+  TFanMode = (fmFanIn, fmFanOut);                              // FanInOut
+  TInitDist = (idUniform, idNormal);                           // NormalOrUniform
+  TNonLinearity = (nlReLU, nlLinear, nlSigmoid, nlTanh, nlSELU, nlExplicitGain);
+  TInitKind = (ikConst, ikUniform, ikRandn, ikKaiming, ikOrthogonal);
   TInit = record
     Kind: TInitKind;
-    A, B: Double;                       // const value / lo,up / mean,std / gain
-    class function Constant(V: Double): TInit; static;   // "Const" is reserved
+    A, B: Double;                 // Const: A; Uniform: lo, up; Randn: mean, std; Orthogonal: gain in A
+    Dist: TInitDist;              // Kaiming only
+    Fan: TFanMode;
+    NonLin: TNonLinearity;
+    Gain: Double;                 // for nlExplicitGain
+    class function Constant(V: Double): TInit; static;        // "Const" is reserved
     class function Uniform(Lo, Up: Double): TInit; static;
     class function Randn(Mean, Std: Double): TInit; static;
-    class function KaimingUniform: TInit; static;        // tch-rs DEFAULT_KAIMING_UNIFORM
-    class function KaimingNormal: TInit; static;
-    class function Orthogonal(Gain: Double): TInit; static;
-    function Make(const Dims: array of Int64; const Device: TDevice; AKind: TKind): TTensor;
+    class function Kaiming(ADist: TInitDist; AFan: TFanMode; ANonLin: TNonLinearity;
+      AGain: Double = 0): TInit; static;
+    class function KaimingUniform: TInit; static;   // Kaiming(idUniform, fmFanIn, nlReLU) = DEFAULT_KAIMING_UNIFORM
+    class function KaimingNormal: TInit; static;    // Kaiming(idNormal, fmFanIn, nlReLU) = DEFAULT_KAIMING_NORMAL
+    class function Orthogonal(AGain: Double = 1): TInit; static;
+    function Make(const Dims: array of Int64; const ADevice: TDevice; AKind: TKind): TTensor;  // f_init
+    procedure Apply(const T: TTensor);              // Init::set, in place, under NoGradGuard
   end;
+  function FanForDims(Fan: TFanMode; const Dims: array of Int64): Int64;   // FanInOut::for_weight_dims
+  function NonLinearityGain(NL: TNonLinearity; ExplicitGain: Double = 0): Double;
 
+  // --- var store (tch-rs nn/var_store.rs) ---
   TVarStore = class;
 
   TVarPath = record
   private
-    FStore: TVarStore;                  // not owned; must outlive the path
-    FPath: String;                      // 'encoder.layer1' ('' = root)
+    FStore: TVarStore;            // not owned; must outlive the path
+    FPath: String;                // 'encoder.layer1' ('' = root)
     FGroup: Integer;
   public
-    function Sub(const Name: String): TVarPath;
-    class operator /(const P: TVarPath; const Name: String): TVarPath;  // sugar for Sub
+    function Sub(const Name: String): TVarPath;               // raises on '.' in Name
+    class operator /(const P: TVarPath; const Name: String): TVarPath;
     function SetGroup(G: Integer): TVarPath;
     function Store: TVarStore; inline;
     function Device: TDevice;
     function Kind: TKind;
+    function FullName(const Name: String): String;            // Path::path
     function Add(const Name: String; const T: TTensor; Trainable: Boolean): TTensor;
-    function Variable(const Name: String; const Dims: array of Int64; const Init: TInit): TTensor; // tch-rs "var"
+    function Variable(const Name: String; const Dims: array of Int64; const Init: TInit): TTensor; // var
     function Zeros(const Name: String; const Dims: array of Int64): TTensor;
     function Ones(const Name: String; const Dims: array of Int64): TTensor;
     function ZerosNoTrain(const Name: String; const Dims: array of Int64): TTensor;
     function OnesNoTrain(const Name: String; const Dims: array of Int64): TTensor;
+    function RandnStandard(const Name: String; const Dims: array of Int64): TTensor;
     function Randn(const Name: String; const Dims: array of Int64; Mean, Std: Double): TTensor;
     function Uniform(const Name: String; const Dims: array of Int64; Lo, Up: Double): TTensor;
     function KaimingUniform(const Name: String; const Dims: array of Int64): TTensor;
+    function KaimingNormal(const Name: String; const Dims: array of Int64): TTensor;
+    function Orthogonal(const Name: String; const Dims: array of Int64; Gain: Double): TTensor;
     function VarCopy(const Name: String; const T: TTensor): TTensor;
-    function TryGet(const Name: String; out T: TTensor): Boolean;
-    function GetOrAdd(const Name: String; const Dims: array of Int64; const Init: TInit): TTensor;
+    function TryGet(const Name: String; out T: TTensor): Boolean;   // Path::get
+    function GetOrAdd(const Name: String; const Dims: array of Int64; const Init: TInit): TTensor; // entry().or_var
+    procedure SetKind(AKind: TKind);        // this sub-tree, all variables
+    procedure SetFloatKind(AKind: TKind);   // this sub-tree, floating-point variables only
   end;
 
   TNamedTensor = record Name: String; Tensor: TTensor; end;
   TNamedTensorArray = array of TNamedTensor;
 
+  TVarEntry = record
+    Name: String;                 // full dotted name
+    Tensor: TTensor;
+    Trainable: Boolean;
+    Group: Integer;
+  end;
+  TVarEntryArray = array of TVarEntry;
+  TNameIndex = specialize TDictionary<String, Integer>;
+
   TVarStore = class
+  private
+    FVars: TVarEntryArray;        // insertion order, append-only (named_variables + order)
+    FTrainable: array of Integer; // indices into FVars, insertion order (trainable_variables)
+    FIndex: TNameIndex;           // full name -> index into FVars
+    FDevice: TDevice;
+    FKind: TKind;
+    function AddEntry(const FullName: String; const T: TTensor; Trainable: Boolean;
+      Group: Integer): TTensor;   // used by TVarPath.Add
   public
     constructor Create(const ADevice: TDevice; AKind: TKind = kFloat);
+    destructor Destroy; override;
     function Root: TVarPath;
+    function Count: Integer;
     function TrainableVariables: TTensorArray;
-    function Variables: TNamedTensorArray;
-    procedure Save(const FileName: String);          // at_save_multi; '.' -> '|' as tch-rs
-    procedure Load(const FileName: String);          // copies into existing vars; missing name raises
-    function LoadPartial(const FileName: String): TStringArray;  // returns missing names
-    procedure Freeze; procedure Unfreeze;
+    function Variables: TNamedTensorArray;                    // insertion order
+    function TryGet(const FullName: String; out T: TTensor): Boolean;
+    procedure Save(const FileName: String);
+    procedure Load(const FileName: String);
+    function LoadPartial(const FileName: String): TStringArray;   // missing names
+    procedure Freeze;
+    procedure Unfreeze;
     procedure SetDevice(const ADevice: TDevice);
-    procedure SetKind(AKind: TKind);
-    procedure CopyFrom(Src: TVarStore);
+    procedure SetKind(AKind: TKind);                          // set_kind: every variable
+    procedure SetFloatKind(AKind: TKind);                     // half/bfloat16/float/double
+    procedure CopyFrom(Src: TVarStore);                       // VarStore::copy
     property Device: TDevice read FDevice;
     property Kind: TKind read FKind;
-    property Count: Integer read GetCount;
   end;
 
+  // --- modules and layers ---
   TModule = class abstract
   public
     function Forward(const X: TTensor; Train: Boolean = False): TTensor; virtual; abstract;
   end;
 
-  TLinearConfig = record WsInit: TInit; BsInit: TInit; HasBsInit: Boolean; Bias: Boolean; end;
-  function DefaultLinearConfig: TLinearConfig;
+  TLinearConfig = record WsInit, BsInit: TInit; HasBsInit: Boolean; Bias: Boolean; end;
+  TPaddingMode = (pmZeros, pmReflect, pmReplicate, pmCircular);
+  TConvConfig = record
+    Stride, Padding, Dilation, Groups: Int64; Bias: Boolean;
+    WsInit, BsInit: TInit; PaddingMode: TPaddingMode;
+  end;
+  TBatchNormConfig = record CudnnEnabled: Boolean; Eps, Momentum: Double; Affine: Boolean; WsInit, BsInit: TInit; end;
+  TLayerNormConfig = record CudnnEnabled: Boolean; Eps: Double; ElementwiseAffine: Boolean; WsInit, BsInit: TInit; end;
+  TEmbeddingConfig = record Sparse, ScaleGradByFreq: Boolean; WsInit: TInit; PaddingIdx: Int64; end;
+  function DefaultLinearConfig: TLinearConfig;      // and DefaultConvConfig, DefaultBatchNormConfig, ...
 
   TLinear = class(TModule)
   public
-    Weight, Bias: TTensor;              // Bias.IsNil when the layer has none
+    Weight, Bias: TTensor;        // Bias.IsNil when the layer has none
     constructor Create(const P: TVarPath; InDim, OutDim: Int64); overload;
     constructor Create(const P: TVarPath; InDim, OutDim: Int64; const Cfg: TLinearConfig); overload;
     function Forward(const X: TTensor; Train: Boolean = False): TTensor; override;
   end;
-
-  TTensorFunc = function(const X: TTensor): TTensor;
-  TTensorFuncT = function(const X: TTensor; Train: Boolean): TTensor;
-
-  TSequential = class(TModule)
+  TConv2D = class(TModule)       // Conv2D with tch-rs's scalar ConvConfig
   private
-    FLayers: TObjectList;               // OwnsObjects = True
+    FCfg: TConvConfig;
+    FPadTwice: TInt64Array;       // reversed_padding_repeated_twice
   public
-    function Add(M: TModule): TSequential;            // returns Self for chaining
-    function AddFn(F: TTensorFunc): TSequential;
-    function AddFnT(F: TTensorFuncT): TSequential;
+    Weight, Bias: TTensor;
+    constructor Create(const P: TVarPath; InDim, OutDim, KSize: Int64); overload;
+    constructor Create(const P: TVarPath; InDim, OutDim, KSize: Int64; const Cfg: TConvConfig); overload;
+    function Forward(const X: TTensor; Train: Boolean = False): TTensor; override;
+  end;
+  TBatchNorm = class(TModule)    // Nd = 1, 2, 3 for batch_norm1d/2d/3d
+  public
+    Weight, Bias, RunningMean, RunningVar: TTensor;
+    constructor Create(const P: TVarPath; Nd: Integer; OutDim: Int64); overload;
+    constructor Create(const P: TVarPath; Nd: Integer; OutDim: Int64; const Cfg: TBatchNormConfig); overload;
+    function Forward(const X: TTensor; Train: Boolean = False): TTensor; override;
+  end;
+  TLayerNorm = class(TModule)
+  public
+    Weight, Bias: TTensor;
+    constructor Create(const P: TVarPath; const NormalizedShape: array of Int64); overload;
+    constructor Create(const P: TVarPath; const NormalizedShape: array of Int64; const Cfg: TLayerNormConfig); overload;
+    function Forward(const X: TTensor; Train: Boolean = False): TTensor; override;
+  end;
+  TEmbedding = class(TModule)
+  public
+    Weight: TTensor;
+    constructor Create(const P: TVarPath; NumEmbeddings, EmbeddingDim: Int64); overload;
+    constructor Create(const P: TVarPath; NumEmbeddings, EmbeddingDim: Int64; const Cfg: TEmbeddingConfig); overload;
     function Forward(const X: TTensor; Train: Boolean = False): TTensor; override;
   end;
 
-  TOptimizer = class
+  TTensorFunc    = function(const X: TTensor): TTensor;
+  TTensorFuncT   = function(const X: TTensor; Train: Boolean): TTensor;
+  TTensorMethod  = function(const X: TTensor): TTensor of object;
+  TTensorMethodT = function(const X: TTensor; Train: Boolean): TTensor of object;
+
+  TFuncModule = class(TModule)   // Func / FuncT
   public
-    class function Sgd(VS: TVarStore; LR: Double; Momentum: Double = 0;
-      Dampening: Double = 0; WeightDecay: Double = 0; Nesterov: Boolean = False): TOptimizer; static;
-    class function Adam(VS: TVarStore; LR: Double; Beta1: Double = 0.9;
-      Beta2: Double = 0.999; WeightDecay: Double = 0; Eps: Double = 1e-8;
-      AmsGrad: Boolean = False): TOptimizer; static;
-    class function AdamW(...): TOptimizer; static;
-    class function RmsProp(...): TOptimizer; static;
-    destructor Destroy; override;                      // ato_free
+    constructor Create(F: TTensorFunc); overload;
+    constructor Create(F: TTensorFuncT); overload;
+    constructor Create(F: TTensorMethod); overload;
+    constructor Create(F: TTensorMethodT); overload;
+    function Forward(const X: TTensor; Train: Boolean = False): TTensor; override;
+  end;
+
+  TModuleList = specialize TObjectList<TModule>;
+
+  TSequential = class(TModule)   // SequentialT: Train goes to every child
+  private
+    FLayers: TModuleList;         // OwnsObjects
+  public
+    constructor Create;
+    destructor Destroy; override;
+    function Add(M: TModule): TSequential;                    // takes ownership; returns Self
+    function AddFn(F: TTensorFunc): TSequential; overload;
+    function AddFn(F: TTensorFuncT): TSequential; overload;
+    function AddFn(F: TTensorMethod): TSequential; overload;
+    function AddFn(F: TTensorMethodT): TSequential; overload;
+    function Forward(const X: TTensor; Train: Boolean = False): TTensor; override;
+    function ForwardAll(const X: TTensor; Train: Boolean = False; N: Integer = -1): TTensorArray;
+    function Count: Integer;
+    property Items[I: Integer]: TModule read GetItem; default;
+  end;
+
+  // --- optimizers (tch-rs nn/optimizer.rs, wrappers/optimizer.rs) ---
+  TOptimizer = class
+  private
+    FOpt: PTorchOptimizer;
+    FStore: TVarStore;            // not owned; free the optimizer before the store
+    FVarsInOptimizer: Integer;    // variables_in_optimizer
+    constructor CreateRaw(AOpt: PTorchOptimizer; VS: TVarStore);
+    procedure AddMissingVariables;
+  public
+    class function Sgd(VS: TVarStore; LR: Double; Momentum: Double = 0; Dampening: Double = 0;
+      WeightDecay: Double = 0; Nesterov: Boolean = False): TOptimizer; static;
+    class function Adam(VS: TVarStore; LR: Double; Beta1: Double = 0.9; Beta2: Double = 0.999;
+      WeightDecay: Double = 0; Eps: Double = 1e-8; AmsGrad: Boolean = False): TOptimizer; static;
+    class function AdamW(VS: TVarStore; LR: Double; Beta1: Double = 0.9; Beta2: Double = 0.999;
+      WeightDecay: Double = 0.01; Eps: Double = 1e-8; AmsGrad: Boolean = False): TOptimizer; static;
+    class function RmsProp(VS: TVarStore; LR: Double; Alpha: Double = 0.99; Eps: Double = 1e-8;
+      WeightDecay: Double = 0; Momentum: Double = 0; Centered: Boolean = False): TOptimizer; static;
+    destructor Destroy; override;                             // ato_free
     procedure ZeroGrad;
     procedure Step;
-    procedure BackwardStep(const Loss: TTensor);       // zero_grad; backward; step
+    procedure BackwardStep(const Loss: TTensor);
     procedure BackwardStepClip(const Loss: TTensor; MaxValue: Double);
     procedure BackwardStepClipNorm(const Loss: TTensor; MaxNorm: Double);
     procedure ClipGradValue(MaxValue: Double);
     procedure ClipGradNorm(MaxNorm: Double);
-    procedure SetLearningRate(LR: Double);             // + group variants, momentum, weight decay
-  private
-    FOpt: PTorchOptimizer;
-    FStore: TVarStore;                                 // not owned
-    FVarsInOptimizer: Integer;                         // lazily adds new trainable vars, as tch-rs
+    procedure SetLearningRate(LR: Double);
+    procedure SetLearningRateGroup(Group: Integer; LR: Double);
+    procedure SetMomentum(M: Double);                         // beta1 for Adam/AdamW
+    procedure SetMomentumGroup(Group: Integer; M: Double);
+    procedure SetWeightDecay(WD: Double);
+    procedure SetWeightDecayGroup(Group: Integer; WD: Double);
+    function TrainableVariables: TTensorArray;
   end;
 ```
 
-Decisions and rationale:
+Decisions and rationale (overall shape):
 - **`TVarStore` is a class, `TVarPath` a record.** The store has identity,
   mutable state and a clear owner; paths are throwaway values that only
   carry a prefix and a group. A path holds a plain class reference, so the
@@ -960,9 +1081,11 @@ Decisions and rationale:
   resolved in step 7**: with the default repeated, `Forward(X)` works
   through base and derived references; an override without it still works
   through the base type but `Derived.Forward(X)` is a compile error).
-  A PyTorch-style `Training` flag on the module was considered and rejected
-  for now: propagating it requires child registration machinery
-  (`__setattr__` magic in Python) that Pascal would have to spell out.
+  A PyTorch-style `Training` flag on the module was considered and rejected:
+  propagating it requires child registration machinery (`__setattr__` magic
+  in Python) that Pascal would have to spell out. Closed in cloud session 4:
+  `TSequential` passes `Train` to every child (4.6.6) and a user `TModule`
+  passes it on explicitly; nothing else is needed.
 - **Layers are classes that own nothing but tensors** (refcounted). They are
   created with a `TVarPath` and register their parameters, like tch-rs.
   `TSequential` owns its children. A user model is a `TModule` subclass that
@@ -990,7 +1113,422 @@ Decisions and rationale:
   `TIValue` should be treated as immutable after construction.
   `TTrainableJitModule` registers `NamedParameters` into a `TVarPath` and
   derives from `TModule`, so a scripted model can be fine-tuned with
-  `TOptimizer` like any other layer.
+  `TOptimizer` like any other layer. Not part of milestone 2.
+
+#### 4.6.1 Initialisation (`TInit`), from `src/nn/init.rs`
+
+- **Fan** (`FanInOut::for_weight_dims`): `Receptive := product of
+  Dims[2..]` (1 when there are fewer than three dims). `fmFanIn` = 1 if
+  `Length(Dims) < 2`, else `Dims[1] * Receptive`; `fmFanOut` = 1 if
+  `Length(Dims) = 0`, else `Dims[0] * Receptive`. So a linear weight
+  `[Out, In]` has fan-in `In`, a conv weight `[Out, In div Groups, K, K]`
+  has fan-in `In div Groups * K * K`.
+- **Gain** (`NonLinearity::gain`): ReLU `sqrt(2)`, Tanh `5/3`, Linear and
+  Sigmoid `1`, SELU `0.75`, ExplicitGain `g`.
+- **`Make(Dims, Device, Kind)`** is tch-rs `f_init`, op for op (generated
+  names as in `TchTensorGenerated_intf.inc`):
+
+  | `TInit` | tensor |
+  |---|---|
+  | `Constant(0)` | `TTensor.zeros(Dims, Kind, Device)` |
+  | `Constant(1)` | `TTensor.ones(Dims, Kind, Device)` (tch-rs tests `abs(c - 1) <= f64::EPSILON`; `A = 1.0` gives the same tensor) |
+  | `Constant(c)` | `TTensor.ones(...).mul_scalar(c)` |
+  | `Uniform(Lo, Up)` | `TTensor.zeros(...).uniform_(Lo, Up)` |
+  | `Randn(0, 1)` | `TTensor.randn(Dims, Kind, Device)` |
+  | `Randn(M, S)` | `TTensor.randn(...).mul_scalar(S).add_scalar(M)` |
+  | `Kaiming(idUniform, Fan, NL)` | `Std := Gain / sqrt(FanForDims(Fan, Dims))`; `Bound := sqrt(3) * Std`; `TTensor.zeros(...).uniform_(-Bound, Bound)` |
+  | `Kaiming(idNormal, Fan, NL)` | `TTensor.randn(...).mul_scalar(Std)` |
+  | `Orthogonal(G)` | below |
+
+  `KaimingUniform` on a linear weight `[Out, In]` therefore draws from
+  `±sqrt(6 / In)` (gain `sqrt(2)`, fan-in `In`): the hand-checkable bound
+  for the test.
+- **Orthogonal** (`Init::Orthogonal`): `Length(Dims) < 2` raises
+  `ETorchError('Only tensors with 2 or more dimensions are supported')`;
+  `Rows := Dims[0]`, `Cols := product of Dims[1..]`;
+  `F := TTensor.empty([Rows, Cols], Kind, Device).normal_(0, 1)`;
+  if `Rows < Cols` then `F := F.t_`; `TTensor.linalg_qr(F, 'reduced', Q, R)`
+  (class procedure with `out Q, R`); `Ph := R.diag(0).sign`; `Q.mul_(Ph)`
+  (broadcast over the last dim, tch-rs `q *= ph`); if `Rows < Cols` then
+  `Q := Q.t_`; `Q.mul_scalar_(G)`; `Result := Q.contiguous.view(Dims)`.
+  **Deviation, stated:** tch-rs's `f_init` returns the 2-D `[Rows, Cols]`
+  tensor even when `Dims` has more than two entries (its `Init::set` then
+  fixes the shape with `view_as`); PyTorch's `orthogonal_` keeps the
+  requested shape, so `Make` ends with `.view(Dims)` (a no-op for 2-D
+  dims, where the two agree). **(H14)**: `Q·Qᵀ = I` for `[3, 5]` and
+  `Qᵀ·Q = I` for `[5, 3]` with `allclose(…, 1e-5)` on real libtorch.
+- **No `NoGradGuard` in `Make`:** every tensor is created inside it with
+  `requires_grad = False`, so no history is recorded (tch-rs's `f_init` has
+  no `no_grad` either, except a redundant one around the gain multiply).
+  `requires_grad` is set afterwards by `TVarPath.Add`.
+- **`Apply(T)`** is tch-rs `Init::set` (re-initialise an existing variable
+  in place: `fill_`, `uniform_`, `at_copy_` of `randn_like * std + mean`,
+  `at_copy_` of `Make(T.Shape, T.Device, T.Kind)` for Orthogonal, Kaiming
+  with the fan taken from `T.Shape`). It runs under its own `NoGradGuard`:
+  the target is normally a leaf that requires grad, and an in-place op on
+  such a leaf raises in libtorch; tch-rs leaves the `no_grad` to the caller
+  (its tests wrap `init` in `no_grad`), the Pascal version does it itself.
+  **(H17)**: confirm the failure without the guard and success with it.
+  Hand-written `TTensor.CopyFrom(const Src: TTensor)` over `at_copy_` is
+  added to `Tch.pas` for this (there is no generated `copy_`; `_copy_from`
+  is a different identifier, so tchgen's name check passes).
+- **Kind.** `TVarPath.Variable` and friends pass the store's `Kind` (tch-rs
+  `f_var` uses `self.kind()`). tch-rs hard-codes `Kind::Float` in
+  `zeros_no_train`, `ones_no_train` and `Entry::or_var`; the Pascal version
+  uses the store kind everywhere (deviation; identical for the default
+  `kFloat`). tch-rs's `Entry::or_kaiming_uniform` uses the *normal* default
+  (an upstream slip); `GetOrAdd` takes an explicit `TInit`, so the question
+  does not arise.
+
+#### 4.6.2 `TVarStore` internals, from `src/nn/var_store.rs`
+
+- **tch-rs's state:** `named_variables: HashMap<String, Tensor>`
+  (unordered) and `trainable_variables: Vec<Var { tensor, group }>` in
+  insertion order; the optimizer depends on that order and on the vector's
+  length for its lazy add.
+- **Container (decided, measured in M2 of cloud session 4):** `FVars:
+  array of TVarEntry` in insertion order, append-only (entries are never
+  removed), `FTrainable: array of Integer` with the indices of the trainable
+  entries in insertion order (= tch-rs `trainable_variables`), and `FIndex:
+  specialize TDictionary<String, Integer>` from `Generics.Collections` for
+  the name lookup. Measured on FPC 3.2.2: `TDictionary<String, Integer>`
+  compiles, keys are case-sensitive (`weight` and `Weight` are two keys),
+  a duplicate `Add` raises `EListError`; a dynamic array of a record with a
+  `TTensor` field keeps every handle alive across `SetLength` growth and
+  releases them all when the array is cleared; `TList<TTensor>` works too
+  (`IndexOf` compares the record bytes, i.e. the handle, so it is identity)
+  but is not needed. This closes the "equality and containers" question:
+  no `=` on `TTensor` is required. `Variables` and `TrainableVariables`
+  return insertion order (tch-rs's `variables()` is a HashMap, so
+  deterministic order is a harmless improvement).
+- **`Add(Name, T, Trainable)`** (`Path::add`): full name = `FPath + '.' +
+  Name` (`Name` alone at the root). If the full name already exists it
+  becomes `<full>__<Count>` (tch-rs: `format!("{}__{}", path,
+  named_variables.len())`); tch-rs's `save_and_load_var_store` test
+  registers `t123` twice and expects four variables, so files written by
+  tch-rs can contain such names and the rule is kept verbatim. If
+  `Trainable`: `T.set_requires_grad(True)` (generated; in place, the
+  returned handle is discarded) and the index is appended to `FTrainable`.
+  The function returns `T` itself: the layer, the store and the caller share
+  the handle (tch-rs's `shallow_clone`s only exist for Rust ownership).
+- **Name validation:** `Sub` and every variable name raise `ETorchError`
+  when the string contains `.` (tch-rs panics: "sub name cannot contain .",
+  "variable name cannot contain ."). Stricter than tch-rs, stated: `|` is
+  rejected too (it would come back as `.` after a save/load round trip) and
+  so is the empty string.
+- **`GetOrAdd(Name, Dims, Init)`** (`Entry::or_var`): returns the existing
+  tensor by full name whatever `Dims` and `Init` say (tch-rs test
+  `var_store_entry`: a second `or_zeros(&[1, 5, 9])` returns the `[3, 1, 4]`
+  tensor), otherwise adds a trainable variable.
+- **`Freeze` / `Unfreeze`:** `set_requires_grad(False / True)` on every
+  `FTrainable` entry; the entries stay trainable and stay in the optimizer
+  (libtorch's optimizers skip a parameter whose `grad` is undefined,
+  **(H18)**: `Freeze; Step` leaves the values unchanged and raises nothing).
+  In place: no handle changes.
+- **`SetDevice(D)`** (`set_device`): for every entry
+  `T.set_data(T.&to(D))` (generated `set_data` and `&to`), then `FDevice :=
+  D`. `set_data` swaps the storage behind the *same* C++ tensor object, so
+  every `TTensor` sharing the handle (layers, the optimizer's param groups)
+  sees the moved data; no grad guard is needed, `set_data` is not an
+  autograd op. Same caveat as tch-rs: an optimizer's state buffers are not
+  moved, so create optimizers after `SetDevice`. **(H13)**: a layer's
+  `Weight` and the store's entry show the new device after `SetDevice`, and
+  an optimizer created before a `SetKind(kDouble)` still steps the variable.
+- **`SetKind(K)`** (`set_kind` → `Path::set_kind` on the root): every entry
+  `T.set_data(T.totype(K))`, then `FKind := K`. **`SetFloatKind(K)`**
+  (tch-rs `half` / `bfloat16` / `float` / `double`): only entries whose
+  `is_floating_point` is true. Deviation, stated: tch-rs's `half()` leaves
+  the default kind for *new* variables at `Float`; `SetFloatKind` sets
+  `FKind` too. `TVarPath.SetKind` / `SetFloatKind` restrict to the sub-tree:
+  entries whose name equals the path or starts with the path plus `.`
+  (tch-rs uses a plain `starts_with`, which also matches `ab.x` for the path
+  `a`; fixed, stated).
+- **`CopyFrom(Src)`** (`VarStore::copy`): first pass checks that every name
+  of `Self` exists in `Src` and raises `ETorchError('variable <name> not
+  found in source var-store')` before anything is copied (tch-rs does the
+  same two passes); second pass, under `NoGradGuard`,
+  `Dst.CopyFrom(SrcT.&to(FDevice))`.
+- **`Destroy`** frees `FIndex`; clearing the arrays releases the store's
+  references, tensors shared with layers live on. `TVarPath` values that
+  still point at the freed store are dangling (documented, as above).
+  `Count = Length(FVars)` (tch-rs `len()`).
+
+#### 4.6.3 Save and load, from `var_store.rs` and `wrappers/tensor.rs`
+
+- **`Save(FileName)`** (`VarStore::save` → `Tensor::save_multi`):
+  `at_save_multi(tensors, names, n, filename)` over *all* entries in
+  insertion order, each name with `.` replaced by `|`. The Pascal side keeps
+  an `array of AnsiString` alive and passes an `array of PChar` into it.
+  tch-rs writes safetensors for the `.safetensors` extension in Rust code;
+  there is no libtch entry point for it, so that extension raises
+  `ETorchError('safetensors files are not supported')`.
+- **Reading** (`VarStore::named_tensors`): by extension, exactly as tch-rs:
+  `.bin` / `.pt` → `at_loadz_callback_with_device` (pickle zip, as
+  exported from Python); `.safetensors` → `ETorchError`; anything else →
+  `at_load_callback_with_device(filename, data, @LoadCallback,
+  FDevice.ToC)`. Not used, and therefore not declared in `TchSys`:
+  `at_load_multi`, `at_load_multi_` (tch-rs does not use them either) and
+  the two callback forms without a device (the device forms cover them).
+  Tensors arrive on the store's device; extra names in the file are ignored.
+- **The callback** (tch-rs `add_callback`; measured in M1 of cloud session
+  4 with a C harness calling the trampoline three times):
+
+  ```pascal
+  // TchSys
+  TTorchLoadCallback = procedure(data: Pointer; name: PChar; t: PTorchTensor); cdecl;
+  procedure at_load_callback_with_device(filename: PChar; data: Pointer;
+    f: TTorchLoadCallback; device_id: cint); cdecl; external LibTch;
+  // TchNN, implementation
+  type
+    TLoadContext = class
+      Items: TNamedTensorArray;
+      Error: Exception;                 // acquired exception object, nil = none
+    end;
+  procedure LoadCallback(data: Pointer; name: PChar; t: PTorchTensor); cdecl;
+  var Ctx: TLoadContext; N: String; T: TTensor;
+  begin
+    Ctx := TLoadContext(data);
+    try
+      T := TTensor.FromRaw(t);          // own the handle on every path (section 2)
+      if Ctx.Error <> nil then Exit;    // an earlier callback failed: keep skipping
+      N := StringReplace(StrPas(name), '|', '.', [rfReplaceAll]);
+      SetLength(Ctx.Items, Length(Ctx.Items) + 1);
+      Ctx.Items[High(Ctx.Items)].Name := N;
+      Ctx.Items[High(Ctx.Items)].Tensor := T;
+    except
+      Ctx.Error := Exception(AcquireExceptionObject);
+    end;
+  end;
+  ```
+
+  After the C call returns: `P := get_and_reset_last_err` unconditionally
+  (the slot must be clear on every path); if `Ctx.Error <> nil` then
+  `tchf_free(P)`, take the object out of the context and `raise` it;
+  otherwise if `P <> nil` then `TchRaiseNative(P)`. Measured: the class
+  instance arrives intact through `data`; an exception raised in the
+  trampoline is caught there, the acquired object survives the return
+  through the C frames and re-raises with its class and message after the
+  call; the later callbacks are skipped; every handle handed over is owned.
+  The borrowed `name` is copied before the callback returns.
+- **Copying into the store** (`load_internal`, `load_partial`,
+  `copy_data_with_precision_update`). `Load`: a first pass checks that every
+  store name is in the loaded list and raises `ETorchError('variable <name>
+  not found in <file>')` before anything is modified (tch-rs stops at the
+  first missing name in HashMap order, leaving the earlier ones updated;
+  two passes make it deterministic). Then for each entry, under
+  `NoGradGuard`: `Dst.set_data(Dst.totype(Src.Kind))` then
+  `Dst.CopyFrom(Src)`: the destination takes the *file's* kind, which is why
+  a `kFloat` store loading a half-precision file ends up `kHalf` (tch-rs
+  test `save_and_load_var_store`, second half). `LoadPartial`: same without
+  the first pass; the missing names are returned in insertion order
+  (tch-rs's `save_and_load_partial_var_store_incomplete_file` expects
+  `['a.b.t2']`). **(H15)**: the precision update on real libtorch.
+
+#### 4.6.4 Optimizers, from `nn/optimizer.rs`, `wrappers/optimizer.rs` and `torch_api.cpp`
+
+- **L2:** `PTorchOptimizer = Pointer;` in `TchSys` (same style as the
+  existing `PTorchTensor`) and the externals exactly as `torch_api.h`
+  declares them:
+
+  ```pascal
+  function ato_sgd(learning_rate, momentum, dampening, weight_decay: Double;
+    nesterov: cint): PTorchOptimizer; cdecl; external LibTch;
+  function ato_adam(learning_rate, beta1, beta2, weight_decay, eps: Double;
+    amsgrad: Boolean): PTorchOptimizer; cdecl; external LibTch;      // C++ bool (section 2)
+  function ato_adamw(...same as ato_adam...): PTorchOptimizer; cdecl; external LibTch;
+  function ato_rms_prop(learning_rate, alpha, eps, weight_decay, momentum: Double;
+    centered: cint): PTorchOptimizer; cdecl; external LibTch;
+  procedure ato_add_parameters(opt: PTorchOptimizer; t: PTorchTensor; group: csize_t); cdecl; external LibTch;
+  procedure ato_set_learning_rate(opt: PTorchOptimizer; learning_rate: Double); cdecl; external LibTch;
+  procedure ato_set_learning_rate_group(opt: PTorchOptimizer; group: csize_t; learning_rate: Double); ...
+  procedure ato_set_momentum(opt: PTorchOptimizer; momentum: Double); ...
+  procedure ato_set_momentum_group(opt: PTorchOptimizer; group: csize_t; momentum: Double); ...
+  procedure ato_set_weight_decay(opt: PTorchOptimizer; weight_decay: Double); ...
+  procedure ato_set_weight_decay_group(opt: PTorchOptimizer; group: csize_t; weight_decay: Double); ...
+  procedure ato_zero_grad(opt: PTorchOptimizer); ...
+  procedure ato_step(opt: PTorchOptimizer); ...
+  procedure ato_free(opt: PTorchOptimizer); ...
+  ```
+
+  All are `PROTECT`ed except `ato_free` (a bare `delete`), so `TchCheck`
+  after each; the constructors return `nullptr` on error, which `TchCheck`
+  turns into an exception before the pointer is looked at. A `Boolean`
+  argument for a C++ `bool` was measured in step 4 (`at_autocast_set_enabled`).
+- **Construction** (`OptimizerConfig::build`): create the C optimizer, then
+  `ato_add_parameters(FOpt, Tensor.Raw, Group)` for every `FTrainable`
+  entry in order, `FVarsInOptimizer := Length(FStore.FTrainable)`.
+  `ato_add_parameters` creates param groups up to `group`, each a clone of
+  the defaults, so groups may be sparse (as in tch-rs).
+- **Lazy add** (`add_missing_variables`): `ZeroGrad`, `Step` and the three
+  `BackwardStep*` first add `FStore.FTrainable[FVarsInOptimizer..]` with
+  their groups and update the count; `ClipGrad*` and the setters do not.
+  This reads `TVarStore`'s private fields, which is why `TOptimizer` lives
+  in `TchNN` (4.5).
+- **Defaults** (`impl Default` in `nn/optimizer.rs`): SGD momentum 0,
+  dampening 0, weight decay 0, nesterov false; Adam β₁ 0.9, β₂ 0.999,
+  weight decay 0, eps 1e-8, amsgrad false; **AdamW weight decay 0.01**,
+  the rest as Adam; RmsProp alpha 0.99, eps 1e-8, weight decay 0, momentum
+  0, centered false. Parameter order in Pascal follows the tch-rs structs,
+  `LR` first as in `build(vs, lr)`.
+- **`ClipGradValue(Max)`** (`clip_grad_value`): for every trainable entry
+  `G := T.grad; if G.Defined then G.clamp_(-Max, Max)`.
+  **`ClipGradNorm(Max)`** (`clip_grad_norm`): collect `G.norm` (the
+  parameterless generated `norm`, 2-norm of the flattened gradient) of every
+  defined gradient; if none, exit (tch-rs would panic in `stack` of an
+  empty list); `Total := TTensor.stack(Norms, 0).norm.DoubleValue([])`;
+  `Coef := Max / (Total + 1e-6)`; if `Coef < 1` then `G.mul_scalar_(Coef)`
+  on each defined gradient. Both run under `NoGradGuard` (tch-rs only the
+  norm variant; PyTorch's `clip_grad_value_` is `@torch.no_grad()` too).
+  Hand-checkable numbers from tch-rs `tests/nn_tests.rs`
+  (`gradient_clip_test`): `v1 = [1, 1]`, `v2 = [1]`, `v3 = [-1, -1]`,
+  `loss = sum(cat([v1, 2·v2, 2·v3])²)` → gradients `[2, 2]`, `[8]`,
+  `[-8, -8]`; `ClipGradValue(4)` → `[2, 2]`, `[4]`, `[-4, -4]`;
+  `ClipGradNorm(1)`: total norm `sqrt(4+4+64+64+64) = sqrt(200) = 14.1421`,
+  coefficient `0.070711` → `[0.1414, 0.1414]`, `[0.5657]`,
+  `[-0.5657, -0.5657]` (rounded to 4 places).
+- **Setters:** `SetLearningRate` (defaults and every group),
+  `SetLearningRateGroup`, `SetMomentum` (β₁ for Adam/AdamW, as libtch's
+  `ato_set_momentum`), `SetMomentumGroup`, `SetWeightDecay`,
+  `SetWeightDecayGroup`; `TchCheck` after each. **Fork patch found while
+  reading `torch_api.cpp`:** in `ato_set_momentum_group` the SGD branch is
+  `} if (auto sgd = ...)` instead of `} else if`, so for Adam, AdamW and
+  RMSprop the value is set and then `"unexpected optimizer"` is thrown
+  anyway (upstream tch-rs bug). The fork changes it to `} else if`
+  (one token, `torch_api.cpp` line 564); **(H16)**: the unpatched build
+  raises `ETorchNativeError('unexpected optimizer')` from
+  `SetMomentumGroup(0, …)` on an Adam optimizer, the patched one does not.
+- **`BackwardStep(Loss)`**: lazy add, `ato_zero_grad`, `Loss.Backward`,
+  `ato_step`. `BackwardStepClip` / `BackwardStepClipNorm` insert the
+  clipping between backward and step. `TrainableVariables` returns the
+  store's. `Destroy` calls `ato_free` and never touches the store. The
+  param groups hold C++ `Tensor` copies, so libtorch stays memory-safe if
+  the store is freed first, but the lazy add would then dereference a freed
+  `TVarStore`: free the optimizer before the store (documented).
+
+#### 4.6.5 Layers of milestone 2
+
+Set: `TLinear`, `TConv2D`, `TBatchNorm` (Nd 1/2/3), `TLayerNorm`,
+`TEmbedding`, and dropout as a function (`X.dropout(P, Train)` in a user
+`Forward`, or `Seq.AddFn(@Drop)` with a `TTensorFuncT`), plus `TFuncModule`
+and `TSequential` (4.6.6). Deferred to milestone 3, with the same pattern:
+`TConv1D` / `TConv3D` and the per-dimension `ConvConfigND`,
+`TConvTranspose`, `TGroupNorm` (identical to `TLayerNorm` over
+`group_norm`), `TLSTM` / `TGRU` (`lstm` / `gru` have `out` parameters and
+need a state record and `ZeroState`), `Id`. Variable names, shapes, default
+initialisations and the generated op each `Forward` calls, all from the
+tch-rs file named:
+
+| layer (tch-rs file) | variables: name `[shape]`, default init | config defaults | `Forward` |
+|---|---|---|---|
+| `TLinear` (`linear.rs`) | `weight [Out, In]` KaimingUniform; `bias [Out]` when `Bias`: `BsInit` if `HasBsInit`, else `Uniform(-1/sqrt(In), 1/sqrt(In))` | `WsInit` KaimingUniform, `HasBsInit` False, `Bias` True | `X.linear(Weight, Bias)` — `atg_linear`, as tch-rs; its `matches_pytorch` test shows `linear` at least as close to PyTorch as `matmul(ws.tr()) + bs`. `Bias.IsNil` passes `TensorOption` none |
+| `TConv2D` (`conv.rs`, scalar `ConvConfig`) | `bias [Out]` `BsInit` (registered first, as tch-rs); `weight [Out, In div Groups, K, K]` `WsInit` | `Stride` 1, `Padding` 0, `Dilation` 1, `Groups` 1, `Bias` True, `WsInit` KaimingUniform, `BsInit` Constant(0), `PaddingMode` pmZeros | `pmZeros`: `X.conv2d(Weight, Bias, [S, S], [P, P], [D, D], Groups)`; other modes: `X.pad(FPadTwice, Mode, NoDouble).conv2d(Weight, Bias, [S, S], [0, 0], [D, D], Groups)` with `FPadTwice = [P, P, P, P]` (reversed padding repeated twice) and `Mode` `'reflect'` / `'replicate'` / `'circular'` (`PaddingMode::to_string`) |
+| `TBatchNorm` (`batch_norm.rs`) | `weight [Out]` `WsInit`, `bias [Out]` `BsInit` when `Affine`; `running_mean [Out]` `ZerosNoTrain`; `running_var [Out]` `OnesNoTrain` (this registration order) | `CudnnEnabled` True, `Eps` 1e-5, `Momentum` 0.1, `Affine` True, `WsInit` Uniform(0, 1), `BsInit` Constant(0) | dim check first (Nd = 1: input must be 2-D or 3-D; else `Nd + 2` dims; `ETorchError` with tch-rs's text), then `X.batch_norm(Weight, Bias, RunningMean, RunningVar, Train, Momentum, Eps, CudnnEnabled)`; the one milestone-2 layer that uses `Train` |
+| `TLayerNorm` (`layer_norm.rs`) | `weight [NormalizedShape]` `WsInit`, `bias [NormalizedShape]` `BsInit` when `ElementwiseAffine` | `CudnnEnabled` True, `Eps` 1e-5, `ElementwiseAffine` True, `WsInit` Constant(1), `BsInit` Constant(0) | `X.layer_norm(NormalizedShape, Weight, Bias, Eps, CudnnEnabled)` |
+| `TEmbedding` (`sparse.rs`) | `weight [NumEmbeddings, EmbeddingDim]` `WsInit` | `Sparse` False, `ScaleGradByFreq` False, `WsInit` Randn(0, 1), `PaddingIdx` -1 | `TTensor.embedding(Weight, X, PaddingIdx, ScaleGradByFreq, Sparse)` (class function: the receiver rule made `weight` the first argument) |
+
+Every config has a `Default*Config` function and each layer two
+constructors (with and without the config). Variable names are tch-rs's,
+so `.ot` files interchange.
+
+#### 4.6.6 `TSequential` and `TFuncModule`, from `sequential.rs` and `func.rs`
+
+- **Container:** `TModuleList = specialize TObjectList<TModule>`
+  (`Generics.Collections`, `OwnsObjects` True by default). Measured (M2):
+  it compiles on 3.2.2 with an abstract base whose virtual method has a
+  default parameter, `for M in FLayers` works, `Free` frees the children.
+  `Contnrs.TObjectList` works as well but needs a cast on every `Items[I]`;
+  since `Generics.Collections` is already pulled in for the name index, the
+  typed list is used.
+- **`AddFn` is one name with four overloads** on `TTensorFunc`,
+  `TTensorFuncT`, `TTensorMethod` (`of object`) and `TTensorMethodT`.
+  Measured (M3, objfpc): `AddFn(@PlainFunc)`, `AddFn(@PlainFuncT)`,
+  `AddFn(@Obj.Method)` and `AddFn(@Obj.MethodT)` each resolve to the
+  matching procedural type with no ambiguity, and chaining through the
+  returned `Self` works. Each appends a `TFuncModule`, which holds one of
+  the four pointers and can also be created standalone. With a method
+  pointer the object must outlive the sequential (documented).
+- **`Forward(X, Train)`** passes `Train` to every child
+  (`SequentialT::forward_t`; one class covers tch-rs's `Sequential` and
+  `SequentialT` because `TModule` already merges the two traits). An empty
+  sequential returns `X` (a record copy of the same handle, tch-rs's
+  `shallow_clone`). `ForwardAll(X, Train, N)` returns the outputs of the
+  first `N` layers (`forward_all_t`; `N = -1` means all).
+- `Add(M)` takes ownership and returns `Self` for chaining; `Count` and the
+  default `Items[I]` property expose the children.
+
+#### 4.6.7 Unit layout, L2 additions and the milestone 2 test
+
+- **One unit `TchNN.pas`** (no `TchOptim`): `TOptimizer` reads
+  `TVarStore.FTrainable` / `FVars`, which same-unit private access allows
+  (4.5). `TchJit.pas` comes with the JIT milestone.
+- **`TchSys.pas` additions:** `PTorchOptimizer`, `TTorchLoadCallback`,
+  `at_save_multi`, `at_load_callback_with_device`,
+  `at_loadz_callback_with_device`, the thirteen `ato_*` of 4.6.4.
+  **`Tch.pas` addition:** `TTensor.CopyFrom(const Src: TTensor)` over
+  `at_copy_`. **Fork patch:** `ato_set_momentum_group` `} else if`
+  (4.6.4), then rebuild `libtch.so`.
+- **`tests/nn/nn_test.pas`** (real libtorch), hand-checkable numbers:
+  1. Init: `KaimingUniform` on `[4, 16]`: every value in
+     `±sqrt(6/16) = ±0.6124`, mean within 0.1 of 0; `Constant(3)` all 3;
+     `Orthogonal` `[3, 5]` and `[5, 3]` (H14), result shape = `Dims`.
+  2. Store: `a.b.t2` naming through `Sub`; `Sub('x.y')` and `Zeros('a.b',
+     …)` raise; adding `t123` twice gives `Count = 4` with the second named
+     `a.b.ccc.t123__3` (tch-rs `save_and_load_var_store`); `GetOrAdd` of an
+     existing name returns the `[3, 1, 4]` tensor whatever dims are asked;
+     `TrainableVariables` in registration order; `Freeze` →
+     `RequiresGrad = False`, `Unfreeze` → True; `Freeze; Step` changes
+     nothing (H18).
+  3. Linear regression (tch-rs `optimizer_test`): `xs = 1..14` as
+     `[14, 1]` float, `ys = 0.42·xs + 1.337`, `TLinear(1, 1)` with both
+     inits `Constant(0)`, `Sgd(VS, 0)` then `SetLearningRate(1e-2)`. Initial
+     `mse_loss` = `mean((0.42x + 1.337)²) = (0.1764·1015 + 1.12308·105 +
+     14·1.787569) / 14 = 22.99967`. After **one** step: `w = 0.80955`,
+     `b = 0.08974` (`∂/∂w = -2/14·Σx·y = -80.955`, `∂/∂b = -2/14·Σy =
+     -8.974`), to 1e-3 in float32. After 49 `BackwardStep`s loss < 0.25;
+     `Apply(Constant(0))` on both resets the loss to the initial value;
+     `SetLearningRate(1e-10)` and 49 more steps change it by < 1e-5.
+  4. Adam: parameter `p = [1, -2]`, `loss = sum(p²)`, `Adam(VS, 0.1)`, one
+     `BackwardStep` → `p = [0.9, -1.9]` to 1e-6: Adam's first step is
+     `-lr·g/(|g| + eps)`, i.e. `lr·sign(g)`.
+  5. Gradient clipping: the numbers of 4.6.4.
+  6. Lazy add: create the optimizer, then add a trainable variable, one
+     `BackwardStep` changes it; a variable in group 1 with
+     `SetLearningRateGroup(1, 0)` does not move while group 0 does.
+  7. Save → Load (tch-rs `save_and_load_var_store`): under `NoGradGuard`
+     `u += 42`, `v *= 2`; `Save` to a temp `.ot`; a second store with the
+     same layout `Load`s it: means 42 and 2; nested names round-trip through
+     `|`. `Load` into a store with an extra variable raises `ETorchError`
+     naming it; `LoadPartial` returns `['a.b.t2']` (tch-rs
+     `…_incomplete_file`); `SetFloatKind(kHalf)`, save, load into a float
+     store → variables are `kHalf` with the same means (H15).
+  8. Layers: `TConv2D(1, 1, 3)` with `Padding 1`, `Bias False`, weights
+     filled with 1 on `[[1, 2], [3, 4]]` (NCHW `[1, 1, 2, 2]`): zeros
+     padding → `[10, 10, 10, 10]`, reflect → `[27, 24, 21, 18]`, circular
+     → `[27, 24, 21, 18]`, replicate → `[18, 21, 24, 27]` (tch-rs `conv`
+     test). `TBatchNorm(1, 40)` registers 4 variables (2 with `Affine`
+     False), forward on `[10, 40]` in train mode runs; `[10, 40, 3, 3]`
+     raises. `TLayerNorm([2])` fit (tch-rs `layer_norm_parameters_test`:
+     `xs = [[42, 42], [42, 24]]`, SGD lr 1.0, initial loss > 1, after 49
+     steps < 0.25). `TEmbedding(10, 4)` on `randint(10, [5, 7])` gives
+     `[5, 7, 4]` and the `PaddingIdx` row equals `Weight`'s row. `TLinear`
+     registers `weight` and `bias` (`Count` 2, or 1 without bias).
+  9. Sequential: `AddFn(@Relu)` on `[1, -1, 2]` → `[1, 0, 2]`; a
+     `TTensorFuncT` that records `Train` sees the flag passed by
+     `Forward(X, True)`; `ForwardAll` returns one tensor per layer.
+  10. `TchLiveHandles` returns to its starting value after freeing the
+      optimizer, the layers and the store, in that order.
+- **What the mock can cover** (extend `tests/mock/mock_tch.c`, plumbing
+  only): `ato_*` stubs over a counter struct (adds per group, zero_grad and
+  step counts, exposed as `mock_opt_*`) → construction and lazy-add counts;
+  `at_save_multi` recording the names → `.`→`|` mapping and order;
+  `at_load_callback_with_device` calling back with `a|b|t2`, `t1` and mock
+  tensors, plus a file name that sets the error slot after the first
+  callback → trampoline, `|`→`.` mapping, error ordering;
+  `atg_set_requires_grad`, `atg_set_data`, `atg_fill_`, `atg_uniform_`
+  (shape-only) → store bookkeeping, `Freeze`, `TInit` plumbing;
+  `TSequential` / `TFuncModule` chaining over `add_scalar`. Not coverable
+  there: anything numerical (distributions, QR, `linear`, `conv2d`,
+  `batch_norm`, backward, `step`), which is the real-libtorch test above.
 
 ### 4.7 Grad mode and global settings
 
@@ -1121,3 +1659,9 @@ earlier `tests/ownership`, `tests/fpu`, `tests/abi`, `tests/mock`,
 `tests/compiler`. Autograd basics (`requires_grad_`, `Backward`, `grad`,
 `NoGradGuard`) are in; optimizers, VarStore/nn (4.6), JIT and CUDA are
 next, in that order.
+
+**Milestone 2 (designed in cloud session 4, 2026-10-10):** everything in
+4.6 except JIT — `TInit`, `TVarStore`/`TVarPath`, save/load, `TOptimizer`,
+`TLinear`, `TConv2D`, `TBatchNorm`, `TLayerNorm`, `TEmbedding`,
+`TFuncModule`, `TSequential` — with the acceptance test of 4.6.7. Order
+of implementation and the new hypotheses H13–H18 are in HANDOFF.md.

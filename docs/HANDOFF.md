@@ -4,7 +4,121 @@ Japanese version: [HANDOFF_jp.md](HANDOFF_jp.md)
 
 Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 
-## Handing back to the cloud (2026-10-10, end of local session 2)
+## Cloud session 4 (2026-10-10): DESIGN 4.6 settled
+
+The request below ("Handing back to the cloud, end of local session 2") is
+answered: DESIGN.md 4.6 now has the interface sketch plus subsections
+4.6.1–4.6.7, each grounded in a named tch-rs file at 4227b89b. Nothing was
+committed; no code was written outside the scratchpad. Summary of the
+decisions:
+
+1. **Init (4.6.1).** `TInit` carries `Kind`, `A`, `B`, and the Kaiming
+   payload (`Dist`, `Fan`, `NonLin`, `Gain`). Fan and gain formulas from
+   `init.rs` (fan-in = `Dims[1] * prod(Dims[2..])`, ReLU gain `sqrt(2)`,
+   uniform bound `sqrt(3) * gain / sqrt(fan)`). `Make` = `f_init` op for op
+   (`zeros`/`ones`/`mul_scalar`, `uniform_`, `randn`, `empty.normal_`,
+   `t_`, `linalg_qr(…, 'reduced', Q, R)`, `diag(0).sign`, `mul_`,
+   `mul_scalar_`, `contiguous`, then `.view(Dims)` — the one stated
+   deviation, PyTorch's shape rule). No grad guard in `Make`; `Apply`
+   (tch-rs `Init::set`) guards itself. Store kind is used everywhere tch-rs
+   hard-codes `Float`.
+2. **Store (4.6.2).** Append-only `array of TVarEntry` (name, tensor,
+   trainable, group) + `array of Integer` of trainable indices (tch-rs
+   `trainable_variables`) + `TDictionary<String, Integer>` index (measured
+   on 3.2.2, case-sensitive). Duplicate `Add` renames to `<name>__<Count>`
+   as tch-rs; `.`, `|` and empty names raise; `GetOrAdd` returns the
+   existing tensor regardless of dims. `Freeze`/`Unfreeze` =
+   `set_requires_grad` on the trainable entries; `SetDevice`/`SetKind` =
+   `set_data(to/totype)` in place; `SetFloatKind` for the `half()` family;
+   `CopyFrom` two-pass, under `NoGradGuard`. Equality/containers question
+   closed: no `=` on `TTensor` needed.
+3. **Save/Load (4.6.3).** `Save` → `at_save_multi` (`.`→`|`); `Load` /
+   `LoadPartial` → `at_load_callback_with_device` (`.bin`/`.pt` →
+   `at_loadz_callback_with_device`; `.safetensors` raises). `cdecl`
+   trampoline with a `TLoadContext` class instance in `data`, exception
+   captured with `AcquireExceptionObject`, re-raised after the C call,
+   error slot cleared on every path; measured with a C harness. Precision
+   update on load (`set_data(totype(file kind))` then copy) as tch-rs.
+   `at_load_multi[_]` unused.
+4. **Optimizers (4.6.4).** `PTorchOptimizer = Pointer`, externals as in
+   `torch_api.h`; construction adds all trainable entries, `ZeroGrad`/
+   `Step`/`BackwardStep*` lazily add new ones (`FVarsInOptimizer`).
+   Defaults from `nn/optimizer.rs` (AdamW weight decay 0.01, RmsProp alpha
+   0.99). `ClipGradValue` = `grad.clamp_`; `ClipGradNorm` = `norm` per
+   grad, `stack(...).norm`, `mul_scalar_(coef)`; both under `NoGradGuard`.
+   **Fork bug found:** `ato_set_momentum_group` has `} if` instead of
+   `} else if` (`torch_api.cpp:564`), to be patched locally.
+5. **Layers (4.6.5).** `TLinear` (`linear`), `TConv2D` (`conv2d`, scalar
+   `ConvConfig`, padding modes via `pad`), `TBatchNorm` (Nd 1/2/3,
+   `batch_norm`, uses `Train`), `TLayerNorm` (`layer_norm`), `TEmbedding`
+   (`embedding`), dropout as a function. Defaults and variable names per
+   tch-rs file in the 4.6.5 table. Conv1D/3D, ConvTranspose, GroupNorm,
+   LSTM/GRU deferred to milestone 3.
+6. **Sequential (4.6.6).** `specialize TObjectList<TModule>`; `AddFn` with
+   four overloads (function, function+Train, method, method+Train;
+   resolution measured); `Train` passed to every child; `ForwardAll`.
+7. **Unit/tests (4.6.7).** Single `TchNN.pas`; `TchSys` gets the
+   optimizer/save/load externals, `Tch.pas` gets `TTensor.CopyFrom`;
+   `tests/nn/nn_test.pas` with the hand-checkable numbers listed there
+   (initial loss 22.99967, first SGD step `w = 0.80955`, `b = 0.08974`,
+   Adam first step `lr·sign(g)`, clip numbers from tch-rs, conv padding
+   vectors, `LoadPartial → ['a.b.t2']`); the mock covers bookkeeping,
+   callback and lazy-add counts only.
+
+**Measurements in the cloud (FPC 3.2.2, gcc 13; scratchpad only):**
+- M1: `cdecl` trampoline called three times from a C harness with a class
+  instance in `data`; `AcquireExceptionObject` in the handler, re-raise after
+  the call: class and message intact, later callbacks skipped, all handles
+  owned.
+- M2: `Generics.Collections` with `TTensor` against the mock libtch:
+  `TDictionary<String, Integer>` case-sensitive, duplicate `Add` →
+  `EListError`; `array of record` with a `TTensor` field and
+  `TList<TTensor>` release handles correctly (only the H1 expression
+  temporary lingers until routine exit); `TObjectList<TModule>` with an
+  abstract base and `for .. in` works; `Contnrs.TObjectList` too.
+- M3: four `AddFn` overloads on function / method pointers with and without
+  `Train` resolve unambiguously in objfpc, chaining works.
+- Side effect: `build/mock/libtch.so` was stale (built before local session
+  2's stubs) and has been rebuilt with `tests/mock/run.sh` (45 checks pass).
+  `build/` is git-ignored; nothing to commit.
+
+**New hypotheses (need real libtorch):**
+- **(H13)** `set_data` keeps shared handles in sync: after `SetDevice` /
+  `SetKind` a layer's `Weight` and an optimizer created earlier see the new
+  storage (tch-rs relies on this).
+- **(H14)** Orthogonal init: `Q·Qᵀ = I` for `[3, 5]`, `Qᵀ·Q = I` for `[5, 3]`
+  (`allclose` 1e-5), result shape = `Dims`.
+- **(H15)** Load precision update: a `kFloat` store loading a `kHalf` file
+  ends up `kHalf` with the right values.
+- **(H16)** Unpatched `ato_set_momentum_group` raises "unexpected optimizer"
+  on Adam; patched (`} else if`) does not.
+- **(H17)** `TInit.Apply` on a trainable leaf fails without `NoGradGuard`
+  ("a leaf Variable that requires grad is being used in an in-place
+  operation") and works with it.
+- **(H18)** `Freeze; Step` leaves the values unchanged and raises nothing
+  (libtorch skips parameters with an undefined grad).
+
+**Local session, in this order (mechanical):**
+1. Fork patch: `csrc/libtch/torch_api.cpp` `ato_set_momentum_group`:
+   `} if (auto sgd` → `} else if (auto sgd`; rebuild libtch; `tests/abi`,
+   `tests/mock/run.sh`.
+2. `src/TchSys.pas`: `PTorchOptimizer`, `TTorchLoadCallback`,
+   `at_save_multi`, `at_load_callback_with_device`,
+   `at_loadz_callback_with_device`, the 13 `ato_*` (4.6.4 lists the
+   signatures). `src/Tch.pas`: `TTensor.CopyFrom`.
+3. `src/TchNN.pas`, in this order so each part compiles alone: `TInit`
+   (4.6.1) → `TVarPath`/`TVarStore` without save/load (4.6.2) → save/load
+   (4.6.3) → `TOptimizer` (4.6.4) → `TModule`, `TFuncModule`, `TSequential`
+   (4.6.6) → the five layers (4.6.5).
+4. `tests/nn/nn_test.pas` with the ten groups of 4.6.7, checking H13–H18
+   as they come up; record each result next to the (Hn) in DESIGN.md.
+5. Mock: add the stubs of 4.6.7 to `tests/mock/mock_tch.c` and a
+   `tests/mock/nn_mock_test.pas` (or extend `mock_test.pas`) for the
+   bookkeeping checks.
+6. Update DESIGN/HANDOFF (en + jp); then hand JIT (`TchJit`) and CUDA back
+   to a design session if needed.
+
+## Handing back to the cloud (2026-10-10, end of local session 2) — answered in cloud session 4 above
 
 **Design only.** Do not write committed code (units, generator, tests);
 small throwaway measurements to settle a question are fine (CLAUDE.md).
@@ -201,7 +315,7 @@ committed code does.
     single-letter op names.
   - `tests/mock/mock_tch.c` got stubs for the new hand-written externals.
 
-Next: cloud design session for DESIGN 4.6 (request at the top of this file).
+Next: done in cloud session 4 (see the top of this file); then the local implementation of milestone 2 as listed there.
 
 Local session, in this order (all mechanical):
 
@@ -476,13 +590,15 @@ build commands in each test's header and in "Local progress".
   added; no `overload` directive is needed in `objfpc` (measured), but
   tchgen uses `overload;` as the marker for deliberate overloads
   (DESIGN.md 4.4). Still open: `topk(k)`-style defaults for out-param ops.
-- **Equality and containers.** `=` is deliberately not overloaded for
-  `TTensor`, which rules out FGL (`TFPGList<TTensor>`). Confirm
-  `Generics.Collections.TList<TTensor>` and plain `TTensorArray` cover the
-  needs of `TchNN`; otherwise reconsider an identity `=`.
-- **Train flag.** `Forward(X, Train)` parameter (decided) vs a PyTorch-style
-  `Training` property propagated through children. Revisit once
-  `TSequential` and a custom-model example exist.
+- **Equality and containers: decided** (cloud session 4). `=` stays
+  un-overloaded for `TTensor`. `TchNN` needs only an append-only
+  `array of TVarEntry`, a `TDictionary<String, Integer>` name index and
+  `TObjectList<TModule>`; all measured on 3.2.2 (DESIGN.md 4.6.2, 4.6.6).
+  `TList<TTensor>` also works (byte comparer = handle identity) if ever
+  needed.
+- **Train flag: decided** (cloud session 4). `Forward(X, Train)` stays;
+  `TSequential` passes `Train` to every child and a user `TModule` passes it
+  on explicitly (DESIGN.md 4.6.6). No `Training` property.
 - **`TIValue` representation.** Tagged record: decided, and H10 confirmed
   it compiles (step 7). Copies share `Items`; treat as immutable.
 - **VarStore thread safety.** Documented as not thread-safe; add a

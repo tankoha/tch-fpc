@@ -4,7 +4,108 @@
 
 再開するときは最初にこれを読んでください。決定事項と理由は [DESIGN_jp.md](DESIGN_jp.md) にあります。
 
-## クラウドへの引き継ぎ（2026-10-10、ローカルセッション2の終了時点）
+## クラウドセッション4（2026-10-10）：DESIGN 4.6 を確定
+
+下の依頼（「クラウドへの引き継ぎ、ローカルセッション2の終了時点」）に回答しました：
+DESIGN.md 4.6 にインターフェースのスケッチと小節 4.6.1〜4.6.7 を書き、それぞれ
+4227b89b の tch-rs の具体的なファイルに根拠を置いています。何もコミットしておらず、
+スクラッチパッドの外にコードは書いていません。決定事項の要約：
+
+1. **初期化（4.6.1）。** `TInit` は `Kind`、`A`、`B` と Kaiming のペイロード（`Dist`、
+   `Fan`、`NonLin`、`Gain`）を持つ。fan と gain の式は `init.rs` から（fan-in =
+   `Dims[1] * prod(Dims[2..])`、ReLU の gain `sqrt(2)`、一様分布の範囲
+   `sqrt(3) * gain / sqrt(fan)`）。`Make` = `f_init` を op 単位で（`zeros`/`ones`/
+   `mul_scalar`、`uniform_`、`randn`、`empty.normal_`、`t_`、
+   `linalg_qr(…, 'reduced', Q, R)`、`diag(0).sign`、`mul_`、`mul_scalar_`、`contiguous`、
+   最後に `.view(Dims)` — 唯一の明示した差異で、PyTorch の形の規則）。`Make` に勾配
+   ガードはなし。`Apply`（tch-rs の `Init::set`）は自分でガードする。tch-rs が `Float` を
+   直書きしている箇所はどこでもストアの kind を使う。
+2. **ストア（4.6.2）。** 追加のみの `array of TVarEntry`（名前、テンソル、trainable、
+   グループ）+ 学習対象の添字の `array of Integer`（tch-rs の `trainable_variables`）+
+   `TDictionary<String, Integer>` の索引（3.2.2 で計測、大文字小文字を区別）。重複する
+   `Add` は tch-rs と同じく `<name>__<Count>` に改名。`.`、`|`、空の名前は例外。
+   `GetOrAdd` は次元にかかわらず既存のテンソルを返す。`Freeze`/`Unfreeze` = 学習対象の
+   要素への `set_requires_grad`。`SetDevice`/`SetKind` = その場での `set_data(to/totype)`。
+   `half()` 系には `SetFloatKind`。`CopyFrom` は2パスで、`NoGradGuard` の下。
+   等価性/コンテナの論点は閉じた：`TTensor` に `=` は不要。
+3. **Save/Load（4.6.3）。** `Save` → `at_save_multi`（`.`→`|`）。`Load` / `LoadPartial` →
+   `at_load_callback_with_device`（`.bin`/`.pt` → `at_loadz_callback_with_device`、
+   `.safetensors` は例外）。`data` に `TLoadContext` クラスのインスタンスを渡す `cdecl` の
+   トランポリン。例外は `AcquireExceptionObject` で捕まえ、C の呼び出し後に再 raise。
+   エラースロットはどの経路でも空にする。C のハーネスで計測済み。読み込み時の精度の
+   更新（`set_data(totype(ファイルの kind))` してからコピー）は tch-rs と同じ。
+   `at_load_multi[_]` は使わない。
+4. **オプティマイザ（4.6.4）。** `PTorchOptimizer = Pointer`、external は `torch_api.h`
+   のとおり。構築時にすべての学習対象の要素を追加し、`ZeroGrad`/`Step`/`BackwardStep*` が
+   新しいものを遅延追加（`FVarsInOptimizer`）。デフォルト値は `nn/optimizer.rs` から
+   （AdamW の weight decay 0.01、RmsProp の alpha 0.99）。`ClipGradValue` =
+   `grad.clamp_`。`ClipGradNorm` = 勾配ごとの `norm`、`stack(...).norm`、
+   `mul_scalar_(coef)`。どちらも `NoGradGuard` の下。**フォークのバグを発見：**
+   `ato_set_momentum_group` が `} else if` ではなく `} if`（`torch_api.cpp:564`）。
+   ローカルでパッチする。
+5. **レイヤー（4.6.5）。** `TLinear`（`linear`）、`TConv2D`（`conv2d`、スカラーの
+   `ConvConfig`、padding モードは `pad` 経由）、`TBatchNorm`（Nd 1/2/3、`batch_norm`、
+   `Train` を使う）、`TLayerNorm`（`layer_norm`）、`TEmbedding`（`embedding`）、関数と
+   しての dropout。デフォルト値と変数名は 4.6.5 の表に tch-rs のファイルごとに。
+   Conv1D/3D、ConvTranspose、GroupNorm、LSTM/GRU はマイルストーン3へ。
+6. **Sequential（4.6.6）。** `specialize TObjectList<TModule>`。`AddFn` は4つの
+   オーバーロード（関数、関数+Train、メソッド、メソッド+Train。解決を計測済み）。`Train`
+   を全ての子に渡す。`ForwardAll`。
+7. **ユニット/テスト（4.6.7）。** `TchNN.pas` 1つ。`TchSys` にオプティマイザ/save/load の
+   external、`Tch.pas` に `TTensor.CopyFrom`。そこに挙げた手計算できる数値による
+   `tests/nn/nn_test.pas`（初期 loss 22.99967、SGD の最初のステップ `w = 0.80955`、
+   `b = 0.08974`、Adam の最初のステップ `lr·sign(g)`、tch-rs のクリッピングの数値、conv の
+   padding のベクトル、`LoadPartial → ['a.b.t2']`）。mock は帳簿、コールバック、遅延追加の
+   回数だけを確認する。
+
+**クラウドでの計測（FPC 3.2.2、gcc 13。スクラッチパッドのみ）：**
+- M1：`data` にクラスのインスタンスを渡し、C のハーネスから `cdecl` のトランポリンを
+  3回呼ぶ。ハンドラで `AcquireExceptionObject`、呼び出し後に再 raise：クラスと
+  メッセージは無傷、以後のコールバックは飛ばされ、ハンドルはすべて所有される。
+- M2：mock の libtch に対する `TTensor` と `Generics.Collections`：
+  `TDictionary<String, Integer>` は大文字小文字を区別し、重複する `Add` → `EListError`。
+  `TTensor` フィールドを持つ `array of record` と `TList<TTensor>` はハンドルを正しく
+  解放する（H1 の式の一時変数だけがルーチン終了まで残る）。抽象基底クラスと `for .. in`
+  での `TObjectList<TModule>` が動く。`Contnrs.TObjectList` も動く。
+- M3：関数ポインタ / メソッドポインタ、`Train` あり・なしの4つの `AddFn` オーバーロードは
+  objfpc で曖昧さなく解決し、チェーンも動く。
+- 副作用：`build/mock/libtch.so` が古かった（ローカルセッション2のスタブより前にビルド）
+  ので `tests/mock/run.sh` で再ビルドした（45件のチェックが通る）。`build/` は
+  git-ignore されているので、コミットするものはない。
+
+**新しい仮説（本物の libtorch が必要）：**
+- **(H13)** `set_data` は共有ハンドルを同期させる：`SetDevice` / `SetKind` のあと、
+  レイヤーの `Weight` と先に作ったオプティマイザが新しいストレージを見る（tch-rs は
+  これに依存している）。
+- **(H14)** Orthogonal 初期化：`[3, 5]` で `Q·Qᵀ = I`、`[5, 3]` で `Qᵀ·Q = I`
+  （`allclose` 1e-5）、結果の形 = `Dims`。
+- **(H15)** 読み込み時の精度の更新：`kHalf` のファイルを読んだ `kFloat` のストアは
+  正しい値の `kHalf` になる。
+- **(H16)** パッチ前の `ato_set_momentum_group` は Adam で "unexpected optimizer" を
+  投げ、パッチ後（`} else if`）は投げない。
+- **(H17)** 学習対象の葉への `TInit.Apply` は `NoGradGuard` なしで失敗し（"a leaf
+  Variable that requires grad is being used in an in-place operation"）、ありで成功する。
+- **(H18)** `Freeze; Step` は値を変えず、例外も出ない（libtorch は grad が未定義の
+  パラメータを飛ばす）。
+
+**ローカルセッション、この順に（機械的）：**
+1. フォークのパッチ：`csrc/libtch/torch_api.cpp` の `ato_set_momentum_group`：
+   `} if (auto sgd` → `} else if (auto sgd`。libtch を再ビルド。`tests/abi`、
+   `tests/mock/run.sh`。
+2. `src/TchSys.pas`：`PTorchOptimizer`、`TTorchLoadCallback`、`at_save_multi`、
+   `at_load_callback_with_device`、`at_loadz_callback_with_device`、13個の `ato_*`
+   （シグネチャは 4.6.4 に）。`src/Tch.pas`：`TTensor.CopyFrom`。
+3. `src/TchNN.pas`。各部分が単独でコンパイルできるようこの順に：`TInit`（4.6.1）→
+   save/load なしの `TVarPath`/`TVarStore`（4.6.2）→ save/load（4.6.3）→ `TOptimizer`
+   （4.6.4）→ `TModule`、`TFuncModule`、`TSequential`（4.6.6）→ 5つのレイヤー（4.6.5）。
+4. 4.6.7 の10グループによる `tests/nn/nn_test.pas`。出てきた順に H13〜H18 を確認し、
+   結果を DESIGN.md の各 (Hn) の横に記録する。
+5. mock：4.6.7 のスタブを `tests/mock/mock_tch.c` に足し、帳簿のチェックのために
+   `tests/mock/nn_mock_test.pas`（または `mock_test.pas` の拡張）を書く。
+6. DESIGN/HANDOFF（英語・日本語）を更新。その後、必要なら JIT（`TchJit`）と CUDA を
+   設計セッションに戻す。
+
+## クラウドへの引き継ぎ（2026-10-10、ローカルセッション2の終了時点）— 上のクラウドセッション4で回答済み
 
 **設計のみ。** コミットするコード（ユニット、生成器、テスト）は書かないこと。
 論点を決めるための小さな使い捨ての計測はよい（CLAUDE.md）。実装はローカル
@@ -183,7 +284,7 @@ FPC 3.2.2 を入れ、OCaml は apt から（`yaml` は入らなかった：opam
     op 名を避ける。
   - `tests/mock/mock_tch.c` に新しい手書き external のスタブを追加。
 
-次：DESIGN 4.6 のクラウド設計セッション（依頼はこのファイルの先頭）。
+次：クラウドセッション4で完了（このファイルの先頭）。続けて、そこに挙げたマイルストーン2のローカル実装。
 
 ローカルセッションでやること（この順で。すべて機械的）：
 
@@ -446,12 +547,14 @@ DESIGN_jp.md の各 (Hn) の横）。手順8のための OCaml の環境はロ�
   ローカルセッション2：`zeros`、`ones`、`empty`、`rand`、`randn` のオーバーロードを
   追加。`objfpc` では `overload` 指示子は不要（実測）だが、tchgen は意図した
   オーバーロードの目印に `overload;` を使う（DESIGN_jp.md の 4.4）。未決：out 引数の op に `topk(k)` 型のデフォルト。
-- **等価性とコンテナ。** `TTensor` では `=` を意図的にオーバーロードしていないので、
-  FGL（`TFPGList<TTensor>`）は使えない。`TchNN` に必要なことが
-  `Generics.Collections.TList<TTensor>` と素の `TTensorArray` で足りるか確認する。
-  足りなければ、ハンドルの同一性による `=` を再検討する。
-- **Train フラグ。** `Forward(X, Train)` の引数（決定済み）か、子へ伝播する PyTorch 風の
-  `Training` プロパティか。`TSequential` と独自モデルの例ができてから見直す。
+- **等価性とコンテナ：決定**（クラウドセッション4）。`TTensor` の `=` は
+  オーバーロードしないまま。`TchNN` に必要なのは追加のみの `array of TVarEntry`、
+  `TDictionary<String, Integer>` の名前の索引、`TObjectList<TModule>` だけで、
+  すべて 3.2.2 で計測済み（DESIGN_jp.md 4.6.2、4.6.6）。必要になれば
+  `TList<TTensor>` も動く（バイト比較 = ハンドルの同一性）。
+- **Train フラグ：決定**（クラウドセッション4）。`Forward(X, Train)` のまま。
+  `TSequential` が `Train` を全ての子に渡し、ユーザーの `TModule` は明示的に渡す
+  （DESIGN_jp.md 4.6.6）。`Training` プロパティは作らない。
 - **`TIValue` の表現。** タグ付き record：決定済みで、H10 でコンパイルできることを確認
   （手順7）。コピーすると `Items` を共有するので、変更しないものとして扱う。
 - **VarStore のスレッドセーフ性。** スレッドセーフでないと明記している。データ読み込み用の

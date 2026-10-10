@@ -11,3 +11,5 @@ backup/
 libtorch/
 # CMake build trees
 build/
+# dune build tree (gen/)
+_build/

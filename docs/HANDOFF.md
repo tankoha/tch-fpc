@@ -118,6 +118,17 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
   - Record with 2,657 methods via `{$I}` (with a managed field): compiles
     in about 1 s (-O2: 1.6 s); a `default` indexed property gives `T[5][2]`.
 
+- **OCaml toolchain ready (step 8 prerequisite).** `ocaml` 5.4.0 and
+  `opam` 2.5.0 from apt (`yaml` is not packaged in Ubuntu, hence opam).
+  `opam init --bare --no-setup` (shell rc files untouched), switch
+  `tch-fpc` on `ocaml-system`, `opam install dune base stdio yaml`. Use
+  `eval $(opam env --switch=tch-fpc)` before building; then
+  `cd gen && dune build ./gen.exe` builds warning-free. Run from a tch-rs
+  checkout at 4227b89b (it reads
+  `third_party/pytorch/Declarations-v2.13.0.yaml` and writes upstream
+  paths), the patched gen.exe reproduces `csrc/libtch/torch_api_generated.{h,cpp}`
+  byte for byte (2657 functions, 0.5 s).
+
 ## Next steps (local implementation)
 
 1. **Toolchain check.** FPC 3.2.2, g++, CMake, libtorch 2.13.0 CPU

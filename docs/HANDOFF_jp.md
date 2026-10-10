@@ -117,6 +117,16 @@
     約1秒でコンパイルできる（-O2 で 1.6 秒）。`default` のインデックス付きプロパティで
     `T[5][2]` と書ける。
 
+- **OCaml の環境を用意（手順8の前提）。** apt の `ocaml` 5.4.0 と `opam` 2.5.0
+  （Ubuntu に `yaml` のパッケージがないので opam を使う）。
+  `opam init --bare --no-setup`（シェルの設定ファイルには触れない）、`ocaml-system` を
+  使うスイッチ `tch-fpc`、`opam install dune base stdio yaml`。ビルドの前に
+  `eval $(opam env --switch=tch-fpc)` を実行し、`cd gen && dune build ./gen.exe` で
+  警告なしにビルドできる。4227b89b の tch-rs のチェックアウトで実行すると
+  （`third_party/pytorch/Declarations-v2.13.0.yaml` を読み、上流のパスに書き出す）、
+  パッチ済みの gen.exe は `csrc/libtch/torch_api_generated.{h,cpp}` をバイト単位で
+  再現する（2657 関数、0.5 秒）。
+
 ## 次の作業（ローカル実装）
 
 1. **ツールの確認。** FPC 3.2.2、g++、CMake を用意し、libtorch 2.13.0 の CPU 版

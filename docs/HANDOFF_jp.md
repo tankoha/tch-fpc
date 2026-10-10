@@ -63,7 +63,22 @@
    `FromSingles`/`FromDoubles` を足すか、オーバーロードの組を変えるか（例：`Single` を
    外して実数リテラルを `Double` にする。PyTorch の既定 float32 とはずれる）を決める。
    `[1.0, 0.1]` が黙って丸められる点も考慮。
-3. **任意、後で：** マイルストーン3のレイヤー（DESIGN 4.6.5 の先送り一覧）、CUDA/ROCm
+3. **ローカルセッション3で設計どおりにならなかった点の確認**（詳細は上の
+   「ローカルセッション3」と DESIGN_jp.md の各項目の横）。それぞれ承認または修正し、
+   DESIGN 4.6 / 4.6.7 をコードとテストの現状に合わせる：
+   - 4.6.7 テスト3：lr 1e-10 の上限。DESIGN には tch-rs の判定は符号付きで、loss は
+     3.25e-5（手計算）／3.24e-5（実測）下がると書いた。計算を確認すること。
+   - 4.6.7 テスト7：`LoadPartial → ['a.b.t2']` は tch-rs の `add_partial` の構成
+     （`t123` は1回）が必要。完全な構成だと `a.b.ccc.t123__3` も欠ける。DESIGN 4.6.7 は
+     まだ直していない。
+   - スケッチにない追加：`TVarPath.Group`。`TVarPath.FullName` が名前を検査する
+     （`TryGet` も `.`/`|` を拒否する）。`AddEntry` は nil テンソルで例外。
+   - private の `TOptimizer.CreateRaw` への FPC の警告「Constructor should be public」：
+     private のままでよいか、別の生成パターンにするか。
+   - 4.6.7 にないテストの追加（AdamW の1ステップ目 `[0.899, -1.898]`、存在しない
+     ファイルの Load、`CopyFrom`、部分木の `SetKind`、MLP、`AddFn` へのメソッド
+     ポインタ）：4.6.7 に取り込むか、テストだけに置くか。
+4. **任意、後で：** マイルストーン3のレイヤー（DESIGN 4.6.5 の先送り一覧）、CUDA/ROCm
    （H13 の実際のデバイス移動は未確認。ここまで CPU のみ）。
 
 最後にいつもどおり DESIGN/HANDOFF（英日）を更新すること。

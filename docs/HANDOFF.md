@@ -71,7 +71,26 @@ Steps 1–5 of cloud session 4's list (below) are done; every test passes.
    rule only, add named `FromSingles`/`FromDoubles`, or change the overload
    set (e.g. drop `Single` so real literals pick `Double`, which breaks
    PyTorch's float32 default). Consider also `[1.0, 0.1]` rounding silently.
-3. **Optional, later:** milestone 3 layers (DESIGN 4.6.5 deferred list),
+3. **Review the deviations of local session 3 from the design** (details in
+   "Local session 3" above and next to each item in DESIGN.md). Confirm
+   or correct each, and make DESIGN 4.6 / 4.6.7 say what the code and
+   tests now do:
+   - 4.6.7 test 3: the lr 1e-10 bound. DESIGN now says tch-rs's check is
+     signed and the loss drops by 3.25e-5 (hand) / 3.24e-5 (measured);
+     check the arithmetic.
+   - 4.6.7 test 7: `LoadPartial → ['a.b.t2']` needs tch-rs's
+     `add_partial` layout (`t123` once); with the full layout
+     `a.b.ccc.t123__3` is missing too. Not yet corrected in DESIGN 4.6.7.
+   - Additions not in the sketch: `TVarPath.Group`; `TVarPath.FullName`
+     validates the name (so `TryGet` rejects `.`/`|` too); `AddEntry`
+     raises on a nil tensor.
+   - FPC warning "Constructor should be public" for the private
+     `TOptimizer.CreateRaw`: keep private, or another construction
+     pattern?
+   - Test additions beyond 4.6.7 (AdamW first step `[0.899, -1.898]`, Load
+     of a missing file, `CopyFrom`, sub-tree `SetKind`, MLP, method
+     pointers in `AddFn`): adopt into 4.6.7 or leave as test-only.
+4. **Optional, later:** milestone 3 layers (DESIGN 4.6.5 deferred list),
    CUDA/ROCm (H13's real device move is untested; CPU only so far).
 
 Keep DESIGN/HANDOFF (en + jp) current at the end, as usual.

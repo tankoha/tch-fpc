@@ -1,6 +1,7 @@
 // Modified for tch-fpc from tch-rs 4227b89b72059b0651ff83a38637693574e0a2d6 (torch-sys/libtch):
 // stream/image declarations removed, PROTECT also catches (...),
-// tchf_free added, C branch includes stddef.h and stdbool.h.
+// tchf_free and atm_create/atm_register_parameter/atm_define added,
+// C branch includes stddef.h and stdbool.h.
 #ifndef __TORCH_API_H__
 #define __TORCH_API_H__
 #include<stdint.h>
@@ -232,6 +233,12 @@ void atm_named_parameters(module, void *data, void (*f)(void *, char *, tensor))
 // This function has to be followed by a call to atm_end_tracing.
 module atm_create_for_tracing(char *modl_name, tensor *inputs, int ninputs);
 void atm_end_tracing(module m, char *fn_name, tensor *outputs, int noutputs);
+// tch-fpc: build a scripted module from Pascal (TorchScript source through
+// Module::define). atm_create registers the "training" attribute that
+// Module::train() and self.training need.
+module atm_create(char *modl_name);
+void atm_register_parameter(module m, char *name, tensor t, bool is_buffer);
+void atm_define(module m, char *src);
 
 ivalue ati_none();
 ivalue ati_tensor(tensor);

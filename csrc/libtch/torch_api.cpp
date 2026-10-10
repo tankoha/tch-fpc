@@ -1,5 +1,6 @@
 // Modified for tch-fpc from tch-rs 4227b89b72059b0651ff83a38637693574e0a2d6 (torch-sys/libtch):
-// stream adapters, stream and stb image functions removed, tchf_free added.
+// stream adapters, stream and stb image functions removed, tchf_free added;
+// atm_create, atm_register_parameter and atm_define added.
 #include "torch_api.h"
 #include <ATen/autocast_mode.h>
 #include <stdexcept>
@@ -904,6 +905,22 @@ void atm_end_tracing(module m, char *fn_name, tensor *outputs, int noutputs) {
                                                                   state->graph);
       m->type()->addMethod(fn);)
 }
+
+// tch-fpc: build a scripted module from Pascal. Module::train() silently
+// skips a module without a "training" attribute, so it is registered here
+// as Python's ScriptModule has it.
+module atm_create(char *modl_name) {
+  PROTECT(auto m = new torch::jit::script::Module(modl_name);
+          m->register_attribute("training", c10::BoolType::get(), true);
+          return m;)
+  return nullptr;
+}
+
+void atm_register_parameter(module m, char *name, tensor t, bool is_buffer) {
+  PROTECT(m->register_parameter(name, *t, is_buffer);)
+}
+
+void atm_define(module m, char *src) { PROTECT(m->define(src);) }
 
 void atm_named_parameters(module m, void *data,
                           void (*f)(void *, char *, tensor)) {

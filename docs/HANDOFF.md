@@ -76,6 +76,39 @@ committed code does.
   `tests/compiler/run.sh` still passes. `tests/ownership/ownership_test.pas`
   compiles (not linked here; `ones` now takes `TDevice.Cpu`).
 
+## Local session 2 (2026-10-10): steps 1-5 below done
+
+- **1.** libtch rebuilt with the autocast patch; `tests/abi` passes and no
+  `[W` warning line is printed any more (the deprecated-API warning on every
+  `at_autocast_*` call is gone). `tests/fpu/run.sh`: same results as local
+  session 1.
+- **2.** gen.exe built with the real opam `yaml`; run against
+  `Declarations-v2.13.0.yaml` from tch-rs 4227b89b (sparse clone of that one
+  file, outside the repo): `ops.tsv` and `torch_api_generated.{h,cpp}`
+  **byte-identical**, so the cloud's stand-in YAML parser typed every
+  default the same way.
+- **3.** tchgen: no diff (2657 ops; 479 with defaults, 149 with out
+  parameters, 97 fill tensors passed in).
+- **4.** `tests/ownership` passes against real libtorch (RSS flat over 10^6
+  iterations, 1.4 s); `tests/mock/run.sh` passes.
+- **5.** New `tests/generated/generated_test.pas`, all passing, against
+  hand-worked values (no Python). Measured:
+  - `sum_dim_intlist`: `NoIntList` and `IntList([])` both reduce over all
+    dims (0-d, 15) for `sum`, as in PyTorch.
+  - `pad(..., 'constant', NoDouble)` fills 0; `9.0` converts to `TOptDouble`.
+  - `linalg_norm(2, NoIntList)` on a 2-d tensor is the **matrix** 2-norm
+    (largest singular value, sqrt 54 here), not the vector norm; my first
+    expectation (sqrt 55) was wrong, libtorch follows PyTorch's
+    `torch.linalg.norm`. On a 1-d tensor it is the vector norm.
+  - `to_sparse(ltNone, ...)` (nullopt layout) gives sparse COO like
+    `ltSparse`.
+  - **Error split verified** on a real message: `Message` = "mat1 and mat2
+    shapes cannot be multiplied (2x3 and 2x3)", `Detail` = 2,217 chars
+    starting with `Message` and containing `Exception raised from`.
+  - `TchLiveHandles = 0` at the end.
+
+Next: step 6 (hand-written API of milestone 1).
+
 Local session, in this order (all mechanical):
 
 1. **Build libtch** again: `csrc/libtch/torch_api.cpp` has the autocast
@@ -310,8 +343,8 @@ build commands in each test's header and in "Local progress".
 
 - **Native error message format: decided** (cloud session 3). `Message`
   = text before `#10'Exception raised from '`, `Detail` = full text
-  (DESIGN.md 4.2, implemented in `ETorchNativeError.Create`). Verify the
-  split once against a real libtorch message (step 5 above).
+  (DESIGN.md 4.2, implemented in `ETorchNativeError.Create`). Verified
+  against a real libtorch message in local session 2.
 - **`TKind` beyond 26: decided** (cloud session 3). Extended to all 46
   values of 2.13 plus `kNone = -1` for optional dtypes (DESIGN.md 4.3).
   Open: which kinds `FromArray`/`CopyData` support (element sizes), to be

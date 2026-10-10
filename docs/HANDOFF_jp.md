@@ -73,6 +73,36 @@ FPC 3.2.2 を入れ、OCaml は apt から（`yaml` は入らなかった：opam
   `tests/compiler/run.sh` も引き続き通る。`tests/ownership/ownership_test.pas` は
   コンパイルできる（ここではリンクしていない。`ones` は `TDevice.Cpu` を取るようになった）。
 
+## ローカルセッション2（2026-10-10）：下の手順1〜5完了
+
+- **1.** autocast のパッチ入りで libtch を再ビルド。`tests/abi` は合格し、
+  `[W` の警告行はもう出ない（`at_autocast_*` を呼ぶたびに出ていた非推奨 API の
+  警告が消えた）。`tests/fpu/run.sh` はローカルセッション1と同じ結果。
+- **2.** opam の本物の `yaml` で gen.exe をビルドし、tch-rs 4227b89b の
+  `Declarations-v2.13.0.yaml`（そのファイルだけを repo の外に sparse clone）で
+  実行：`ops.tsv` と `torch_api_generated.{h,cpp}` は**バイト単位で一致**。
+  クラウドの代替 YAML パーサーはデフォルト値をすべて同じ型で読んでいた。
+- **3.** tchgen：差分なし（2657 op、デフォルト引数あり 479、out 引数あり 149、
+  渡したテンソルに書き込むもの 97）。
+- **4.** `tests/ownership` は本物の libtorch で合格（10^6 回で RSS 一定、1.4 秒）。
+  `tests/mock/run.sh` も合格。
+- **5.** 新規 `tests/generated/generated_test.pas`、全件合格。期待値は手計算
+  （Python は使っていない）。実測したこと：
+  - `sum_dim_intlist`：`sum` では `NoIntList` も `IntList([])` も全次元で
+    縮約する（0 次元、15）。PyTorch と同じ。
+  - `pad(..., 'constant', NoDouble)` は 0 で埋める。`9.0` は `TOptDouble` に変換される。
+  - 2 次元テンソルの `linalg_norm(2, NoIntList)` は**行列**の 2 ノルム
+    （最大特異値、ここでは sqrt 54）で、ベクトルノルムではない。最初の期待値
+    （sqrt 55）は私の誤りで、libtorch は PyTorch の `torch.linalg.norm` どおり。
+    1 次元ならベクトルノルム。
+  - `to_sparse(ltNone, ...)`（レイアウトが nullopt）は `ltSparse` と同じく sparse COO。
+  - **エラーの分割を本物のメッセージで確認**：`Message` = "mat1 and mat2
+    shapes cannot be multiplied (2x3 and 2x3)"、`Detail` は 2,217 文字で
+    `Message` から始まり `Exception raised from` を含む。
+  - 終了時 `TchLiveHandles = 0`。
+
+次：手順6（マイルストーン1の手書き API）。
+
 ローカルセッションでやること（この順で。すべて機械的）：
 
 1. **libtch を再ビルド**：`csrc/libtch/torch_api.cpp` に autocast のパッチ
@@ -301,8 +331,8 @@ DESIGN_jp.md の各 (Hn) の横）。手順8のための OCaml の環境はロ�
 
 - **ネイティブのエラーメッセージの形：決定済み**（クラウドセッション3）。`Message` は
   `#10'Exception raised from '` より前の本文、`Detail` は全文（DESIGN_jp.md の 4.2。
-  `ETorchNativeError.Create` に実装済み）。本物の libtorch のメッセージで一度
-  分割を確認すること（上の手順5）。
+  `ETorchNativeError.Create` に実装済み）。ローカルセッション2で
+  本物の libtorch のメッセージで確認済み。
 - **26 を超える `TKind`：決定済み**（クラウドセッション3）。2.13 の 46 個全部に
   広げ、省略可能な dtype 用に `kNone = -1` を足した（DESIGN_jp.md の 4.3）。
   未決：`FromArray`/`CopyData` がどの kind を扱うか（要素サイズ）。手書き API と

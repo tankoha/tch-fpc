@@ -3,7 +3,9 @@
 Japanese version: [DESIGN_jp.md](DESIGN_jp.md)
 
 Decisions and their rationale. Open questions and next steps live in
-[HANDOFF.md](HANDOFF.md).
+[HANDOFF.md](HANDOFF.md). Statements about FPC 3.2.2 behaviour that have not
+been verified by building are marked **(H*n*)** and listed as verification
+steps in HANDOFF.md; treat them as hypotheses until then.
 
 Reference point for everything below: tch-rs commit
 `4227b89b72059b0651ff83a38637693574e0a2d6` (2026-08-23, crate 0.26.0),
@@ -15,8 +17,11 @@ which targets **libtorch 2.13.0** and generates from
 ```
  user code (Pascal)
       |
- [L3] Tch           TTensor (managed record), TDevice, TKind, ETorchError,
-      |             generated op methods; later TchNN / TchOptim / TchJit
+ [L3] Tch           TTensor (managed record), TDevice, TKind, TScalar,
+      |             ETorchError, generated op methods, grad-mode helpers
+      |  TchNN      TVarStore / TVarPath / TInit, TModule and layers,
+      |             TSequential, TOptimizer
+      |  TchJit     TJitModule, TIValue
  [L2] TchSys        raw `external` declarations, 1:1 with the C ABI
       |             (hand-written TchSys + generated TchSysGenerated)
  ---- C ABI ---------------------------------------------------------------
@@ -48,7 +53,7 @@ Why not as-is:
 
 Why not our own:
 - The generated part is the value: `torch_api_generated.{h,cpp}` is ~19k
-  lines covering ~2,650 ops, produced by `gen/gen.ml` from PyTorch's
+  lines covering 2,657 ops, produced by `gen/gen.ml` from PyTorch's
   `Declarations.yaml`, with years of special cases (excluded functions,
   `no_tensor_options`, optional-scalar handling). Rewriting that buys nothing.
 - The ABI is already language-neutral: opaque pointers, `int64_t`, `double`,
@@ -59,6 +64,8 @@ Fork rules:
   `torch_api_generated.h`, `torch_api_generated.cpp`, plus `gen/gen.ml` into
   `gen/`. Copy tch-rs `LICENSE-MIT` and `LICENSE-APACHE` next to them.
   Commit messages name the source files (see CLAUDE.md).
+  `third_party/pytorch/Declarations-v2.13.0.yaml` (needed only to regenerate)
+  is in the tch-rs repo at the same commit; it is large and is not vendored.
 - **Keep tch-rs's C names and calling shapes unchanged** (`at_*`, `atg_*`,
   `ats_*`, `ato_*`, `atm_*`, `ati_*`). This keeps the diff against upstream
   small, so bumping libtorch is "re-sync from tch-rs, re-apply our patch".
@@ -66,6 +73,13 @@ Fork rules:
   `tch_*_stream_*`), `torch_python.*`, image functions (`at_load_image*`,
   `at_save_image`, `at_resize_image`) and the stb headers. They can return
   later in a Pascal-friendly form (see HANDOFF).
+- Harden `PROTECT`: upstream catches only `const std::exception&`. Add a
+  `catch (...)` branch that stores a fixed message, so that *no* C++ throw
+  can ever unwind into Pascal frames (that would abort the process).
+- `torch_api_generated.h` opens `extern "C" {` unconditionally (it is only
+  ever compiled as C++ in tch-rs). Guard it with `#ifdef __cplusplus` so the
+  C smoke test in HANDOFF can include it. Both patches are a few lines and
+  easy to re-apply.
 - Our own additions use a separate prefix `tchf_` (tch-fpc) so they are
   obviously ours. First one: `void tchf_free(void *)` — frees strings and
   arrays that libtch allocates with `strdup`/`malloc`, so Pascal never has to
@@ -81,18 +95,41 @@ From reading tch-rs (to be **verified by building**, per CLAUDE.md):
 - Handles: `tensor`, `scalar`, `optimizer`, `module`, `ivalue` are opaque
   pointers to heap-allocated C++ objects (`new torch::Tensor(...)`). Each must
   be released exactly once with `at_free` / `ats_free` / `ato_free` /
-  `atm_free` / `ati_free`.
+  `atm_free` / `ati_free`. `at_free` is a bare `delete`: it cannot fail and
+  never sets the error slot.
 - Errors: every entry point wraps its body in `PROTECT(...)`, which catches
   `std::exception` (this includes `c10::Error`) and stores
   `strdup(e.what())` in `thread_local char *torch_last_err`.
   `get_and_reset_last_err()` returns and clears it; caller owns the string.
-- Generated op shapes (`atg_*`):
+  Hand-written functions that return a handle return `nullptr` on error;
+  those returning `int` flags return `-1`.
+- **Non-optional `tensor` arguments are dereferenced without a null check**
+  (`*self` in the generated call). Passing `nullptr` where a `Tensor` (not
+  `TensorOption`) is expected is a segfault, not a catchable error. L3 must
+  validate before calling (4.2).
+- Generated op shapes (`atg_*`, 2,657 in total):
   - Fixed number of tensor results: `void atg_X(tensor *out__, ...)`. Caller
-    passes an array of N slots, C fills `out__[0..N-1]`.
+    passes an array of N slots, C fills `out__[0..N-1]` *after* the op has
+    succeeded. 246 ops return 2 or more tensors (up to 7).
   - Dynamic number (e.g. `split`): `tensor *atg_X(...)` returns a
     `malloc`'d, `nullptr`-terminated array. Caller frees the array (not the
     tensors) after taking ownership of each element. 33 such ops.
-  - Scalar results: `bool` / `int64_t` / `double` returned directly.
+  - Scalar results: `bool` (as `int`) / `int64_t` / `double` returned
+    directly. 44 ops. 21 ops return nothing.
+- Memory ownership of data:
+  - `at_tensor_of_data` **copies** (`torch::zeros` + `memcpy`): the Pascal
+    buffer may be released as soon as the call returns.
+  - `at_tensor_of_blob` does **not** copy: the buffer must outlive the tensor
+    and every view of it. Not exposed in the first milestone.
+  - `at_copy_data` copies out, going through CPU and `contiguous()` if
+    needed.
+  - Strings from `at_to_string`, `ats_to_string`, `ati_to_string` and the
+    error slot are `strdup`'d; dynamic result arrays are `malloc`'d. All go
+    to `tchf_free`.
+- Callback loaders (`at_load_callback*`, `at_loadz_callback*`,
+  `atm_named_parameters`) call `f(data, name, new torch::Tensor(...))` on
+  the calling thread, inside `PROTECT`. The callee **owns** the tensor it
+  receives. The name is borrowed and valid only during the call.
 - Argument encodings:
 
   | gen.ml type | C params | meaning |
@@ -112,11 +149,13 @@ From reading tch-rs (to be **verified by building**, per CLAUDE.md):
   | ScalarType | `int` | `c10::ScalarType` value |
   | ScalarTypeOption | `int` | `<0` = none |
   | Device | `int` | `-1` CPU, `-2` MPS, `-3` Vulkan, `>=0` CUDA index |
-  | Layout / LayoutOption | `int8_t` | `-1` = none |
+  | Layout / LayoutOption | `int8_t` | `-1` = none (no generated op uses it at 2.13) |
 
 - The hand-written `torch_api.h` mixes `int` and C++ `bool` for flags
   (e.g. `at_autocast_is_enabled` returns `bool`). Pascal must declare each
-  exactly (`Boolean`/`ByteBool`-sized for `bool`, `cint` for `int`).
+  exactly: `Boolean` (1 byte, never `LongBool`) for `bool`, `cint` for
+  `int`, `Byte` for `uint8_t`, `ShortInt` for `int8_t`, `csize_t` for
+  `size_t`.
 
 Important consequence: **the C header alone is not enough to generate a
 good Pascal API.** `Tensor` vs `TensorOption`, `Bool` vs `Int` vs
@@ -133,10 +172,10 @@ generator needs gen.ml's richer type information (section 5).
   correct on i386), `{$packrecords c}`, `ctypes` for `cint` etc.
 - Library name in one constant: `const LibTch = 'tch';` and
   `external LibTch name 'atg_add'`. Static `external` (link-time) binding,
-  not `LoadLibrary` + 2,650 function pointers.
+  not `LoadLibrary` + 2,657 function pointers.
 - Names stay exactly as in C (`atg_add`, `at_free`). Reserved words in
-  parameter names (`out`, `end`, `to`, ...) are escaped by the generator
-  (`&end`) or suffixed (`end_`); parameter names have no ABI meaning.
+  parameter names (`out`, `end`, `to`, `result`) are given a `_` suffix
+  (`out_`); parameter names have no ABI meaning.
 
 Sketch:
 
@@ -150,6 +189,7 @@ const
 type
   PTorchTensor = type Pointer;  PPTorchTensor = ^PTorchTensor;
   PTorchScalar = type Pointer;
+  TTorchLoadCallback = procedure(data: Pointer; name: PChar; t: PTorchTensor); cdecl;
 
 function  get_and_reset_last_err: PChar; cdecl; external LibTch;
 procedure tchf_free(p: Pointer); cdecl; external LibTch;
@@ -161,11 +201,15 @@ function  at_tensor_of_data(vs: Pointer; dims: PInt64; ndims: csize_t;
 procedure at_copy_data(t: PTorchTensor; vs: Pointer; numel: csize_t;
             element_size_in_bytes: csize_t); cdecl; external LibTch;
 function  at_shallow_clone(t: PTorchTensor): PTorchTensor; cdecl; external LibTch;
+function  at_defined(t: PTorchTensor): cint; cdecl; external LibTch;
 function  at_dim(t: PTorchTensor): csize_t; cdecl; external LibTch;
 procedure at_shape(t: PTorchTensor; dims: PInt64); cdecl; external LibTch;
 function  at_scalar_type(t: PTorchTensor): cint; cdecl; external LibTch;
 function  at_device(t: PTorchTensor): cint; cdecl; external LibTch;
 function  at_to_string(t: PTorchTensor; line_size: cint): PChar; cdecl; external LibTch;
+function  at_autocast_is_enabled: Boolean; cdecl; external LibTch;  // C++ bool
+procedure at_load_callback(filename: PChar; data: Pointer;
+            f: TTorchLoadCallback); cdecl; external LibTch;
 procedure at_free(t: PTorchTensor); cdecl; external LibTch;
 
 function  ats_int(v: Int64): PTorchScalar; cdecl; external LibTch;
@@ -183,13 +227,29 @@ function  atg_split(self: PTorchTensor; split_size, dim: Int64): PPTorchTensor;
             cdecl; external LibTch;
 procedure atg_zeros(out__: PPTorchTensor; size_data: PInt64; size_len: cint;
             options_kind, options_device: cint); cdecl; external LibTch;
+procedure atg_narrow(out__: PPTorchTensor; self: PTorchTensor; dim, start,
+            length: Int64); cdecl; external LibTch;
+procedure atg_add_out(out__: PPTorchTensor; out_, self, other: PTorchTensor);
+            cdecl; external LibTch;
 ```
 
 ## 4. Pascal layer L3: Tch (object-oriented)
 
 ### 4.1 Tensor ownership: managed record wrapping an interface (decision)
 
+Options considered:
+
+| Option | Verdict |
+|---|---|
+| Plain `class` with explicit `Free` | Rejected: every temporary needs `try..finally`; `(a + b) * c` leaks the intermediate. |
+| COM-style `ITensor` interface as the public type | Rejected: operator overloading in FPC is built around records, and whether binary operators on interface types are accepted at all is unclear; 2,657 virtual methods in one interface is heavier than static record methods; and a public interface invites holding the implementing object by class reference, the classic refcount footgun. |
+| Record with the raw pointer + management operators (`Initialize/Finalize/Copy`) | Rejected for now: available since 3.2.0 only, with a bug history around temporaries and function results in 3.2.x. Saves one heap allocation per tensor. Revisit only if that allocation is measured to matter. |
+| Record helper for the generated ops, record for the core | Rejected (see 4.5). |
+| **Record wrapping a refcounted `ITensorHandle`** | **Chosen** |
+
 ```pascal
+unit Tch;
+{$mode objfpc}{$H+}{$modeswitch advancedrecords}
 type
   ITensorHandle = interface
     function Raw: PTorchTensor;
@@ -200,29 +260,53 @@ type
     FRaw: PTorchTensor;
   public
     constructor Create(ARaw: PTorchTensor);  // takes ownership
-    destructor Destroy; override;            // at_free(FRaw)
+    destructor Destroy; override;            // at_free(FRaw); never raises
     function Raw: PTorchTensor;
   end;
 
   TTensor = record
   private
-    FHandle: ITensorHandle;   // nil = undefined tensor
+    FHandle: ITensorHandle;   // nil = no tensor at all
   public
-    // hand-written API, Pascal naming
-    class function FromRaw(ARaw: PTorchTensor): TTensor; static;
-    function Raw: PTorchTensor; inline;      // nil if undefined
-    function Defined: Boolean; inline;
+    // --- hand-written API, Pascal naming ---
+    class function FromRaw(ARaw: PTorchTensor): TTensor; static; // takes ownership
+    function Raw: PTorchTensor; inline;      // borrowed; nil if IsNil
+    function IsNil: Boolean; inline;         // FHandle = nil
+    function Defined: Boolean;               // not IsNil and at_defined <> 0
     function Dim: Integer;
     function Shape: TInt64Array;
+    function Numel: Int64;
     function Kind: TKind;
     function Device: TDevice;
-    function ToString: AnsiString;
-    function ShallowClone: TTensor;
+    function ToString(LineWidth: Integer = 80): AnsiString;
+    function ShallowClone: TTensor;          // new handle, same storage
+    function Copy: TTensor;                  // new storage (zeros_like + copy_)
+    // data in / out (H2)
+    class function FromArray(const A: array of Single): TTensor; overload; static;
+    class function FromArray(const A: array of Double): TTensor; overload; static;
+    class function FromArray(const A: array of Int64): TTensor; overload; static;
+    class function FromArray(const A: array of Int32): TTensor; overload; static;
+    class function FromArray(const A: array of Byte): TTensor; overload; static;
+    class function FromArray(const A: array of Boolean): TTensor; overload; static;
+    class function FromBytes(const Data; const Shape: array of Int64; AKind: TKind): TTensor; static;
+    function ToSingleArray: TSingleArray;    // copies out, converts kind
+    function ToDoubleArray: TDoubleArray;
+    function ToInt64Array: TInt64Array;
+    function DoubleValue(const Index: array of Int64): Double;
+    function Int64Value(const Index: array of Int64): Int64;
+    // autograd
+    procedure Backward;
+    function RequiresGrad: Boolean;
+    // operators (4.1 "Operators")
     class operator +(const A, B: TTensor): TTensor;
     class operator -(const A, B: TTensor): TTensor;
-    class operator *(const A, B: TTensor): TTensor;
+    class operator *(const A, B: TTensor): TTensor;    // elementwise (mul)
     class operator /(const A, B: TTensor): TTensor;
-    // generated op methods
+    class operator -(const A: TTensor): TTensor;       // neg
+    class operator **(const A: TTensor; B: Double): TTensor;
+    class operator +(const A: TTensor; B: Double): TTensor;  // and Int64, and reversed
+    ...
+    // --- generated op methods (4.4) ---
     {$I TchTensorGenerated_intf.inc}
   end;
 ```
@@ -230,64 +314,138 @@ type
 Why this shape:
 - **Deterministic release.** Interface refcounting frees the C++ tensor (and
   GPU memory) as soon as the last Pascal reference goes away, like tch-rs's
-  `Drop`. A plain `class` would force `try..finally Free` around every
-  temporary, and `a.Add(b).Mul(c)` would leak the intermediate.
+  `Drop`.
 - **Expressions work.** Records support `class operator` overloads in
   `{$mode objfpc}{$modeswitch advancedrecords}`; the intermediate results of
-  `(a + b) * c` are compiler-managed temporaries that get released.
+  `(a + b) * c` are compiler-managed temporaries. **(H1)** Exactly *when* FPC
+  finalises such temporaries (end of statement vs end of the enclosing
+  routine) is not known for certain; either way a temporary slot is reused
+  and released on reassignment, so a loop does not accumulate, but a large
+  intermediate may stay alive longer than expected. Measure (HANDOFF).
 - **Robust on FPC 3.2.2.** A record containing an interface field is managed
-  by the compiler's long-standing interface refcounting. We avoid FPC's newer
-  *management operators* (`class operator Initialize/Finalize/Copy`),
-  which are newer and had bugs around temporaries and function results in
-  3.2.x. (To be confirmed by tests, not trusted from memory.)
+  by the compiler's long-standing interface refcounting, exercised by every
+  Lazarus application. Management operators are avoided (table above).
 - **Thread-safe refcount.** `TInterfacedObject` uses interlocked
   increment/decrement.
 - **Natural "none".** `Default(TTensor)` (nil handle) maps straight to
-  `TensorOption = nullptr`.
+  `TensorOption = nullptr`, and a `TTensor` is one pointer in size, so
+  copying it around is free.
 
 Semantics:
 - `B := A` shares the same C++ `torch::Tensor` object. libtorch tensors are
   themselves refcounted handles to shared storage, so this is the same
   aliasing a C++ or Python user expects. `ShallowClone` (`at_shallow_clone`)
-  gives an independent handle to the same storage; `Copy`/`Clone` (generated
-  ops) copy data.
-- In-place ops keep the PyTorch trailing underscore (`Add_`) and return the
-  same tensor for chaining, like tch-rs.
+  gives an independent handle to the same storage; `Copy` copies data.
+- Two levels of "nothing": `IsNil` (no handle; `Default(TTensor)`; what the
+  generator passes as `nullptr` for `TensorOption`) and `Defined` (libtorch's
+  own notion; `at_new_tensor` gives a non-nil handle to an undefined tensor,
+  which is what `grad` returns when there is no gradient). Passing a nil
+  handle for a non-optional `Tensor` argument raises `ETorchError` *before*
+  the call, because C would dereference it (section 2).
+- `Raw` is a borrowed pointer: valid only while some `TTensor` still holds
+  the handle. Never store it.
+- `TTensorHandle.Destroy` only calls `at_free`. It never raises and never
+  reads the error slot (a destructor running during exception unwinding must
+  not throw a second exception).
+- In-place ops keep the PyTorch trailing underscore (`add_`) and return the
+  same tensor for chaining, like tch-rs. Ignoring the result is fine
+  (`{$X+}` is the default).
 - Releasing early: `A := Default(TTensor);`.
+- **No `=` / `<>` overload.** Equality on tensors is ambiguous (handle
+  identity vs elementwise vs `allclose`); spelling it out (`SameHandle`,
+  generated `equal`, `allclose`) avoids silent surprises. Consequence: the
+  FGL containers (`TFPGList<TTensor>`) will not compile because they require
+  `=`; use `TTensorArray` (dynamic array) or `Generics.Collections.TList<TTensor>`,
+  which compares by bytes. Open question in HANDOFF.
+- Data in: `FromArray` is overloaded on the element type so `TTensor.FromArray([1.0, 2.0])`
+  reads naturally. **(H2)** Whether an open-array literal of real constants
+  resolves unambiguously between `array of Single` and `array of Double`
+  (and integer literals between `Int32` and `Int64`) must be tested; the
+  fallback is distinct names (`FromSingles`, `FromDoubles`, ...). Data out
+  has to be named by type (`ToDoubleArray`) because Pascal cannot overload on
+  return type.
+
+Operators (hand-written; map to generated ops):
+
+| Pascal | op | note |
+|---|---|---|
+| `A + B`, `A - B`, `A * B`, `A / B` | `add`, `sub`, `mul`, `div` | `*` is **elementwise**; matrix product is `A.matmul(B)` |
+| `A + d`, `A - d`, `A * d`, `A / d` | `add_scalar` ... | `d: Double` and `d: Int64` as explicit overloads **(H3)**, not via `TScalar`'s implicit operator, so that `T + 1` and `T + 1.5` both resolve without going through a user-defined conversion |
+| `d + A`, `d - A`, `d * A`, `d / A` | reversed | `d - A` = `(-A) + d`, `d / A` = `A.pow(-1) * d` as in tch-rs |
+| `-A` | `neg` | |
+| `A ** d` | `pow_tensor_scalar` | FPC allows overloading `**` |
+
+Not overloaded: `=`, `<>`, `<`, `>` (comparisons return tensors in
+PyTorch; a Boolean result would be a lie), `@`, `in`.
 
 Cost: two heap allocations per tensor (C++ `torch::Tensor` + Pascal
-`TTensorHandle`). Acceptable for now; measure before optimizing.
+`TTensorHandle`). Acceptable for now; measure before optimizing (the
+management-operator variant is the escape hatch).
 
 ### 4.2 Error handling (decision)
 
 - Single API (no separate fallible/infallible variants as in tch-rs's
   `f_add`/`add`): Pascal has exceptions, so every op raises on failure.
-- `ETorchError = class(Exception)`. After **every** libtch call L3 calls
+- Classes: `ETorchError = class(Exception)` is the base and is what
+  Pascal-side validation raises (nil handle, shape helpers, unknown kind).
+  `ETorchNativeError = class(ETorchError)` carries a message that came from
+  libtorch's error slot. Catching `ETorchError` catches both.
+- After **every** libtch call L3 calls
 
   ```pascal
-  procedure CheckTorch; inline;
+  procedure TchCheck; inline;
   var P: PChar;
   begin
     P := get_and_reset_last_err;
-    if P <> nil then RaiseTorchError(P);  // copies message, tchf_free(P), raises
+    if P <> nil then TchRaiseNative(P);  // copies message, tchf_free(P), raises
   end;
   ```
 
-  `RaiseTorchError` is a separate non-inline procedure so the hot path stays
+  `TchRaiseNative` is a separate non-inline procedure so the hot path stays
   small. The error slot is thread-local on the C side and we read it on the
-  same thread immediately, so threads do not interfere.
-- On error, already-filled `out__` slots are freed before raising (PROTECT can
-  fail after partially filling multi-output arrays).
+  same thread immediately, so threads do not interfere. Helpers used by
+  generated bodies are prefixed `Tch` so that no op parameter name
+  (`self`, `out_`, `data`, `index`, ...) can shadow them.
+- Before a call, every non-optional `Tensor` argument (including the
+  receiver) is checked for `IsNil`; a nil handle raises
+  `ETorchError('undefined tensor passed as <param> to <op>')`. This is the
+  only check that costs anything, and it replaces a segfault.
+- Fixed-N outputs: slots are initialised to `nil`; on error, non-nil slots are
+  freed before raising (in practice C fills them only after success, but
+  `new torch::Tensor` could still throw `bad_alloc` part-way).
 - **Never let a Pascal exception unwind through C++ frames.** Callbacks
-  passed into libtch (e.g. `at_load_callback`) are `cdecl` trampolines that
-  catch everything, store it, and re-raise after the C call returns.
+  passed into libtch (`at_load_callback`, `atm_named_parameters`) are
+  `cdecl` trampolines whose body is wrapped in `try..except`; the handler
+  stores the exception object (`AcquireExceptionObject`) in the context
+  record and returns normally. After the C call returns, L3 re-raises it.
+  The trampoline takes ownership of the tensor it is handed (section 2) even
+  when it will be discarded.
 - **FPU exception mask.** FPC programs on x86 run with floating-point
-  exceptions unmasked; libtorch/MKL/oneDNN assume the C default (masked) and
-  legitimately produce NaN/Inf. Unit `Tch` calls
+  exceptions (invalid, zero-divide, overflow) *unmasked* in both the x87
+  control word and MXCSR, so `0/0` raises `EInvalidOp`. libtorch, MKL and
+  oneDNN assume the C default (all masked) and legitimately produce NaN/Inf;
+  with the Pascal defaults a CPU kernel that divides by zero kills the
+  program with SIGFPE. Decision: unit `Tch` calls
   `SetExceptionMask([exInvalidOp, exDenormalized, exZeroDivide, exOverflow,
-  exUnderflow, exPrecision])` in its `initialization`. Worker threads created
-  by libtorch's own pool are unaffected; the issue is the main thread and
-  Pascal-created threads. Verify with a test that divides by zero on CPU.
+  exUnderflow, exPrecision])` in its `initialization`, before any libtorch
+  call can happen, and exports `procedure TchMaskFpuExceptions;` for threads.
+  - libtorch's own worker pools are created lazily by the first parallel op,
+    and a new pthread inherits the creating thread's FP control state. So
+    the pool threads end up masked *because* `Tch` masks before the first
+    call. This is why the mask must be set in `initialization`, not lazily.
+  - Threads created from Pascal (`TThread`, `BeginThread`) are initialised by
+    the RTL; **(H4)** whether they pick up the mask set via `SetExceptionMask`
+    (which may update `Default8087CW`/`DefaultMXCSR`) or revert to the FPC
+    defaults must be measured. Until then, call `TchMaskFpuExceptions` at the
+    start of every Pascal thread that touches tensors.
+  - **(H5)** The RTL's SIGFPE handler may reset the control word after a
+    Pascal floating-point exception has been raised and caught. Verify that
+    the mask survives a caught `EZeroDivide` in Pascal code; if not,
+    re-apply it in the places that catch such exceptions.
+  - Trade-off, stated plainly: in a program that uses `Tch`, plain Pascal
+    `x / 0.0` yields `Inf` instead of raising. This is the C/C++/Python
+    behaviour and is acceptable for a numerical library; it is documented in
+    the README rather than hidden.
 
 ### 4.3 Small value types
 
@@ -296,19 +454,29 @@ type
   TKind = (kUInt8 = 0, kInt8 = 1, kInt16 = 2, kInt = 3, kInt64 = 4,
            kHalf = 5, kFloat = 6, kDouble = 7, kComplexHalf = 8,
            kComplexFloat = 9, kComplexDouble = 10, kBool = 11,
-           kQInt8 = 12, kQUInt8 = 13, kQInt32 = 14, kBFloat16 = 15);
-           // values = c10::ScalarType for libtorch 2.13; verify against
-           // c10/core/ScalarType.h before relying on them
+           kQInt8 = 12, kQUInt8 = 13, kQInt32 = 14, kBFloat16 = 15,
+           kFloat8e5m2 = 23, kFloat8e4m3fn = 24, kFloat8e5m2fnuz = 25,
+           kFloat8e4m3fnuz = 26);
+           // values = c10::ScalarType as tch-rs kind.rs lists them; verify
+           // against c10/core/ScalarType.h. `TTensor.Kind` raises
+           // ETorchError on a value outside this set (unknown kind).
 
   TDeviceType = (dtCpu, dtCuda, dtMps, dtVulkan);
   TDevice = record
     DeviceType: TDeviceType;
     Index: Integer;               // CUDA only
     function ToC: cint;           // -1 / >=0 / -2 / -3
+    class function FromC(V: cint): TDevice; static;
     class function Cpu: TDevice; static;
     class function Cuda(AIndex: Integer = 0): TDevice; static;
     class function CudaIfAvailable: TDevice; static;
+    function IsCuda: Boolean;
   end;
+
+  TInt64Array  = array of Int64;
+  TDoubleArray = array of Double;
+  TSingleArray = array of Single;
+  TTensorArray = array of TTensor;
 
   TScalar = record                // converted to a temporary ats_* handle per call
     IsFloat: Boolean;
@@ -320,25 +488,40 @@ type
   TOptInt64  = record HasValue: Boolean; Value: Int64;  class operator :=(V: Int64): TOptInt64;  end;
   TOptDouble = record HasValue: Boolean; Value: Double; class operator :=(V: Double): TOptDouble; end;
   TOptKind   = record HasValue: Boolean; Value: TKind;  class operator :=(V: TKind): TOptKind;   end;
-  // Default(TOptXxx) = none. Hand-written, not generic: fewer 3.2.2 surprises
-  // with implicit operators in generic records.
+  TOptIntList = record HasValue: Boolean; Value: TInt64Array; end;
 
-  TInt64Array  = array of Int64;
-  TTensorArray = array of TTensor;
+const
+  NoInt64:   TOptInt64   = (HasValue: False; Value: 0);
+  NoDouble:  TOptDouble  = (HasValue: False; Value: 0);
+  NoKind:    TOptKind    = (HasValue: False; Value: kFloat);
+  NoIntList: TOptIntList = (HasValue: False; Value: nil);
+
+function IntList(const A: array of Int64): TOptIntList;  // present, possibly empty
 ```
+
+- `Default(TOptXxx)` is also "none"; the `NoXxx` constants are just more
+  readable at call sites (`t.sum_dim_intlist(IntList([0]), False, NoKind)`).
+- Hand-written, not generic (`TOpt<T>`): implicit `:=` operators inside
+  generic records are an area with known 3.2.x bug reports, and there are
+  only four of them.
+- `IntListOption` (103 uses) was an open question: open arrays and dynamic
+  arrays cannot distinguish "none" from "empty" (both are nil/zero-length),
+  so a record with `HasValue` it is, built with `IntList([...])`.
+- `TensorOptList` (13 uses) needs no extra type: `array of TTensor` with
+  `IsNil` elements meaning "none".
 
 Parameter mapping used by the generator:
 
 | gen.ml type | Pascal parameter |
 |---|---|
-| Tensor | `const X: TTensor` (must be defined; checked) |
-| TensorOption | `const X: TTensor` (undefined = none) |
+| Tensor | `const X: TTensor` (nil handle rejected before the call) |
+| TensorOption | `const X: TTensor` (nil handle = none) |
 | Scalar | `const X: TScalar` |
 | Bool | `X: Boolean` |
 | Int64 / Double | `X: Int64` / `X: Double` |
 | Int64Option / DoubleOption | `const X: TOptInt64` / `TOptDouble` |
 | IntList | `const X: array of Int64` (allows `[2, 3]`) |
-| IntListOption | `const X: TOptIntList` (open question, see HANDOFF) |
+| IntListOption | `const X: TOptIntList` (`IntList([..])` / `NoIntList`) |
 | DoubleList | `const X: array of Double` |
 | TensorList / TensorOptList | `const X: array of TTensor` |
 | String | `const X: AnsiString` |
@@ -350,34 +533,70 @@ Results: one tensor → `TTensor`; dynamic → `TTensorArray`; N fixed tensors
 → `out` parameters (see 4.4); `bool`/`int64_t`/`double` → `Boolean`/`Int64`/
 `Double`.
 
+**(H6)** Marshalling `const X: array of TTensor` built from an open-array
+constructor (`[A, B]`) relies on FPC refcounting the temporary array of
+managed records correctly; covered by the ownership test.
+
 ### 4.4 Generated op methods and naming (decision)
 
-- Every `atg_*` whose first argument is `self: Tensor` becomes a method of
-  `TTensor`; the rest become `class function ... static` on `TTensor`
-  (e.g. `TTensor.zeros([2, 3], kFloat, TDevice.Cpu)`), mirroring tch-rs's
-  `Tensor::zeros`.
+- Receiver rule, same as tch-rs: an op whose arguments include a `Tensor`
+  named `self` becomes a method of `TTensor` with that argument as the
+  receiver; otherwise one named `input` (152 ops, e.g. `conv2d`,
+  `batch_norm`, so `x.conv2d(w, ...)` reads like PyTorch); otherwise a
+  `class function ... static` on `TTensor` (563 ops, e.g.
+  `TTensor.zeros([2, 3], kFloat, TDevice.Cpu)`), mirroring tch-rs's
+  `Tensor::zeros`. The receiver is `const`; for in-place ops it is still
+  `const` (the record is not modified, the C++ tensor behind it is).
 - **Op names are kept verbatim from tch-rs/PyTorch in snake_case**
   (`t.max_pool2d(...)`, `t.add_(u)`, `t.sum_dim_intlist(...)`).
   Hand-written API uses Pascal CamelCase (`Shape`, `Kind`, `ToString`).
   Rationale: snake_case→CamelCase is lossy (`_foo`/`foo`/`foo_` collide),
   verbatim names are searchable in PyTorch/tch-rs docs, and the split makes
-  "generated vs hand-written" visible at the call site.
+  "generated vs hand-written" visible at the call site. Leading and double
+  underscores (`_cast_byte`, `__and__`, 530 ops) are legal FPC identifiers
+  and are kept too; tch-rs's `internal_` rename is not needed.
 - Checked on tch-rs 4227b89: the 2,657 `atg_*` names contain no uppercase
-  letters and no case-insensitive duplicates, so Pascal's case-insensitivity
-  is not a problem among themselves. The generator must still check
-  generated names against hand-written member names case-insensitively.
-- Reserved words: ops `div`, `to`, `set`, `repeat`, `absolute` and parameter
-  names `out` (819 uses), `end`, `to` collide with Pascal keywords. Methods
-  use FPC's `&` escape (`t.&div(u)`, `t.&to(dev)`); parameters get a `_`
-  suffix (`end_`). Friendlier hand-written aliases (`DivBy`, `ToDevice`) can
-  be added on top where it matters.
-- Fixed multi-tensor results (e.g. `max_dim` → values, indices) become
-  `procedure max_dim(Dim: Int64; KeepDim: Boolean; out Values, Indices: TTensor)`.
+  letters and no case-insensitive duplicates, and no single op has two
+  parameters that differ only by case. The generator must still check
+  generated names against hand-written member names case-insensitively;
+  known overlaps that the hand-written API therefore avoids: `data`, `grad`,
+  `detach`, `to_device`, `absolute`, `alias`, `index`, and `clone` (which,
+  because gen.ml excludes `clone` itself and the overload de-duplication
+  gives the bare name to the shortest survivor, is actually `clone_out` —
+  hence our hand-written data copy is `Copy`, not `Clone`).
+- Reserved words. Op names colliding with FPC reserved words: `div`, `repeat`,
+  `set`, `to`, `var`; with modifiers: `absolute`, `alias`, `index`. Methods
+  keep their name with FPC's `&` escape at declaration and call site
+  (`t.&div(u)`, `t.&var(0)`); a `_` suffix is not an option for ops because
+  the trailing underscore means in-place. Modifiers are escaped as well — a
+  harmless `&` on a legal identifier avoids guessing which modifiers FPC
+  accepts as method names **(H7)**. Parameter names colliding with reserved
+  words or `Result`: `out` (819 uses), `end` (31), `to` (7), `result` (3);
+  these get a `_` suffix (`out_`, `end_`). Friendlier hand-written aliases
+  (`DivBy`, `ToDevice`, `Variance`) can be added on top where it matters.
+- Fixed multi-tensor results (246 ops, 2 to 7 tensors; e.g. `max_dim` →
+  values, indices) become
+  `procedure max_dim(dim: Int64; keepdim: Boolean; out values, indices: TTensor)`.
   Output names come from `Declarations.yaml` `returns[].name` when present,
-  else `Result0..N`.
-- Default arguments: Pascal supports trailing defaults for simple types only.
-  First version: no defaults except where gen.ml already supplies them;
-  convenience overloads are hand-written later.
+  else `result0..N`. Rationale: Pascal has no destructuring, `out` is the
+  idiom (`DecodeDate`, `DivMod`), and a result record per op would add 246
+  types. Hand-written result records can be added for the few popular ops
+  (`max_dim`, `sort`, `topk`, `lstm`) once real code shows the need.
+  Caveat: FPC finalises an `out` argument on entry **(H8)**, so passing the
+  receiver or an input as an `out` argument (`t.max_dim(1, False, t, i)`)
+  releases it before the body runs; the nil-handle check then raises
+  `ETorchError` rather than crashing. Document it; do not try to be clever.
+- Default arguments. gen.ml already parses each argument's `default`; the
+  manifest carries it (section 5) and the Pascal emitter turns the maximal
+  *trailing* run of `Bool` / `Int64` / `Double` / `String` parameters that
+  have a default into Pascal default parameters (`keepdim: Boolean = False`,
+  `dim: Int64 = -1`, `mode: AnsiString = 'constant'`). Record-typed
+  parameters (`TOpt*`, `TScalar`) and open arrays cannot carry defaults in
+  Pascal, so the run stops at the first of those. This is free and removes
+  most of the noise; convenience overloads beyond it are hand-written.
+- `TensorOptions` arguments stay explicit (`AKind, ADevice`); a hand-written
+  `TTensor.zeros([2, 3])` overload defaulting to `kFloat`/CPU is cheap and
+  mirrors tch-rs's `FLOAT_CPU`.
 
 ### 4.5 Unit layout
 
@@ -385,16 +604,220 @@ Results: one tensor → `TTensor`; dynamic → `TTensorArray`; N fixed tensors
 src/
   TchSys.pas                 L2 hand-written externals
   TchSysGenerated.pas        L2 generated externals           (generated)
-  Tch.pas                    L3 core: TTensor, TDevice, TKind, ETorchError
+  Tch.pas                    L3 core: TTensor, TDevice, TKind, TScalar,
+                             ETorchError, grad-mode helpers
   TchTensorGenerated_intf.inc  method declarations inside TTensor (generated)
   TchTensorGenerated_impl.inc  method bodies                    (generated)
-  later: TchNN.pas (VarStore, Linear, Conv...), TchOptim.pas, TchJit.pas
+  TchNN.pas                  TInit, TVarStore, TVarPath, TModule, layers,
+                             TSequential, TOptimizer (4.6)
+  TchJit.pas                 TJitModule, TIValue, TTrainableJitModule (4.6)
 csrc/libtch/                 forked C wrapper + CMakeLists.txt
 gen/                         gen.ml (forked) + Pascal emitter
 ```
 
-Generated record members must be declared inside the record, hence the two
-include files.
+- Generated record members must be declared inside the record, hence the two
+  include files. Putting the generated ops in a `record helper for TTensor`
+  in a separate unit was considered and rejected: FPC resolves only the
+  *last* helper in scope for a type, so any user-defined helper for
+  `TTensor` would silently hide all 2,657 ops.
+- Optimizers live in `TchNN`, not a separate `TchOptim`: `TOptimizer` needs
+  the var-store's trainable-variable list and groups (it lazily registers
+  variables created after the optimizer, exactly like tch-rs), and that is
+  internal state better not exported across units. tch-rs keeps them in
+  `nn` for the same reason.
+
+### 4.6 nn, VarStore, optimizers and JIT (decision)
+
+tch-rs's shape and its Pascal equivalent:
+
+| tch-rs | role | Pascal | why |
+|---|---|---|---|
+| `VarStore` (`Arc<Mutex<Variables>>`, device, kind) | owns all parameters by name | `TVarStore = class` | long-lived identity object with explicit lifetime; `Free` it when the model is done |
+| `Path<'a>` (borrowed, `vec<String>` + group) | naming scope, cheap to copy | `TVarPath = record` (non-owning `TVarStore` reference + dotted path + group) | value semantics, no ownership, `P.Sub('layer1')` / `P / 'layer1'` |
+| `Entry::or_*` | get-or-create | `TVarPath.GetOrAdd(...)` | no separate type needed |
+| `Init` enum with payload | initialisation recipe | `TInit = record` with `Kind` + fields and static constructors | Pascal enums carry no payload |
+| `Module` / `ModuleT` traits | forward pass | `TModule = class abstract` with one virtual `Forward(const X; Train: Boolean = False)` | Pascal has no blanket trait impl; a default parameter merges the two traits |
+| `Linear`, `Conv2D`, `BatchNorm`, `LSTM`... structs | layers holding `Tensor` fields | classes deriving from `TModule`, parameters as public `TTensor` fields (`Weight`, `Bias`) | same ownership story as tch-rs: the layer and the var-store share the handle |
+| `Sequential` (`Vec<Box<dyn Module>>`) | composition | `TSequential = class(TModule)`, owns its children | explicit ownership tree, idiomatic Pascal |
+| `Func` (closure layer) | ad-hoc layers | `TFuncModule` taking a plain function pointer or `of object` method | FPC 3.2.2 has no anonymous functions; a named function or a tiny `TModule` subclass replaces `add_fn(|x| ...)` |
+| `Optimizer` + `OptimizerConfig` structs | training | `TOptimizer = class` with `class function Adam(VS, LR; Beta1 = 0.9; ...)` constructors | Pascal default parameters replace builder/config structs |
+| `no_grad(|| ...)`, `NoGradGuard` | grad mode | `SetGradEnabled(B): Boolean` + `NoGradGuard: IInterface` | see 4.7 |
+| `CModule`, `TrainableCModule`, `IValue` | TorchScript | `TJitModule = class`, `TTrainableJitModule = class(TModule)`, `TIValue` tagged record | see below |
+| `Iter2` | mini-batches | `TBatchIter` with `GetEnumerator` for `for .. in` | later |
+
+Sketch:
+
+```pascal
+unit TchNN;
+type
+  TInitKind = (ikConst, ikUniform, ikRandn, ikKaimingUniform, ikKaimingNormal, ikOrthogonal);
+  TInit = record
+    Kind: TInitKind;
+    A, B: Double;                       // const value / lo,up / mean,std / gain
+    class function Constant(V: Double): TInit; static;   // "Const" is reserved
+    class function Uniform(Lo, Up: Double): TInit; static;
+    class function Randn(Mean, Std: Double): TInit; static;
+    class function KaimingUniform: TInit; static;        // tch-rs DEFAULT_KAIMING_UNIFORM
+    class function KaimingNormal: TInit; static;
+    class function Orthogonal(Gain: Double): TInit; static;
+    function Make(const Dims: array of Int64; const Device: TDevice; AKind: TKind): TTensor;
+  end;
+
+  TVarStore = class;
+
+  TVarPath = record
+  private
+    FStore: TVarStore;                  // not owned; must outlive the path
+    FPath: String;                      // 'encoder.layer1' ('' = root)
+    FGroup: Integer;
+  public
+    function Sub(const Name: String): TVarPath;
+    class operator /(const P: TVarPath; const Name: String): TVarPath;  // sugar for Sub
+    function SetGroup(G: Integer): TVarPath;
+    function Store: TVarStore; inline;
+    function Device: TDevice;
+    function Kind: TKind;
+    function Add(const Name: String; const T: TTensor; Trainable: Boolean): TTensor;
+    function Variable(const Name: String; const Dims: array of Int64; const Init: TInit): TTensor; // tch-rs "var"
+    function Zeros(const Name: String; const Dims: array of Int64): TTensor;
+    function Ones(const Name: String; const Dims: array of Int64): TTensor;
+    function ZerosNoTrain(const Name: String; const Dims: array of Int64): TTensor;
+    function OnesNoTrain(const Name: String; const Dims: array of Int64): TTensor;
+    function Randn(const Name: String; const Dims: array of Int64; Mean, Std: Double): TTensor;
+    function Uniform(const Name: String; const Dims: array of Int64; Lo, Up: Double): TTensor;
+    function KaimingUniform(const Name: String; const Dims: array of Int64): TTensor;
+    function VarCopy(const Name: String; const T: TTensor): TTensor;
+    function TryGet(const Name: String; out T: TTensor): Boolean;
+    function GetOrAdd(const Name: String; const Dims: array of Int64; const Init: TInit): TTensor;
+  end;
+
+  TNamedTensor = record Name: String; Tensor: TTensor; end;
+  TNamedTensorArray = array of TNamedTensor;
+
+  TVarStore = class
+  public
+    constructor Create(const ADevice: TDevice; AKind: TKind = kFloat);
+    function Root: TVarPath;
+    function TrainableVariables: TTensorArray;
+    function Variables: TNamedTensorArray;
+    procedure Save(const FileName: String);          // at_save_multi; '.' -> '|' as tch-rs
+    procedure Load(const FileName: String);          // copies into existing vars; missing name raises
+    function LoadPartial(const FileName: String): TStringArray;  // returns missing names
+    procedure Freeze; procedure Unfreeze;
+    procedure SetDevice(const ADevice: TDevice);
+    procedure SetKind(AKind: TKind);
+    procedure CopyFrom(Src: TVarStore);
+    property Device: TDevice read FDevice;
+    property Kind: TKind read FKind;
+    property Count: Integer read GetCount;
+  end;
+
+  TModule = class abstract
+  public
+    function Forward(const X: TTensor; Train: Boolean = False): TTensor; virtual; abstract;
+  end;
+
+  TLinearConfig = record WsInit: TInit; BsInit: TInit; HasBsInit: Boolean; Bias: Boolean; end;
+  function DefaultLinearConfig: TLinearConfig;
+
+  TLinear = class(TModule)
+  public
+    Weight, Bias: TTensor;              // Bias.IsNil when the layer has none
+    constructor Create(const P: TVarPath; InDim, OutDim: Int64); overload;
+    constructor Create(const P: TVarPath; InDim, OutDim: Int64; const Cfg: TLinearConfig); overload;
+    function Forward(const X: TTensor; Train: Boolean = False): TTensor; override;
+  end;
+
+  TTensorFunc = function(const X: TTensor): TTensor;
+  TTensorFuncT = function(const X: TTensor; Train: Boolean): TTensor;
+
+  TSequential = class(TModule)
+  private
+    FLayers: TObjectList;               // OwnsObjects = True
+  public
+    function Add(M: TModule): TSequential;            // returns Self for chaining
+    function AddFn(F: TTensorFunc): TSequential;
+    function AddFnT(F: TTensorFuncT): TSequential;
+    function Forward(const X: TTensor; Train: Boolean = False): TTensor; override;
+  end;
+
+  TOptimizer = class
+  public
+    class function Sgd(VS: TVarStore; LR: Double; Momentum: Double = 0;
+      Dampening: Double = 0; WeightDecay: Double = 0; Nesterov: Boolean = False): TOptimizer; static;
+    class function Adam(VS: TVarStore; LR: Double; Beta1: Double = 0.9;
+      Beta2: Double = 0.999; WeightDecay: Double = 0; Eps: Double = 1e-8;
+      AmsGrad: Boolean = False): TOptimizer; static;
+    class function AdamW(...): TOptimizer; static;
+    class function RmsProp(...): TOptimizer; static;
+    destructor Destroy; override;                      // ato_free
+    procedure ZeroGrad;
+    procedure Step;
+    procedure BackwardStep(const Loss: TTensor);       // zero_grad; backward; step
+    procedure BackwardStepClip(const Loss: TTensor; MaxValue: Double);
+    procedure BackwardStepClipNorm(const Loss: TTensor; MaxNorm: Double);
+    procedure ClipGradValue(MaxValue: Double);
+    procedure ClipGradNorm(MaxNorm: Double);
+    procedure SetLearningRate(LR: Double);             // + group variants, momentum, weight decay
+  private
+    FOpt: PTorchOptimizer;
+    FStore: TVarStore;                                 // not owned
+    FVarsInOptimizer: Integer;                         // lazily adds new trainable vars, as tch-rs
+  end;
+```
+
+Decisions and rationale:
+- **`TVarStore` is a class, `TVarPath` a record.** The store has identity,
+  mutable state and a clear owner; paths are throwaway values that only
+  carry a prefix and a group. A path holds a plain class reference, so the
+  rule "the store outlives its paths, layers and optimizers" is documented
+  rather than enforced (same as tch-rs's lifetime `'a`, minus the compiler).
+- **One `Forward` with `Train: Boolean = False`** instead of `Module` and
+  `ModuleT`. Layers that ignore `Train` just ignore it. Overrides must repeat
+  the default value for callers through the derived type to see it **(H9)**.
+  A PyTorch-style `Training` flag on the module was considered and rejected
+  for now: propagating it requires child registration machinery
+  (`__setattr__` magic in Python) that Pascal would have to spell out.
+- **Layers are classes that own nothing but tensors** (refcounted). They are
+  created with a `TVarPath` and register their parameters, like tch-rs.
+  `TSequential` owns its children. A user model is a `TModule` subclass that
+  creates sub-layers in its constructor and frees them in its destructor —
+  the Lazarus component pattern.
+- **Configs** are records with a `Default*` function (Pascal records cannot
+  have default field values); the common case gets an overload without the
+  config. Optimizers use default parameters instead, because their options
+  are flat.
+- **Variable names** use `.` as separator and are written with `|` in
+  `.ot` files, exactly as tch-rs does, so files are interchangeable with
+  tch-rs and with `Tensor::save_multi` readers.
+- **Thread safety:** tch-rs wraps `Variables` in a mutex because Rust forces
+  the question. The first Pascal version documents `TVarStore` as not
+  thread-safe; a `TCriticalSection` can be added without API change.
+- **JIT.** `TJitModule` is a class (few instances, explicit lifetime, like a
+  file). `TIValue` is a tagged record (`Tag`, `Tensor`, `I`, `D`, `B`, `S`,
+  `Items: array of TIValue`, `Tensors: TTensorArray`, ...) with static
+  constructors (`TIValue.Tuple([...])`) and `As*` accessors that raise on a
+  tag mismatch. **(H10)** A record containing a dynamic array of its own type
+  must compile on 3.2.2; the fallback is an fpjson-style class hierarchy.
+  `TTrainableJitModule` registers `NamedParameters` into a `TVarPath` and
+  derives from `TModule`, so a scripted model can be fine-tuned with
+  `TOptimizer` like any other layer.
+
+### 4.7 Grad mode and global settings
+
+```pascal
+function  SetGradEnabled(Enabled: Boolean): Boolean;   // returns previous; thread-local in libtorch
+function  NoGradGuard: IInterface;                     // restores the previous mode when released
+procedure ManualSeed(Seed: Int64);
+procedure SetNumThreads(N: Integer); function GetNumThreads: Integer;
+function  CudaIsAvailable: Boolean; function CudaDeviceCount: Integer;
+```
+
+Usage: `var G: IInterface; ... G := NoGradGuard; Loss := Model.Forward(X);`.
+**(H11)** FPC releases interface-typed locals at routine exit (not at block
+exit), so the guard covers the rest of the routine; a `try..finally` with
+`SetGradEnabled` is the alternative when a narrower scope matters. Autocast
+follows the same pattern later.
 
 ## 5. Code generation (decision)
 
@@ -403,15 +826,23 @@ include files.
   manifest `gen/ops.tsv`, one op per line, e.g.
 
   ```
-  add	method	fixed1	self:Tensor	other:Tensor
-  max_dim	method	fixed2	self:Tensor	dim:Int64	keepdim:Bool	->values,indices
-  zeros	function	fixed1	size:IntList	options:TensorOptions
-  split	method	dynamic	self:Tensor	split_size:Int64	dim:Int64
+  add	method	self	fixed1	self:Tensor	other:Tensor
+  max_dim	method	self	fixed2	self:Tensor	dim:Int64	keepdim:Bool=False	->values,indices
+  conv2d	method	input	fixed1	input:Tensor	weight:Tensor	bias:TensorOption	stride:IntList=1	...
+  zeros	function	-	fixed1	size:IntList	options:TensorOptions
+  split	method	self	dynamic	self:Tensor	split_size:Int64	dim:Int64=0
   ```
 
+  Columns: exported name, kind, receiver (`self` / `input` / `-`), result
+  shape, arguments as `name:Type[=default]` (the YAML `default` string,
+  verbatim), optional `->` return names from `returns[].name`. gen.ml
+  already has the defaults; reading return names is a small addition.
 - The Pascal emitter is an FPC program (`gen/tchgen.pas`, runnable with
   `instantfpc`) that reads `ops.tsv` and writes `TchSysGenerated.pas` and the
-  two `.inc` files. No Python/Node (CLAUDE.md).
+  two `.inc` files. It owns all Pascal-specific policy: reserved-word
+  escaping, parameter suffixes, default-parameter runs, the nil-handle
+  checks, and the case-insensitive collision check against a list of
+  hand-written member names. No Python/Node (CLAUDE.md).
 - Generated files are committed, so OCaml is only needed when bumping
   libtorch, not to build tch-fpc.
 - Rejected: parsing `torch_api_generated.h` directly — it loses the type
@@ -423,5 +854,6 @@ include files.
 CPU only, Linux x86-64, libtorch 2.13.0:
 create tensors from Pascal arrays, read data back, print, arithmetic
 operators, a handful of generated ops, error → `ETorchError`, no leaks under
-a loop of 10^6 temporaries. Autograd (`at_backward`, `requires_grad_`),
-optimizers, VarStore/nn, JIT modules and CUDA follow in that order.
+a loop of 10^6 temporaries, FPU mask verified. Autograd (`at_backward`,
+`requires_grad_`), optimizers, VarStore/nn, JIT modules and CUDA follow in
+that order.

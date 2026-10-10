@@ -222,6 +222,14 @@
   生成器は衝突する引数名・out の結果名に（重ならなくなるまで）`_` を足し、手書きの
   メンバーはよくある引数名を避ける（`Dim` → `NumDims`。`src/Tch.pas` に反映済み）。
   ルールと数字は DESIGN_jp.md の 4.4。
+  tch-rs でこれが要らなかった理由：Rust では引数はただのローカル変数で、メソッドは
+  `self.dim()` や `Tensor::dim` の形でしか呼べないので、`fn dim(&self)` と `dim: i64` を
+  持つ約250の op が共存できる（`{$mode delphi}` はこの点で Rust と同じ振る舞い）。
+  tch-rs が *対処している* のは op 名の衝突で、手順8ではこちらの名前に対して同じ
+  チェックが必要：gen.ml の `replace_map`（Rust の予約語の `where`/`unsafe`、手書きの
+  メソッドと重なる `view`、`to_device`、`t` → `tr`）と `prefixed_functions`（素の名前を
+  手書き版に譲る `add`、`mul`、`div`、`sub` などに `g_` を付ける）。これらは Rust の
+  ラッパーの名前を変えるだけで、生成器が読む `atg_*` の名前には影響しない。README にも記載。
 - **複数出力の op**：`out` 引数（決定済み）。実際にコードを書いてから、よく使う op
   （`max_dim`、`sort`、`topk`、`lstm`）に手書きの結果用 record を足す価値があるか
   見直す。(H8) でエイリアシングの危険が実際に問題になるなら、`out` の代わりに `var` に

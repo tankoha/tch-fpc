@@ -223,6 +223,16 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
   parameter/out names, and hand-written members avoid common parameter
   names (`Dim` → `NumDims`, done in `src/Tch.pas`). Rule and numbers in
   DESIGN.md 4.4.
+  Why tch-rs never needed this: in Rust, parameters are plain locals and
+  methods are reachable only as `self.dim()` / `Tensor::dim`, so
+  `fn dim(&self)` and ~250 ops with `dim: i64` coexist. (`{$mode delphi}`
+  behaves like Rust here.) What tch-rs *does* handle, and step 8 must
+  check against our own names: op-name collisions in gen.ml's
+  `replace_map` (`where`/`unsafe` for Rust keywords; `view`, `to_device`,
+  `t` → `tr` for hand-written methods) and `prefixed_functions` (`g_`
+  prefix for `add`, `mul`, `div`, `sub`, ... whose plain names go to
+  hand-written versions). These only rename the Rust wrappers; the
+  `atg_*` names our generator reads are unaffected. Also in README.
 - **Multi-output ops**: `out` parameters (decided) — revisit whether a few
   hand-written result records (`max_dim`, `sort`, `topk`, `lstm`) are worth
   adding after writing real code. Also whether `var` instead of `out` is

@@ -4,6 +4,66 @@
 
 再開するときは最初にこれを読んでください。決定事項と理由は [DESIGN_jp.md](DESIGN_jp.md) にあります。
 
+## クラウドへの引き継ぎ（2026-10-10、ローカルセッション2の終了時点）
+
+**設計のみ。** コミットするコード（ユニット、生成器、テスト）は書かないこと。
+論点を決めるための小さな使い捨ての計測はよい（CLAUDE.md）。実装はローカル
+セッションに戻す。本物の libtorch がないと確認できないことは、ローカル向けの
+新しい仮説（H13 以降）として印を付ける。クラウドのコンテナには FPC はあるが
+libtorch はない（`tests/mock` の mock `libtch.so` は使える）。
+
+マイルストーン1は完了（下の「ローカルセッション2」）。次は DESIGN 4.6
+（オプティマイザ、VarStore/nn）。4.6 で全体の形は決まっているが、次の点は
+機械的に実装できるほどには決まっていない：
+
+1. **初期化（`TInit.Make`）。** tch-rs 4227b89b の `nn/init.rs` に沿った正確な式：
+   `Dims` からの fan-in/fan-out（どの次元か、畳み込みのカーネル）、`KaimingUniform`
+   のゲインと範囲（tch-rs の `DEFAULT_KAIMING_UNIFORM`）、`KaimingNormal`、
+   `Orthogonal`（どの生成 op を使うか：`linalg_qr`？符号の補正は？）、`Make` を
+   `NoGradGuard` の下で実行するか。それぞれが呼ぶ生成 op（名前は
+   `src/TchTensorGenerated_intf.inc` のとおり）。
+2. **`TVarStore` の内部。** 名前付き変数のコンテナ（`Variables`/`TrainableVariables`
+   とオプティマイザの遅延追加には順序が効く）、変数ごとの trainable フラグとグループ、
+   名前の検証（tch-rs は名前の中の `.` を拒否）、同名で `Add` したときの動作、
+   `Freeze`/`Unfreeze`/`SetDevice`/`SetKind`/`CopyFrom` が既存のハンドルに何をするか
+   （その場で？no-grad の下で？）。等価性とコンテナの論点：`Generics.Collections` か
+   素の配列か。
+3. **Save/Load。** C の入口：`at_save_multi(tensors, names, n, filename)`、
+   `at_load_multi(tensors, names, n, filename)`（nil の配列を渡すと新しいテンソルが
+   返る）、`at_load_multi_`（既存のテンソルにコピー）、コールバック形式の
+   `at_load_callback[_with_device]` / `at_loadz_callback[_with_device]`
+   （`void (*f)(void *data, char *name, tensor t)`）。tch-rs と同様に
+   `Save`/`Load`/`LoadPartial` がどれを使うか決める。**手順4からの制約：** Pascal の
+   例外を C++ のフレームを通して伝播させてはならないので、Pascal のコールバックは
+   例外を出さない。エラーを記録し、C の呼び出しから戻った後で呼び出し側が raise する。
+   コールバックの宣言（`cdecl`、`data` で Pascal のオブジェクトをどう渡すか）も設計に
+   含める。名前の `.` ↔ `|` は tch-rs と同じ。
+4. **オプティマイザ。** C のシグネチャ：`ato_sgd(lr, momentum, dampening,
+   weight_decay, int nesterov)`、`ato_adam/ato_adamw(lr, beta1, beta2,
+   weight_decay, eps, bool amsgrad)`、`ato_rms_prop(lr, alpha, eps,
+   weight_decay, momentum, int centered)`、`ato_add_parameters(opt, t,
+   size_t group)`、`ato_set_learning_rate[_group]`、`ato_set_momentum[_group]`、
+   `ato_set_weight_decay[_group]`、`ato_zero_grad`、`ato_step`、`ato_free`
+   （すべて `PROTECT` 付きなので毎回 `TchCheck`）。決めること：`PTorchOptimizer` 型、
+   新しい trainable 変数の遅延追加の方法（tch-rs の `variables_in_optimizer`）、
+   勾配クリッピングの実装（`ClipGradValue`/`ClipGradNorm` を Pascal 側で生成 op を
+   使って書く：どの op か、no-grad の下か）、AdamW/RmsProp のデフォルト値（tch-rs のもの）。
+5. **マイルストーン2のレイヤー。** `TLinear` 以外に何を入れるか（tch-rs でよく使われる
+   順：`Conv2D`、`BatchNorm`、`Embedding`、`LayerNorm`、関数としての `Dropout`、
+   `LSTM`/`GRU`？）。それぞれの設定 record、デフォルトの初期化（tch-rs のもの）、
+   `Forward` が呼ぶ生成 op。`TLinear` の forward は `matmul` + bias か `linear` か。
+6. **`TSequential` / `TFuncModule`。** `TObjectList` か
+   `specialize TObjectList<TModule>` か。`AddFn` は素の関数ポインタか `of object` か。
+   train フラグを子に渡すか（渡す：すべての子に `Forward(X, Train)`）。
+7. **ユニット構成とテスト。** `TchNN`（と、必要なら `TchOptim`）のユニットと
+   何をどこに置くか。手で確かめられる数値を使ったマイルストーン2の受け入れテスト
+   （例：SGD の線形回帰が既知の重みに収束する、小さな問題での Adam、
+   save → load の往復、`LoadPartial` が欠けた名前を返す）と、mock ライブラリで
+   どこまで検証できるか。
+
+いつもどおり最後に DESIGN/HANDOFF（英語・日本語）を更新すること。設計の前提に
+してよいローカルの状態は、下の「ローカルセッション2」にあるものすべて。
+
 ## 現状（2026-10-10、クラウド設計セッション2回目の終了時点）
 
 - 3つの層すべての設計を DESIGN.md に書きました。まだ何もビルドしていません。
@@ -123,9 +183,7 @@ FPC 3.2.2 を入れ、OCaml は apt から（`yaml` は入らなかった：opam
     op 名を避ける。
   - `tests/mock/mock_tch.c` に新しい手書き external のスタブを追加。
 
-次：DESIGN 4.6 に沿ってオプティマイザ（`ato_*`）と VarStore/nn。4.6 がローカルで
-実装できるほど詳しいか、先にクラウドの設計セッションに戻すかをユーザーに確認する
-（クラウドは設計のみ、CLAUDE.md 参照）。
+次：DESIGN 4.6 のクラウド設計セッション（依頼はこのファイルの先頭）。
 
 ローカルセッションでやること（この順で。すべて機械的）：
 

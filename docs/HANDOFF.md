@@ -4,6 +4,75 @@ Japanese version: [HANDOFF_jp.md](HANDOFF_jp.md)
 
 Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 
+## Handing back to the cloud (2026-10-10, end of local session 2)
+
+**Design only.** Do not write committed code (units, generator, tests);
+small throwaway measurements to settle a question are fine (CLAUDE.md).
+Implementation comes back to a local session. Mark anything that needs
+real libtorch to confirm as a new hypothesis (H13, ...) for the local
+session; the cloud container has FPC but no libtorch (the mock
+`libtch.so` in `tests/mock` is available).
+
+Milestone 1 is done (see "Local session 2" below). Next is DESIGN 4.6
+(optimizers, VarStore/nn). 4.6 fixes the overall shape, but these points
+are not settled enough to implement mechanically:
+
+1. **Initialisation (`TInit.Make`).** Exact formulas, following tch-rs
+   `nn/init.rs` at 4227b89b: fan-in/fan-out from `Dims` (which dims, conv
+   kernels), `KaimingUniform` gain and bound (tch-rs
+   `DEFAULT_KAIMING_UNIFORM`), `KaimingNormal`, `Orthogonal` (which
+   generated ops: `linalg_qr`? sign fix?), and whether `Make` runs under
+   `NoGradGuard`. Which generated ops each one calls (names as in
+   `src/TchTensorGenerated_intf.inc`).
+2. **`TVarStore` internals.** Container for named variables (ordering
+   matters for `Variables`/`TrainableVariables` and for the optimizer's
+   lazy add), the trainable flag and group per variable, name validation
+   (tch-rs rejects `.` inside a name), behaviour of `Add` on a duplicate
+   name, and what `Freeze`/`Unfreeze`/`SetDevice`/`SetKind`/`CopyFrom` do
+   to existing handles (in place, under no-grad?). Equality/containers
+   open question: `Generics.Collections` vs a plain array.
+3. **Save/Load.** C entry points: `at_save_multi(tensors, names, n,
+   filename)`, `at_load_multi(tensors, names, n, filename)` (nil array in,
+   new tensors out), `at_load_multi_` (copies into existing), and the
+   callback forms `at_load_callback[_with_device]` /
+   `at_loadz_callback[_with_device]` with
+   `void (*f)(void *data, char *name, tensor t)`. Decide which ones
+   `Save`/`Load`/`LoadPartial` use, as tch-rs does. **Constraint from
+   step 4:** a Pascal exception must never propagate through C++ frames,
+   so a Pascal callback must not raise; it records the error and the
+   caller raises after the C call returns. The callback declaration
+   (`cdecl`, how `data` carries the Pascal object) belongs in the design.
+   `.` ↔ `|` in names as tch-rs.
+4. **Optimizers.** C signatures: `ato_sgd(lr, momentum, dampening,
+   weight_decay, int nesterov)`, `ato_adam/ato_adamw(lr, beta1, beta2,
+   weight_decay, eps, bool amsgrad)`, `ato_rms_prop(lr, alpha, eps,
+   weight_decay, momentum, int centered)`, `ato_add_parameters(opt, t,
+   size_t group)`, `ato_set_learning_rate[_group]`, `ato_set_momentum[_group]`,
+   `ato_set_weight_decay[_group]`, `ato_zero_grad`, `ato_step`, `ato_free`
+   (all `PROTECT`ed, so `TchCheck` after each). Decide: the
+   `PTorchOptimizer` type, how lazy adding of new trainable variables
+   works (tch-rs `variables_in_optimizer`), the gradient clipping
+   implementation (`ClipGradValue`/`ClipGradNorm` in Pascal over
+   generated ops: which ones, under no-grad), and AdamW/RmsProp default
+   values (tch-rs's).
+5. **Layers for milestone 2.** Which ones besides `TLinear` (tch-rs order
+   of popularity: `Conv2D`, `BatchNorm`, `Embedding`, `LayerNorm`,
+   `Dropout` as a function, `LSTM`/`GRU`?), each with its config record,
+   default init (tch-rs's), and the generated op its `Forward` calls.
+   `TLinear` forward: `matmul` + bias or `linear`?
+6. **`TSequential` / `TFuncModule`.** `TObjectList` vs
+   `specialize TObjectList<TModule>`, `AddFn` with plain function
+   pointers vs `of object`, and whether the sequential needs the train
+   flag passed down (it does: `Forward(X, Train)` to every child).
+7. **Unit layout and tests.** `TchNN` (and maybe `TchOptim`) units, what
+   goes where; a milestone 2 acceptance test with hand-checkable numbers
+   (e.g. linear regression with SGD converging to known weights, Adam on
+   a tiny problem, save → load round trip, `LoadPartial` missing names),
+   plus which parts the mock library can cover.
+
+Keep DESIGN/HANDOFF (en + jp) current at the end, as usual. Local state
+the design can rely on: everything in "Local session 2" below.
+
 ## State (2026-10-10, end of cloud design session 2)
 
 - Design for all three layers written in DESIGN.md. Nothing built yet.
@@ -132,9 +201,7 @@ committed code does.
     single-letter op names.
   - `tests/mock/mock_tch.c` got stubs for the new hand-written externals.
 
-Next: optimizers (`ato_*`) and VarStore/nn per DESIGN 4.6. Ask the user
-whether 4.6 is detailed enough to implement locally or goes back to a
-cloud design session first (cloud sessions design only, see CLAUDE.md).
+Next: cloud design session for DESIGN 4.6 (request at the top of this file).
 
 Local session, in this order (all mechanical):
 

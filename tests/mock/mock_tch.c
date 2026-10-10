@@ -1,6 +1,6 @@
 /* Mock libtch for testing the generated Pascal layer without libtorch
    (cloud sessions, CI). Implements the handful of at_, ats_ and atg_ entry
-   points that tests/mock/mock_test.pas and nn_mock_test.pas exercise on a tiny CPU "tensor"
+   points that the Pascal tests in tests/mock exercise on a tiny CPU "tensor"
    (double data, up to 8 dims); every other atg_ function is a generated
    stub that reports "mock: not implemented" through the error slot
    (gen_stubs.sh). Built by tests/mock/run.sh into build/mock/libtch.so.
@@ -519,3 +519,254 @@ void ato_free(optimizer t) {
   free(t);
   live_opts--;
 }
+
+/* JIT (DESIGN.md 4.6.8, "Mock"). An ivalue is a tagged struct with real
+   payloads; containers own deep copies of their children, as the C++
+   IValues are copied. Tags follow ati_tag; a string list is stored as a
+   generic list of strings (ati_tag 12, as libtorch reports it) and a
+   device makes ati_tag fail, as in libtorch. */
+#define IV_DEVICE 21
+typedef struct mock_ivalue {
+  int tag;
+  mock_tensor *t;               /* 1 */
+  int64_t i;                    /* 3, 4 */
+  double d;                     /* 2 */
+  char *s;                      /* 9 */
+  int n;                        /* list length; dict: pairs */
+  int64_t *ints;                /* 6 */
+  double *doubles;              /* 7 */
+  char *bools;                  /* 8 */
+  mock_tensor **tensors;        /* 10 */
+  struct mock_ivalue **items;   /* 5, 12; 13: 2n, k0 v0 k1 v1 ... */
+} mock_ivalue;
+
+static int live_ivalues = 0;
+static char *iv_strdup(const char *s) { char *p = malloc(strlen(s) + 1); strcpy(p, s); return p; }
+int mock_live_ivalues(void) { return live_ivalues; }
+
+static mock_ivalue *iv_new(int tag) {
+  mock_ivalue *v = calloc(1, sizeof *v);
+  v->tag = tag;
+  live_ivalues++;
+  return v;
+}
+
+static int iv_nitems(const mock_ivalue *v) { return v->tag == 13 ? 2 * v->n : v->n; }
+
+static mock_ivalue *iv_clone(const mock_ivalue *s) {
+  mock_ivalue *v = iv_new(s->tag);
+  v->i = s->i; v->d = s->d; v->n = s->n;
+  if (s->t) v->t = copy_of(s->t);
+  if (s->s) v->s = iv_strdup(s->s);
+  if (s->ints) { v->ints = malloc(s->n * sizeof(int64_t) + 1); memcpy(v->ints, s->ints, s->n * sizeof(int64_t)); }
+  if (s->doubles) { v->doubles = malloc(s->n * sizeof(double) + 1); memcpy(v->doubles, s->doubles, s->n * sizeof(double)); }
+  if (s->bools) { v->bools = malloc(s->n + 1); memcpy(v->bools, s->bools, s->n); }
+  if (s->tensors) {
+    v->tensors = calloc(s->n + 1, sizeof(mock_tensor *));
+    for (int k = 0; k < s->n; k++) v->tensors[k] = copy_of(s->tensors[k]);
+  }
+  if (s->items) {
+    int m = iv_nitems(s);
+    v->items = calloc(m + 1, sizeof(mock_ivalue *));
+    for (int k = 0; k < m; k++) v->items[k] = iv_clone(s->items[k]);
+  }
+  return v;
+}
+
+void ati_free(ivalue i) {
+  mock_ivalue *v = i;
+  if (!v) return;
+  if (v->t) at_free(v->t);
+  free(v->s); free(v->ints); free(v->doubles); free(v->bools);
+  if (v->tensors) { for (int k = 0; k < v->n; k++) at_free(v->tensors[k]); free(v->tensors); }
+  if (v->items) { for (int k = 0; k < iv_nitems(v); k++) ati_free(v->items[k]); free(v->items); }
+  free(v);
+  live_ivalues--;
+}
+
+ivalue ati_none(void) { return iv_new(0); }
+ivalue ati_tensor(tensor t) {
+  if (!t) { set_err("mock: nil tensor"); return NULL; }
+  mock_ivalue *v = iv_new(1); v->t = copy_of(t); return v;
+}
+ivalue ati_int(int64_t x) { mock_ivalue *v = iv_new(3); v->i = x; return v; }
+ivalue ati_double(double x) { mock_ivalue *v = iv_new(2); v->d = x; return v; }
+ivalue ati_bool(int x) { mock_ivalue *v = iv_new(4); v->i = x != 0; return v; }
+ivalue ati_string(char *s) { mock_ivalue *v = iv_new(9); v->s = iv_strdup(s); return v; }
+static ivalue iv_container(int tag, ivalue *is, int n, int nitems) {
+  mock_ivalue *v = iv_new(tag);
+  v->n = n;
+  v->items = calloc(nitems + 1, sizeof(mock_ivalue *));
+  for (int k = 0; k < nitems; k++) v->items[k] = iv_clone(is[k]);
+  return v;
+}
+ivalue ati_tuple(ivalue *is, int n) { return iv_container(5, is, n, n); }
+ivalue ati_generic_list(ivalue *is, int n) { return iv_container(12, is, n, n); }
+ivalue ati_generic_dict(ivalue *is, int npairs) { return iv_container(13, is, npairs, 2 * npairs); }
+ivalue ati_int_list(int64_t *xs, int n) {
+  mock_ivalue *v = iv_new(6); v->n = n;
+  v->ints = malloc(n * sizeof(int64_t) + 1); if (n) memcpy(v->ints, xs, n * sizeof(int64_t));
+  return v;
+}
+ivalue ati_double_list(double *xs, int n) {
+  mock_ivalue *v = iv_new(7); v->n = n;
+  v->doubles = malloc(n * sizeof(double) + 1); if (n) memcpy(v->doubles, xs, n * sizeof(double));
+  return v;
+}
+ivalue ati_bool_list(char *xs, int n) {
+  mock_ivalue *v = iv_new(8); v->n = n;
+  v->bools = malloc(n + 1);
+  for (int k = 0; k < n; k++) v->bools[k] = xs[k] != 0;
+  return v;
+}
+ivalue ati_string_list(char **xs, int n) {
+  mock_ivalue *v = iv_new(12); v->n = n;
+  v->items = calloc(n + 1, sizeof(mock_ivalue *));
+  for (int k = 0; k < n; k++) v->items[k] = ati_string(xs[k]);
+  return v;
+}
+ivalue ati_tensor_list(tensor *xs, int n) {
+  for (int k = 0; k < n; k++)
+    if (!xs[k]) { set_err("mock: nil tensor in list"); return NULL; }
+  mock_ivalue *v = iv_new(10); v->n = n;
+  v->tensors = calloc(n + 1, sizeof(mock_tensor *));
+  for (int k = 0; k < n; k++) v->tensors[k] = copy_of(xs[k]);
+  return v;
+}
+ivalue ati_device(int device) { mock_ivalue *v = iv_new(IV_DEVICE); v->i = device; return v; }
+
+int ati_tag(ivalue i) {
+  mock_ivalue *v = i;
+  if (v->tag == IV_DEVICE) { set_err("unsupported tag Device"); return -1; }
+  return v->tag;
+}
+static int expect_tag(mock_ivalue *v, int tag) {
+  if (v->tag == tag) return 1;
+  char buf[64]; snprintf(buf, sizeof buf, "mock: expected tag %d, got %d", tag, v->tag);
+  set_err(buf);
+  return 0;
+}
+tensor ati_to_tensor(ivalue i) { return expect_tag(i, 1) ? copy_of(((mock_ivalue *)i)->t) : NULL; }
+int64_t ati_to_int(ivalue i) { return expect_tag(i, 3) ? ((mock_ivalue *)i)->i : -1; }
+double ati_to_double(ivalue i) { return expect_tag(i, 2) ? ((mock_ivalue *)i)->d : 0; }
+int ati_to_bool(ivalue i) { return expect_tag(i, 4) ? (int)((mock_ivalue *)i)->i : -1; }
+char *ati_to_string(ivalue i) { return expect_tag(i, 9) ? iv_strdup(((mock_ivalue *)i)->s) : NULL; }
+int ati_length(ivalue i) {
+  mock_ivalue *v = i;
+  switch (v->tag) {
+    case 5: case 6: case 7: case 8: case 10: case 12: case 13: return v->n;
+    case 9: return (int)strlen(v->s);
+  }
+  set_err("mock: unsupported tag for length");
+  return -1;
+}
+int ati_tuple_length(ivalue i) { return expect_tag(i, 5) ? ((mock_ivalue *)i)->n : -1; }
+static void iv_items_out(mock_ivalue *v, int tag, ivalue *outputs, int n, int nitems) {
+  if (!expect_tag(v, tag)) return;
+  if (v->n != n) { set_err("mock: unexpected size"); return; }
+  for (int k = 0; k < nitems; k++) outputs[k] = iv_clone(v->items[k]);
+}
+void ati_to_tuple(ivalue i, ivalue *outputs, int n) { iv_items_out(i, 5, outputs, n, n); }
+void ati_to_generic_list(ivalue i, ivalue *outputs, int n) { iv_items_out(i, 12, outputs, n, n); }
+void ati_to_generic_dict(ivalue i, ivalue *outputs, int npairs) { iv_items_out(i, 13, outputs, npairs, 2 * npairs); }
+static int list_ok(mock_ivalue *v, int tag, int n) {
+  if (!expect_tag(v, tag)) return 0;
+  if (v->n != n) { set_err("mock: unexpected size"); return 0; }
+  return 1;
+}
+void ati_to_int_list(ivalue i, int64_t *outputs, int n) {
+  if (list_ok(i, 6, n) && n) memcpy(outputs, ((mock_ivalue *)i)->ints, n * sizeof(int64_t));
+}
+void ati_to_double_list(ivalue i, double *outputs, int n) {
+  if (list_ok(i, 7, n) && n) memcpy(outputs, ((mock_ivalue *)i)->doubles, n * sizeof(double));
+}
+void ati_to_bool_list(ivalue i, char *outputs, int n) {
+  if (list_ok(i, 8, n) && n) memcpy(outputs, ((mock_ivalue *)i)->bools, n);
+}
+void ati_to_tensor_list(ivalue i, tensor *outputs, int n) {
+  if (!list_ok(i, 10, n)) return;
+  for (int k = 0; k < n; k++) outputs[k] = copy_of(((mock_ivalue *)i)->tensors[k]);
+}
+
+/* modules: loading fails for a name containing "missing"; forward/method
+   return a copy of the first tensor, the ivalue forms a tuple of clones of
+   the inputs; the rest only records its arguments. */
+typedef struct { int dummy; } mock_module;
+static int live_modules = 0, module_training = -1, last_to_device = 99, last_to_dtype = 99;
+static int tracing_begins = 0, tracing_ends = 0, last_end_noutputs = -1;
+static int creates = 0, registered = 0, defines = 0, last_load_str_size = -1;
+static char last_method[64], last_module_file[256], last_source[256];
+static int profiling_mode = 1, fuser_enabled = 0;
+int mock_live_modules(void) { return live_modules; }
+int mock_module_training(void) { return module_training; }
+int mock_last_to_device(void) { return last_to_device; }
+int mock_last_to_dtype(void) { return last_to_dtype; }
+int mock_tracing_begins(void) { return tracing_begins; }
+int mock_tracing_ends(void) { return tracing_ends; }
+int mock_last_end_noutputs(void) { return last_end_noutputs; }
+int mock_creates(void) { return creates; }
+int mock_registered(void) { return registered; }
+int mock_defines(void) { return defines; }
+int mock_last_load_str_size(void) { return last_load_str_size; }
+const char *mock_last_method(void) { return last_method; }
+const char *mock_last_module_file(void) { return last_module_file; }
+const char *mock_last_source(void) { return last_source; }
+
+static module new_module(void) { live_modules++; return calloc(1, sizeof(mock_module)); }
+module atm_load(char *filename) {
+  if (strstr(filename, "missing")) { set_err("mock: open file failed"); return NULL; }
+  snprintf(last_module_file, sizeof last_module_file, "%s", filename);
+  return new_module();
+}
+module atm_load_on_device(char *filename, int device) { last_to_device = device; return atm_load(filename); }
+module atm_load_str(char *data, size_t sz) { (void)data; last_load_str_size = (int)sz; return new_module(); }
+module atm_load_str_on_device(char *data, size_t sz, int device) { last_to_device = device; return atm_load_str(data, sz); }
+void atm_free(module m) { if (!m) return; free(m); live_modules--; }
+static tensor first_copy(const char *name, tensor *tensors, int n) {
+  snprintf(last_method, sizeof last_method, "%s", name);
+  if (n == 0) { set_err("mock: no input"); return NULL; }
+  return copy_of(tensors[0]);
+}
+tensor atm_forward(module m, tensor *tensors, int n) { (void)m; return first_copy("forward", tensors, n); }
+tensor atm_method(module m, char *name, tensor *tensors, int n) { (void)m; return first_copy(name, tensors, n); }
+ivalue atm_forward_(module m, ivalue *ivalues, int n) {
+  (void)m; snprintf(last_method, sizeof last_method, "forward");
+  return ati_tuple(ivalues, n);
+}
+ivalue atm_method_(module m, char *name, ivalue *ivalues, int n) {
+  (void)m; snprintf(last_method, sizeof last_method, "%s", name);
+  return ati_tuple(ivalues, n);
+}
+void atm_eval(module m) { (void)m; module_training = 0; }
+void atm_train(module m) { (void)m; module_training = 1; }
+void atm_to(module m, int device, int dtype, bool non_blocking) {
+  (void)m; (void)non_blocking; last_to_device = device; last_to_dtype = dtype;
+}
+void atm_save(module m, char *filename) { (void)m; snprintf(last_module_file, sizeof last_module_file, "%s", filename); }
+int atm_get_profiling_mode(void) { return profiling_mode; }
+void atm_set_profiling_mode(int b) { profiling_mode = b; }
+void atm_set_tensor_expr_fuser_enabled(int b) { fuser_enabled = b; }
+bool atm_get_tensor_expr_fuser_enabled(void) { return fuser_enabled != 0; }
+void at_set_graph_executor_optimize(bool b) { (void)b; }
+/* weight [2, 3] requires grad, sub.bias [2] does not */
+void atm_named_parameters(module m, void *data, void (*f)(void *, char *, tensor)) {
+  (void)m;
+  int64_t d1[2] = { 2, 3 }, d2[1] = { 2 };
+  mock_tensor *w = mk(2, d1, 6);
+  w->requires_grad = 1;
+  f(data, "weight", w);
+  f(data, "sub.bias", mk(1, d2, 6));
+}
+module atm_create_for_tracing(char *name, tensor *inputs, int n) {
+  (void)name; (void)inputs; (void)n; tracing_begins++; return new_module();
+}
+void atm_end_tracing(module m, char *fn_name, tensor *outputs, int n) {
+  (void)m; (void)fn_name; (void)outputs; tracing_ends++; last_end_noutputs = n;
+}
+module atm_create(char *name) { (void)name; creates++; return new_module(); }
+void atm_register_parameter(module m, char *name, tensor t, bool is_buffer) {
+  (void)m; (void)name; (void)is_buffer;
+  if (!t) { set_err("mock: nil tensor"); return; }
+  registered++;
+}
+void atm_define(module m, char *src) { (void)m; defines++; snprintf(last_source, sizeof last_source, "%s", src); }

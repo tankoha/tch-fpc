@@ -9,6 +9,7 @@ lib/
 backup/
 # libtorch is downloaded locally, never committed
 libtorch/
+libtorch-*/
 # CMake build trees
 build/
 # dune build tree (gen/)

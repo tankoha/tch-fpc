@@ -1258,7 +1258,7 @@ type
   **(H13) 解決**（ローカルセッション3、CPU のみ）：`SetKind(kDouble)` のあと `TLinear`
   の `Weight`（同じハンドル）は `kDouble` になり、変換前に作った SGD がそれを手計算どおり
   `[0.9, 0.8]` に更新し、`kDouble` のまま。`SetDevice(Cpu)` 後もハンドルは使える。実際の
-  デバイス移動は GPU 版で確認する。
+  デバイス移動は 4.8 の GPU テスト項目 5。
 - **`SetKind(K)`**（`set_kind` → ルートの `Path::set_kind`）：全要素に
   `T.set_data(T.totype(K))`、その後 `FKind := K`。**`SetFloatKind(K)`**（tch-rs の
   `half` / `bfloat16` / `float` / `double`）：`is_floating_point` が真の要素のみ。
@@ -1600,7 +1600,8 @@ BoolList、String、TensorList、GenericList、GenericDict）に対する `TIVal
 `Object`、テスト `jit6` と `jit_double_free`、資材 `foo6.pt`/`foo7.pt`）。オブジェクトは
 C の `IValue` を生かし続けるので `TTensorHandle` のような参照カウント付きハンドルが必要で、
 微調整の用途には要らないからです — **その後 4.6.9 で設計済み**（設計セッション6）。
-それと `atm_fuser_cuda_*`（CUDA と一緒に）。
+それと `atm_fuser_cuda_*`（CUDA と一緒に）— **その後 4.8 で設計済み**（設計セッション8、
+`JitFuserCudaEnabled`/`SetJitFuserCudaEnabled`）。
 
 **L2（`TchSys.pas`）。** `PTorchModule = Pointer`（`torch::jit::script::Module*`）、
 `PTorchIValue = Pointer`（`torch::jit::IValue*`）、`PPTorchIValue = ^PTorchIValue`。
@@ -2512,7 +2513,8 @@ record は測らずに却下：`specialize TConvConfigND<TInt3>` は互いに無
 - **(H29)** tch-rs の `lstm`/`gru`/`conv_transpose2d`/`group_norm` が書いた `.ot`
   ファイルとの相互運用（名前と形は構成上一致する。ファイルを作るには Rust ツール
   チェーンが要る）。
-- **(H30)** CUDA/ROCm の store での cuDNN 平坦化呼び出し（項目3）。
+- **(H30)** CUDA/ROCm の store での cuDNN 平坦化呼び出し（項目3）— 条件・呼び出し・
+  テストは 4.8（「GPU 上の H13 と H30」、GPU テスト項目 8）に移った。
 
 テスト一覧、`tests/nn/nn_test.pas` のグループ11「マイルストーン3のレイヤー」
 （数値は tch-rs と記したもの以外、ここで生成 op に対して*実測*）：
@@ -2581,6 +2583,231 @@ function  CudaIsAvailable: Boolean; function CudaDeviceCount: Integer;
 巻き戻しの途中で解放されます。**落とし穴：** 戻り値を代入せずに `NoGradGuard;` と
 呼ぶと、ガードは次の文より前にすぐ解放されるので効果がありません。API のコメントに
 書くこと。
+
+### 4.8 GPU デバイス：CUDA と ROCm（決定、設計セッション8）
+
+範囲：既存の Pascal API を、libtorch 2.13.0 の CUDA 版または ROCm（HIP）版で、同じ
+`TchSys`/`Tch`/`TchNN`/`TchJit` のソースのまま 1 枚の GPU で動かす。最初の対象は手元の
+AMD Radeon RX 9070（`gfx1201`）での ROCm。CUDA との違いは展開する libtorch アーカイブ
+だけ。**(H31)**〜**(H36)** は ROCm 版 libtorch が要り、まだこのマシンにはない。
+
+**ローカルで確認したこと（設計セッション8、2026-10-11）：**
+- `rocm-smi --showproductname`：GPU[0] RX 9070、GFX version `gfx1201`；GPU[1] Raphael の
+  iGPU、`gfx1036`。`/sys/class/kfd/kfd/topology/nodes/` にも両方ある
+  （`gfx_target_version` 120001 と 100306）ので、カーネル側（amdgpu + KFD、kernel 7.0.0）
+  は動いている。
+- インストール済みの ROCm ユーザー空間は `rocm-smi 7.1.1` と `librocm_smi64`（Ubuntu
+  パッケージ）だけ。`/opt/rocm` なし、`libamdhip64` なし、MIOpen なし、
+  `rocminfo`/`hipconfig` なし。ユーザーは `render`/`video` グループに入っていないが、
+  `/dev/kfd` と `/dev/dri/renderD*` にはシートの ACL が付いていて、デスクトップのログイン
+  からは既に読み書きできる。
+- `libtorch/include/ATen/Context.h` 638〜650 行（CPU アーカイブのヘッダはどの変種とも
+  同じ）：*"HIP masquerades to be CUDA (e.g., when you say CUDA, on a HIP build of ATen,
+  this actually means HIP)"*。つまり ROCm 版 libtorch では `at::kCUDA`、
+  `device_of_int(d >= 0)`、`torch::cuda::*`、`atc_*`、`atm_fuser_cuda_*`、`TDevice.Cuda(N)`
+  がそのまま AMD GPU を指す。以下の API で「CUDA」は「GPU バックエンド」の意味。
+- `libtorch/share/cmake/Caffe2/Caffe2Config.cmake`：CPU アーカイブでは
+  `if (OFF) include(public/LoadHIP.cmake)`。ROCm アーカイブでは `if (ON)` で、
+  `LoadHIP.cmake` は `$ROCM_PATH` か `/opt/rocm` の ROCm SDK を探す（`find_package(hip ...)`）。
+  つまり **ROCm 版 libtorch に対する `find_package(Torch)` はランタイムだけでなく ROCm SDK
+  の cmake ファイルを要求する**。
+- 実測：libtch は **`find_package(Torch)` なしで**ビルド・リンクできる（スクラッチパッドの
+  `manual-link/CMakeLists.txt`、28 秒）：インクルード `<dir>/include` と
+  `<dir>/include/torch/csrc/api/include`、`-D_GLIBCXX_USE_CXX11_ABI=1`、リンク
+  `libtorch.so libtorch_cpu.so libc10.so`、`BUILD_RPATH <dir>/lib`。できた .so の `NEEDED`
+  は `libtorch_cpu.so` と `libc10.so` だけ：リンカの `--as-needed` が傘の `libtorch.so` を
+  落とした。GPU ビルドではこれが重要：バックエンドは `libtorch_cuda.so` / `libtorch_hip.so`
+  にあり、`libtorch.so` 経由でしか引き込まれないので、傘は `-Wl,--no-as-needed` で
+  リンクしなければならない（TorchConfig.cmake は `find_package` 利用者に対してまさに
+  それをしている）。
+
+#### ビルドとリンク
+
+- **ディレクトリ構成。** 変種ごとに libtorch を CPU 版の隣に置く：`libtorch/`（CPU、
+  今のまま）、`libtorch-rocm/`、`libtorch-cuda/`（展開したアーカイブ。`libtorch/` と同様に
+  git-ignore）。libtch のビルドディレクトリも変種ごと：`build/libtch`（CPU）、
+  `build/libtch-rocm`、`build/libtch-cuda`。ほかは何も複製しない：`libtch.so` のエクスポート
+  シンボルはどの変種でも同じで、Pascal ユニットは一切変わらない。
+- **`csrc/libtch/CMakeLists.txt` に手動モードを追加**（フォークの変更。ファイル先頭の
+  コメントに記す）：
+
+  ```cmake
+  option(TCH_LIBTORCH_DIR "libtorch root; when set, link it directly instead of find_package(Torch)" "")
+  if(TCH_LIBTORCH_DIR)
+    add_library(tch SHARED torch_api.cpp torch_api_generated.cpp)
+    target_include_directories(tch PRIVATE ${TCH_LIBTORCH_DIR}/include
+      ${TCH_LIBTORCH_DIR}/include/torch/csrc/api/include)
+    target_compile_definitions(tch PRIVATE _GLIBCXX_USE_CXX11_ABI=1)
+    target_link_libraries(tch -Wl,--no-as-needed ${TCH_LIBTORCH_DIR}/lib/libtorch.so
+      -Wl,--as-needed ${TCH_LIBTORCH_DIR}/lib/libtorch_cpu.so ${TCH_LIBTORCH_DIR}/lib/libc10.so)
+    set_target_properties(tch PROPERTIES BUILD_RPATH ${TCH_LIBTORCH_DIR}/lib)
+  else()
+    find_package(Torch REQUIRED)         # 今の経路、CPU アーカイブ
+    ...
+  endif()
+  ```
+
+  既定（`find_package`）は CPU アーカイブ用にそのまま残すので、HANDOFF の既存コマンドは
+  動き続ける。GPU 変種は `cmake -S csrc/libtch -B build/libtch-rocm
+  -DTCH_LIBTORCH_DIR=$PWD/libtorch-rocm -DCMAKE_BUILD_TYPE=Release` で、ビルド機に ROCm SDK
+  は要らない。**(H31)** この手動リンクで動く GPU 版 libtch ができる：変種間のコンパイル時
+  の差はヘッダのマクロだけ（`USE_ROCM`/`USE_CUDA` は `torch_api.cpp` には不要。
+  `torch::cuda::*` と `at::globalContext()` は実行時に解決されるフックを通る）。ROCm
+  アーカイブのヘッダが正しい ABI に define（例 `__HIP_PLATFORM_AMD__`）を要するなら、
+  本節のテストプログラムが落ちるので、`if(TCH_LIBTORCH_DIR MATCHES rocm)` の下に追加する。
+- **ランタイムライブラリ。** ROCm の `libtorch_hip.so` は `libamdhip64.so`、`libMIOpen.so`、
+  `librocblas.so`、`libhipblaslt.so`、`librccl.so`、… を `NEEDED` する。**(H32)**
+  `libtorch-cxx11-abi-shared-with-deps` の ROCm アーカイブはそれらを `lib/` に同梱している
+  （ROCm 版 *wheel* は同梱。`ls libtorch-rocm/lib | grep -iE 'hip|miopen|rocblas'` と
+  `ldd libtorch-rocm/lib/libtorch_hip.so | grep 'not found'` で確認）。していなければ、
+  ユーザーが対応バージョンの AMD ROCm ランタイムパッケージ（`rocm-hip-runtime`、
+  `miopen-hip`、`rocblas`、`hipblaslt`、`rccl`、`hipfft`、`hipsparse`、`rocsolver`、
+  `hiprand`/`rocrand`）を入れる — アーカイブの ROCm バージョンは名前（`+rocmX.Y`）にあり、
+  設計のほかの部分は何も変わらない。どちらにせよカーネルドライバは既にある。
+- **Pascal のリンク行は不変**：`external 'tch'`、`-Fl<build dir> -k-rpath=$PWD/<build dir>`；
+  `libtch.so` 自身の RUNPATH（cmake が設定）が変種の `lib/` の `libtorch*.so` を見つける。
+  変種の切り替え = 別の `-Fl`/`-k-rpath` でテストを再コンパイル、または CPU リンクの
+  バイナリの前に `LD_LIBRARY_PATH=build/libtch-rocm`（同じ ABI、同じシンボル — 今
+  `build/libtch-unpatched` を差し替えているのと同じやり方）。
+- **デバイスの可視性。** iGPU（`gfx1036`）は対応ターゲットではなく `cuda:1` として
+  現れてしまうので、GPU テストは必ず `HIP_VISIBLE_DEVICES=0`（CUDA：
+  `CUDA_VISIBLE_DEVICES=0`）で走らせ、`CudaDeviceCount = 1` にして下の数値を決定的にする。
+  **(H33)** libtorch 2.13 の ROCm アーカイブに `gfx1201` のコードオブジェクトが入っている：
+  `strings -n 7 libtorch-rocm/lib/libtorch_hip.so | grep -oE 'gfx[0-9a-f]+' | sort -u` で
+  手で確認できる（オフロードバンドルの id は平文）。`gfx1201` がなければこの GPU には
+  新しいアーカイブが要る。`HSA_OVERRIDE_GFX_VERSION` の小細工はしない（ISA が違う）。
+- **C ラッパーと Pascal 層：意味的な変更なし。** `device_of_int`、`at_device`、すべての
+  `atc_*` は既に `torch_api.{h,cpp}`（tch-rs のもの）にある。追加するのは下の L2 宣言と
+  L3 ラッパーだけ。
+
+#### Pascal の API（`Tch.pas`、`TchSys.pas`、`TchJit.pas`）
+
+既にあるもの：`TDevice`（4.3、`ToC` −1/≥0/−2/−3、`Cuda(N)`、`CudaIfAvailable`、`IsCuda`）、
+`TTensor.Device`、生成された `to_device`、`TVarStore.SetDevice`（4.6.2）、store のデバイス
+へのロード（4.6.3）、`TJitModule.ToDevice`（4.6.8）、`CudaIsAvailable`、`CudaDeviceCount`
+（4.7）、L2 の `atc_cuda_device_count`、`atc_cuda_is_available`。
+
+追加するもの。tch-rs の `Cuda`（`src/wrappers/device.rs`）に従い、`Tch.pas` に名前空間なしの
+関数群として（既存の 2 つに合わせて接頭辞 `Cuda`）：
+
+```pascal
+// TchSys.pas (L2)、torch_api.h どおり
+function  atc_cudnn_is_available: cint; cdecl; external LibTch;      // エラー時 -1
+procedure atc_manual_seed(seed: QWord); cdecl; external LibTch;
+procedure atc_manual_seed_all(seed: QWord); cdecl; external LibTch;
+procedure atc_synchronize(device_index: Int64); cdecl; external LibTch;
+function  atc_user_enabled_cudnn: cint; cdecl; external LibTch;      // エラー時 -1
+procedure atc_set_user_enabled_cudnn(b: cint); cdecl; external LibTch;
+procedure atc_set_benchmark_cudnn(b: cint); cdecl; external LibTch;
+function  at_context_has_cuda: Boolean; cdecl; external LibTch;      // C bool = 1 バイト
+function  at_context_has_hip: Boolean; cdecl; external LibTch;
+function  at_context_has_cudnn: Boolean; cdecl; external LibTch;
+function  at_context_version_cudart: Int64; cdecl; external LibTch;
+function  at_context_version_cudnn: Int64; cdecl; external LibTch;
+procedure atm_fuser_cuda_set_enabled(b: Boolean); cdecl; external LibTch;
+function  atm_fuser_cuda_is_enabled: Boolean; cdecl; external LibTch;
+
+// Tch.pas (L3)、4.7 のブロックはこうなる：
+function  CudaIsAvailable: Boolean; function CudaDeviceCount: Integer;   // 既存
+function  CudnnIsAvailable: Boolean;                 // atc_cudnn_is_available > 0（ROCm では MIOpen、H34）
+procedure CudaManualSeed(Seed: QWord);               // 現在のデバイス
+procedure CudaManualSeedAll(Seed: QWord);            // 全デバイス
+procedure CudaSynchronize(DeviceIndex: Int64 = -1); // -1 = 現在のデバイス、torch::cuda::synchronize どおり
+function  CudnnUserEnabled: Boolean; procedure SetCudnnUserEnabled(B: Boolean);
+procedure SetCudnnBenchmark(B: Boolean);
+type TGpuBackend = (gbNone, gbCuda, gbRocm);
+function  GpuBackend: TGpuBackend;                   // 下記
+function  GpuRuntimeVersion: Int64;                  // at_context_version_cudart（ROCm では HIP ランタイム）
+function  CudnnVersion: Int64;                       // at_context_version_cudnn
+```
+
+- L3 の各関数は C 呼び出しのあと `TchCheck` を呼ぶ（`atc_*` のゲッターは `PROTECT` 内で
+  −1 を返し、`TchCheck` が `ETorchNativeError` にする）。CUDA なしでコンパイルされた
+  libtorch では `atc_*` は 0 を返すのではなく `ETorchNativeError`（"... not compiled with
+  CUDA"）になる — 例外は `atc_cuda_is_available` / `atc_cuda_device_count` で、CPU ビルドでは
+  0 を返す（マイルストーン1で実測）。したがって **CPU ビルドで安全に呼べるのは
+  `CudaIsAvailable` だけ**。テストプログラムはそれを最初に確かめ、API コメントにもそう書く。
+- **`GpuBackend`**：`at_context_has_hip` なら `gbRocm`、そうでなく `at_context_has_cuda`
+  なら `gbCuda`、それ以外 `gbNone`。**(H35)** ROCm 版 libtorch で `at_context_has_hip` は
+  True；`at_context_has_cuda` *も* True か（装いにより HIP フックが CUDA フックとして登録
+  される）は不明 — 上の順序ならどちらでも `GpuBackend` は正しく、テストが両フラグを
+  印字するので答えが記録される。`ManualSeed`（4.7、`at_manual_seed` = `torch::manual_seed`）
+  は libtorch 内で既に全 CUDA デバイスにもシードを入れる；`CudaManualSeedAll` は tch-rs
+  との対応のために残す。
+- `TDevice`：`CudaIfAvailable(AIndex)` のオーバーロードは追加しない（tch-rs にも
+  `cuda_if_available()` しかない）。テスト出力用に `function TDevice.ToString: String`
+  （`'cpu'`、`'cuda:0'`、`'mps'`、`'vulkan'`）を追加。tch-rs にはないが費用はゼロ。
+- **`TchJit`**：4.6.8 のプロファイリング/フューザーのスイッチの隣に `JitFuserCudaEnabled:
+  Boolean` / `SetJitFuserCudaEnabled`；ユニットコメントの「未宣言」リストは空になる。CPU
+  ビルドではただのフラグ（エラーなし）で、CPU の jit テストで実測する。
+- **モック**（`tests/mock/mock_tch.c`）：新しい `atc_*` は CPU ビルドと同じ 0/−1 を返す
+  （`atc_cudnn_is_available` → 0、`atc_synchronize` は no-op、シードは no-op、
+  `atc_user_enabled_cudnn` → 1）、`at_context_has_*` → 0、`at_context_version_*` → 0、
+  `atm_fuser_cuda_*` は static な bool。`mock_test.pas` に追加：`GpuBackend = gbNone`、
+  `CudaIsAvailable = False`、`CudnnIsAvailable = False`、`CudaSynchronize` がエラーなしで
+  返る、フューザーフラグの True/False 往復。
+
+#### GPU 上の H13 と H30
+
+- **H13（実デバイスへの移動）。** 4.6.7 の手で設定した重みで `TLinear(VS.Root / 'l', 2, 1)`
+  を作ったあと `VS.SetDevice(TDevice.Cuda(0))`：その後 `VS.Device.IsCuda`、
+  `L.Weight.Device.ToC = 0`、`VS.Variables` の全要素が `cuda:0` 上、移動の**あとに**作った
+  SGD が `w` を CPU と同じ `[0.9, 0.8]` に更新する（`to_device(Cpu)` で読み戻す）。次に
+  `SetDevice(Cpu)` で値を保ったまま戻り、`TchLiveHandles` は不変（set_data はストレージを
+  差し替えるだけで新しいハンドルは作らない）。移動の*前に*作ったオプティマイザはテストに
+  **含めない**：tch-rs が非対応と明記し、4.6.2 もそうしている。
+- **H30（cuDNN/MIOpen の RNN 重み平坦化）。** tch-rs の `rnn.rs`（**H36 解決**：取りまとめ側のセッションが
+  tch-rs 4227b89b `src/nn/rnn.rs` の 154〜166 行と 239〜251 行で確認。tch-rs はバイアスなしでも
+  `4` を渡すので、下の `2` は PyTorch に合わせた明記済みの逸脱）：重みを作ったあと `if vs.device().is_cuda() &&
+  Cuda::cudnn_is_available() { Tensor::internal_cudnn_rnn_flatten_weight(&flat_weights, 4,
+  input_dim, mode, hidden_dim, proj_size = 0, num_layers, batch_first, bidirectional) }`、
+  `mode` 2 = LSTM、3 = GRU（cuDNN `cudnnRNNMode_t`）、`4` = バイアスありのときの層×方向あたり
+  の重み数。`TRNN` の protected コンストラクタにまさにその条件を入れ、生成された class
+  function `TTensor._cudnn_rnn_flatten_weight(FFlatWeights, WeightStride0, InputSize, Mode,
+  HiddenSize, 0, NumLayers, BatchFirst, Bidirectional)` を `WeightStride0 = 4`（`HasBiases`
+  のとき、それ以外 `2`）で呼び、結果は捨て、`try ... except on ETorchNativeError do ; end`
+  で囲む — 平坦化は性能のヒントであり、ROCm では拒否されうる（`_cudnn_rnn_flatten_weight`
+  は cuDNN ディスパッチの op で、MIOpen には独自の `miopen_rnn` がある）。H30 の計測では
+  gfx1201 でどちらが起きたかと、4.6.10 の GRU/LSTM の数値（`0.380797`、`0.1817`）が GPU
+  でもどちらにせよ再現することを記録する。
+
+#### GPU テスト：`tests/gpu/gpu_test.pas`（+ `run.sh`）
+
+`tests/nn` と同じ作り方だが `build/libtch-rocm`（または `-cuda`）にリンクする（`run.sh` は
+変種を `$1` で受け、既定 `rocm`、`HIP_VISIBLE_DEVICES=0` / `CUDA_VISIBLE_DEVICES=0` を設定）。
+最初の文：`if not CudaIsAvailable then begin WriteLn('SKIP: no GPU in this libtorch');
+Halt(0); end;` — 同じプログラムが `build/libtch`（CPU）の下では 0 で終了するので、回帰
+テストの一覧に無条件で入れられる。数値は以前のグループの CPU の数値なので手で確認できる：
+
+1. 能力の印字（検査せず HANDOFF に記録）：`GpuBackend`、`CudaDeviceCount`（可視性変数ありで
+   1 のはず）、`CudnnIsAvailable`、`GpuRuntimeVersion`、`CudnnVersion`、
+   `at_context_has_cuda`/`has_hip`。
+2. `T := TTensor.FromArray([1.0, 2.0, 3.0]).to_device(Cuda(0), kFloat)`：`T.Device.ToC = 0`、
+   `T.Device.IsCuda`；`(T * 2 + 1).to_device(Cpu)` → `3 5 7`；`T.sum.to_device(Cpu)` → `6`；
+   CUDA テンソルのまま `T.sum.ToDouble` は `ETorchNativeError`（libtorch はデバイス上の
+   スカラーをホストで読むのを拒む。クラッシュしてはならない — tch-rs も同じ振る舞い）。
+3. `[64, 64]` の ones の `matmul` のあと `CudaSynchronize` → `to_device(Cpu)` が全部 `64`；
+   `CudaManualSeedAll(7); A := randn([4], Cuda(0)); CudaManualSeedAll(7); B := randn([4],
+   Cuda(0))` → `A.equal(B)` が True（同シードの再現性。値は手計算しない）。
+4. GPU での autograd：`cuda:0` 上の `x := [3.0]` に `requires_grad_`；`(x * x).sum.Backward`；
+   `x.grad.to_device(Cpu)` → `6`。
+5. 上記の H13（`TLinear`、`SetDevice`、SGD → `[0.9, 0.8]`、CPU へ戻す）。
+6. `Cuda(0)` で作った store への 4.6.7 の `.ot` ファイルの `TVarStore.Load`：変数は `cuda:0`
+   に到着（`device_id = 0` の `at_load_callback_with_device`）、値は CPU ロードと等しい。
+7. JIT：`TJitModule.Create('tests/jit/models/foo1.pt')`、`ToDevice(Cuda(0), kFloat)`、入力を
+   `cuda:0` に移して forward → 4.6.8 のグループ 1 と同じ結果を `to_device(Cpu)` で読み戻す。
+   `SetJitFuserCudaEnabled(True)`、forward を 2 回、フラグは True を返す。
+8. H30：`Cuda(0)` 上の VS で `TGRU(2, 3)` と `TLSTM` を 4.6.10 の重みで → `0.380797` /
+   `0.1817 / 0.380797` を CPU で読み戻す；平坦化呼び出しが例外を出したかを印字。GPU での
+   `TConv2D` グループ 8 の数値（MIOpen の conv 経路）、4.6.7 の `TBatchNorm` 訓練モードの
+   数値。
+9. デバイス混在のエラー：`TTensor.FromArray([1.0]) + T`（CPU + CUDA）はメッセージに
+   "Expected all tensors to be on the same device" を含む `ETorchNativeError`；プロセスは
+   続行する。
+10. 最後に `TchLiveHandles = 0`。
+
+CPU のみでの実行の期待結果：`SKIP` の 1 行だけ。`tests/mock` は影響なし（GPU テストは
+モックにリンクしない）。
 
 ## 5. コード生成（決定）
 
@@ -2715,3 +2942,13 @@ JIT を除く 4.6 を実装。`tests/nn/nn_test.pas`（本物の libtorch）は 
 `tests/jit/jit_test.pas` のグループ 14 として、加えてモックの `TestObjects`。大半は
 libtorch 2.13.0 に対して実測済み。H26〜H28 と実装順序は HANDOFF_jp.md にあります。その後も
 残るもの：マイルストーン3のレイヤーと CUDA/ROCm。
+
+**CUDA/ROCm（設計セッション8、2026-10-11 で設計）：** 4.8 — 変種ごとに libtorch ディレクトリ
+1つと `build/libtch-<変種>` 1つ、フォークの CMakeLists に `TCH_LIBTORCH_DIR` の手動リンク
+モード（CPU アーカイブに対してビルドできることを実測。ROCm SDK の cmake ファイルを不要に
+する）、C と ABI の変更なし（HIP は CUDA を装う。ローカルのヘッダで確認）、残っていた
+`atc_*` / `at_context_*` / `atm_fuser_cuda_*` の外部宣言とそのラッパー
+`Cuda*`/`Cudnn*`/`GpuBackend`、`TRNN` の cuDNN RNN 平坦化呼び出し、CPU ビルドでは `SKIP` を
+出して 0 で終了する `tests/gpu/gpu_test.pas`。GPU 上ではまだ何も実測していない：H31〜H36 と
+ユーザー側の前提（ROCm 版 libtorch アーカイブ、ランタイム、グループ所属）は HANDOFF_jp.md
+にあります。これで「引き継ぎ（ローカルセッション4の終了時点）」の設計項目はすべて回答済み。

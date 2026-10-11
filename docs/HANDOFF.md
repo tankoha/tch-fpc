@@ -4,6 +4,140 @@ Japanese version: [HANDOFF_jp.md](HANDOFF_jp.md)
 
 Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 
+## Design session 8 (2026-10-11): CUDA/ROCm designed
+
+Answers item 3 of "Handing back (end of local session 4)" below — the last
+open one. Design only: nothing committed, nothing downloaded or installed;
+one throwaway cmake build in the scratchpad. Details and rationale in
+DESIGN 4.8.
+
+**Decisions** (DESIGN 4.8):
+- One unpacked libtorch per variant (`libtorch/` CPU as today,
+  `libtorch-rocm/`, `libtorch-cuda/`) and one build dir per variant
+  (`build/libtch`, `build/libtch-rocm`, `build/libtch-cuda`). Pascal units,
+  C wrapper and ABI are unchanged: HIP masquerades as CUDA (confirmed in
+  `libtorch/include/ATen/Context.h:638-650`), so `TDevice.Cuda(0)`,
+  `device_of_int`, `atc_*` address the AMD GPU as is.
+- `csrc/libtch/CMakeLists.txt` gains `-DTCH_LIBTORCH_DIR=<dir>`: manual
+  include/link lines (`-Wl,--no-as-needed libtorch.so`, then
+  `libtorch_cpu.so libc10.so`, `-D_GLIBCXX_USE_CXX11_ABI=1`, `BUILD_RPATH
+  <dir>/lib`) instead of `find_package(Torch)`, because a ROCm archive's
+  `Caffe2Config.cmake` includes `LoadHIP.cmake`, which wants the ROCm SDK
+  at `/opt/rocm`. Default path unchanged for the CPU archive.
+- L2: `atc_cudnn_is_available`, `atc_manual_seed(_all)`, `atc_synchronize`,
+  `atc_user_enabled_cudnn`, `atc_set_user_enabled_cudnn`,
+  `atc_set_benchmark_cudnn`, `at_context_has_cuda/hip/cudnn`,
+  `at_context_version_cudart/cudnn`, `atm_fuser_cuda_*`. L3 (4.7 block):
+  `CudnnIsAvailable`, `CudaManualSeed(All)`, `CudaSynchronize(Index = -1)`,
+  `CudnnUserEnabled`/`SetCudnnUserEnabled`, `SetCudnnBenchmark`,
+  `TGpuBackend = (gbNone, gbCuda, gbRocm)` + `GpuBackend`,
+  `GpuRuntimeVersion`, `CudnnVersion`, `TDevice.ToString`; `TchJit`:
+  `JitFuserCudaEnabled`/`SetJitFuserCudaEnabled`. Only `CudaIsAvailable` /
+  `CudaDeviceCount` are safe on a CPU build; the others raise
+  `ETorchNativeError` there.
+- `TRNN`: tch-rs's flatten call when `Device.IsCuda and CudnnIsAvailable`
+  (`_cudnn_rnn_flatten_weight(FFlatWeights, 4 or 2, InputSize, Mode 2/3,
+  HiddenSize, 0, NumLayers, BatchFirst, Bidirectional)`), result
+  discarded, `ETorchNativeError` swallowed (hint only; MIOpen may refuse).
+- `tests/gpu/gpu_test.pas` + `run.sh <variant>`: `SKIP` + exit 0 when
+  `CudaIsAvailable` is False; otherwise ten items reusing the CPU numbers
+  of 4.6.7/4.6.8/4.6.10 (`3 5 7`, `6`, `[0.9, 0.8]`, `0.380797`,
+  `0.1817`), H13's real device move (item 5) and H30 (item 8). Run with
+  `HIP_VISIBLE_DEVICES=0` so the Raphael iGPU (`gfx1036`, unsupported) is
+  hidden and `CudaDeviceCount = 1`.
+- Mock: new `atc_*`/`at_context_*` stubs return what a CPU build returns;
+  `mock_test.pas` checks `GpuBackend = gbNone`, the fuser flag round trip.
+
+**Inspected** (nothing changed): `rocm-smi --showproductname` → GPU[0] RX
+9070 `gfx1201`, GPU[1] Raphael iGPU `gfx1036`; `/sys/class/kfd` lists both
+(kernel 7.0.0 amdgpu/KFD work). Installed ROCm user space is **only**
+`rocm-smi 7.1.1` + `librocm_smi64` (Ubuntu); no `/opt/rocm`, no
+`libamdhip64`, no MIOpen, no `rocminfo`. User groups: `joerg adm cdrom sudo
+dip plugdev users lxd ollama` — not in `render`/`video`, but `/dev/kfd` is
+already read-write for the user through the seat ACL. Measured: the
+manual-link CMakeLists builds libtch against the CPU archive in 28 s; the
+result `NEEDED`s only `libtorch_cpu.so` + `libc10.so` (as-needed dropped
+the umbrella — hence the explicit `--no-as-needed` for GPU builds, where
+the backend is reached only through `libtorch.so`).
+
+**New hypotheses** (need the ROCm libtorch; none measurable here):
+- **H31** the manual-link libtch works unchanged against the ROCm archive
+  (no extra defines such as `__HIP_PLATFORM_AMD__` needed by
+  `torch_api.cpp`).
+- **H32** the `libtorch-cxx11-abi-shared-with-deps-2.13.0+rocmX.Y` archive
+  bundles the HIP runtime, MIOpen, rocBLAS, hipBLASLt, RCCL in `lib/`
+  (check `ldd libtorch-rocm/lib/libtorch_hip.so | grep 'not found'`). If
+  not: AMD's ROCm runtime packages of the same X.Y.
+- **H33** that archive contains `gfx1201` code objects (`strings -n 7
+  libtorch_hip.so | grep -oE 'gfx[0-9a-f]+' | sort -u`). Not visible
+  locally; PyTorch's ROCm 7.x builds are expected to, ROCm 6.x ones are
+  not.
+- **H34** `atc_cudnn_is_available` is 1 on ROCm (MIOpen stands in for
+  cuDNN through the hipified hooks).
+- **H35** `at_context_has_hip` is True on ROCm; whether
+  `at_context_has_cuda` is also True is open (`GpuBackend` checks HIP
+  first, so it is right either way; the test prints both).
+- **H36** tch-rs `rnn.rs` flatten call reconstructed from memory (repo not
+  local): `is_cuda && cudnn_is_available`, stride0 4, mode 2 (LSTM) /
+  3 (GRU), proj_size 0. **Resolved** by the orchestrating session against
+  tch-rs 4227b89b `src/nn/rnn.rs` (lines 154–166, 239–251): matches;
+  tch-rs hard-codes stride0 4 even without biases, DESIGN 4.8 uses 2
+  then (PyTorch), a stated deviation.
+
+**User-side prerequisites** (not done by the design session; described
+only):
+1. Obtain `libtorch-cxx11-abi-shared-with-deps-2.13.0+rocmX.Y.zip` from
+   download.pytorch.org (ROCm variant of the same 2.13.0 used for CPU;
+   pick the highest ROCm version offered for 2.13.0 — RDNA4/gfx1201 needs
+   ROCm 7.x) and unpack it as `libtorch-rocm/` in the repo root
+   (git-ignored). Verify H33 and H32 with the two one-liners above
+   before building anything.
+2. If H32 fails: install AMD's ROCm runtime packages matching X.Y
+   (`rocm-hip-runtime`, `miopen-hip`, `rocblas`, `hipblaslt`, `rccl`,
+   `hipfft`, `hipsparse`, `rocsolver`, `hiprand`) from the AMD repo. No SDK
+   (`rocm-dev`/cmake files) is needed with the manual-link mode.
+3. Device access: `/dev/kfd` and `/dev/dri/renderD*` are `root:render`
+   with an ACL (`+`), and `test -r /dev/kfd -a -w /dev/kfd` already
+   succeeds from the desktop login (logind grants the seat), so nothing is
+   needed for runs from the local session. Only for ssh/cron runs add the
+   user to `render` and `video` (`sudo usermod -aG render,video joerg`,
+   re-login). Without access HIP reports no devices even though
+   `rocm-smi` (which reads sysfs) sees them.
+4. For a CUDA box instead: the `+cuXYZ` archive as `libtorch-cuda/` and
+   the NVIDIA driver; everything else is identical with `cuda` as the
+   variant.
+
+**Local implementation list** (mechanical; order matters):
+1. `csrc/libtch/CMakeLists.txt`: the `TCH_LIBTORCH_DIR` branch of DESIGN
+   4.8; rebuild `build/libtch` the old way to confirm nothing changed, and
+   once with `-DTCH_LIBTORCH_DIR=$PWD/libtorch` into `build/libtch-manual`
+   to confirm the manual path (CPU) passes `tests/api`.
+2. `src/TchSys.pas`: the L2 externals above (QWord for `uint64_t`, Int64
+   for `int64_t`, `Boolean` for C `bool`, `cint` for `int`); trim the unit
+   comment's "Not declared" list to nothing.
+3. `src/Tch.pas`: the 4.7 block additions, `TGpuBackend`, `GpuBackend`,
+   `TDevice.ToString`; API comments stating which calls are CPU-safe.
+4. `src/TchJit.pas`: `JitFuserCudaEnabled`/`SetJitFuserCudaEnabled`.
+5. `src/TchNN.pas`: the flatten call in `TRNN`'s protected constructor
+   (after `FFlatWeights` is complete), guarded and swallowed as above.
+6. `tests/mock/mock_tch.c` stubs + `mock_test.pas` checks; `tests/jit`
+   adds the fuser-flag round trip on CPU. Run `tests/mock/run.sh`,
+   `tests/api`, `tests/nn`, `tests/jit` on the CPU build: unchanged.
+7. `tests/gpu/gpu_test.pas` and `tests/gpu/run.sh` (variant argument,
+   visibility variable, `-Flbuild/libtch-$v -k-rpath=...`); first run it
+   against `build/libtch`: exactly `SKIP: no GPU in this libtorch`, exit 0.
+8. After the user-side prerequisites: `cmake -S csrc/libtch -B
+   build/libtch-rocm -DTCH_LIBTORCH_DIR=$PWD/libtorch-rocm
+   -DCMAKE_BUILD_TYPE=Release && cmake --build build/libtch-rocm -j 8`;
+   `ldd build/libtch-rocm/libtch.so | grep 'not found'` must be empty.
+9. `tests/gpu/run.sh rocm`: record item 1's capability print, the H13 and
+   H30 outcomes, and H31–H35 results next to each hypothesis (DESIGN 4.8
+   and here); then `LD_LIBRARY_PATH=build/libtch-rocm` in front of the
+   CPU-linked `tests/nn` and `tests/jit` binaries — everything still passes
+   on CPU tensors with the GPU libtorch loaded (same ABI).
+10. Add a "Local session 7" section here (en + jp); mark H31–H36 resolved
+    or amended; update DESIGN 4.8 numbers if any differ.
+
 ## Design session 7 (2026-10-11): milestone 3 layers designed
 
 Answers item 2 of "Handing back (end of local session 4)" below; item 3
@@ -227,7 +361,7 @@ Commits `8a912eb` … `b816950`.
   measurement: the unmasked modes crash or hang by design).
 - Not touched, as asked: milestone 3 layers and CUDA/ROCm.
 
-## Handing back (2026-10-11, end of local session 4) — items 1 and 2 answered in design sessions 6 and 7 above
+## Handing back (2026-10-11, end of local session 4) — items 1, 2 and 3 answered in design sessions 6, 7 and 8 above
 
 **Design only** (CLAUDE.md). Nothing is blocked; all of the following are
 optional next milestones. Mark what needs real libtorch as H26, ...
@@ -241,7 +375,8 @@ optional next milestones. Mark what needs real libtorch as H26, ...
    carries it (copies share; `FromC` currently raises on tag 14).
 2. **Milestone 3 layers** (DESIGN 4.6.5 deferred list) — *designed: DESIGN
    4.6.10, design session 7 above.*
-3. **CUDA/ROCm.** Only CPU so far (H13's real device move untested;
+3. **CUDA/ROCm** — *designed: DESIGN 4.8, design session 8 above.* Only
+   CPU so far (H13's real device move untested;
    `atm_fuser_cuda_*` not declared). The local machine has an AMD Radeon
    RX 9070 (Navi 48) and `rocm-smi`; no ROCm libtorch has been tried yet.
    So the GPU route to design first is ROCm (libtorch's HIP build reports

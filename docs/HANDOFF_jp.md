@@ -4,6 +4,121 @@
 
 再開するときは最初にこれを読んでください。決定事項と理由は [DESIGN_jp.md](DESIGN_jp.md) にあります。
 
+## 設計セッション8（2026-10-11）：CUDA/ROCm を設計
+
+下の「引き継ぎ（ローカルセッション4の終了時点）」の項目3への回答 — 最後に残っていた
+項目。設計のみ：何もコミットせず、何もダウンロード・インストールしていない。スクラッチ
+パッドで使い捨ての cmake ビルドを 1 回。詳細と理由は DESIGN 4.8。
+
+**決定**（DESIGN 4.8）：
+- 変種ごとに展開した libtorch を 1 つ（`libtorch/` は今のまま CPU、`libtorch-rocm/`、
+  `libtorch-cuda/`）、ビルドディレクトリも変種ごと（`build/libtch`、`build/libtch-rocm`、
+  `build/libtch-cuda`）。Pascal ユニット、C ラッパー、ABI は不変：HIP は CUDA を装う
+  （`libtorch/include/ATen/Context.h:638-650` で確認）ので、`TDevice.Cuda(0)`、
+  `device_of_int`、`atc_*` はそのまま AMD GPU を指す。
+- `csrc/libtch/CMakeLists.txt` に `-DTCH_LIBTORCH_DIR=<dir>` を追加：`find_package(Torch)`
+  の代わりに手動のインクルード/リンク行（`-Wl,--no-as-needed libtorch.so`、続いて
+  `libtorch_cpu.so libc10.so`、`-D_GLIBCXX_USE_CXX11_ABI=1`、`BUILD_RPATH <dir>/lib`）。
+  理由は ROCm アーカイブの `Caffe2Config.cmake` が `LoadHIP.cmake` を include し、それが
+  `/opt/rocm` の ROCm SDK を要求するから。CPU アーカイブ向けの既定経路は不変。
+- L2：`atc_cudnn_is_available`、`atc_manual_seed(_all)`、`atc_synchronize`、
+  `atc_user_enabled_cudnn`、`atc_set_user_enabled_cudnn`、`atc_set_benchmark_cudnn`、
+  `at_context_has_cuda/hip/cudnn`、`at_context_version_cudart/cudnn`、`atm_fuser_cuda_*`。
+  L3（4.7 のブロック）：`CudnnIsAvailable`、`CudaManualSeed(All)`、
+  `CudaSynchronize(Index = -1)`、`CudnnUserEnabled`/`SetCudnnUserEnabled`、
+  `SetCudnnBenchmark`、`TGpuBackend = (gbNone, gbCuda, gbRocm)` + `GpuBackend`、
+  `GpuRuntimeVersion`、`CudnnVersion`、`TDevice.ToString`；`TchJit`：
+  `JitFuserCudaEnabled`/`SetJitFuserCudaEnabled`。CPU ビルドで安全なのは
+  `CudaIsAvailable` / `CudaDeviceCount` だけで、ほかは `ETorchNativeError` になる。
+- `TRNN`：`Device.IsCuda and CudnnIsAvailable` のとき tch-rs の平坦化呼び出し
+  （`_cudnn_rnn_flatten_weight(FFlatWeights, 4 または 2, InputSize, Mode 2/3, HiddenSize, 0,
+  NumLayers, BatchFirst, Bidirectional)`）、結果は捨て、`ETorchNativeError` は握りつぶす
+  （ヒントに過ぎない。MIOpen は拒否しうる）。
+- `tests/gpu/gpu_test.pas` + `run.sh <変種>`：`CudaIsAvailable` が False なら `SKIP` と
+  exit 0；それ以外は 4.6.7/4.6.8/4.6.10 の CPU の数値（`3 5 7`、`6`、`[0.9, 0.8]`、
+  `0.380797`、`0.1817`）を再利用する 10 項目、H13 の実デバイス移動（項目 5）と H30
+  （項目 8）。Raphael iGPU（`gfx1036`、非対応）を隠して `CudaDeviceCount = 1` にするため
+  `HIP_VISIBLE_DEVICES=0` で走らせる。
+- モック：新しい `atc_*`/`at_context_*` スタブは CPU ビルドと同じ値を返す；`mock_test.pas`
+  は `GpuBackend = gbNone` とフューザーフラグの往復を確認。
+
+**確認したこと**（何も変えていない）：`rocm-smi --showproductname` → GPU[0] RX 9070
+`gfx1201`、GPU[1] Raphael iGPU `gfx1036`；`/sys/class/kfd` に両方ある（kernel 7.0.0 の
+amdgpu/KFD は動作）。インストール済みの ROCm ユーザー空間は **`rocm-smi 7.1.1` +
+`librocm_smi64`（Ubuntu）だけ**；`/opt/rocm` なし、`libamdhip64` なし、MIOpen なし、
+`rocminfo` なし。ユーザーのグループ：`joerg adm cdrom sudo dip plugdev users lxd ollama` —
+`render`/`video` には入っていないが、シートの ACL により `/dev/kfd` は既にユーザーから
+読み書きできる。実測：手動リンクの CMakeLists で CPU アーカイブに
+対して libtch が 28 秒でビルドできる；できた .so の `NEEDED` は `libtorch_cpu.so` +
+`libc10.so` だけ（as-needed が傘を落とした — ゆえに GPU ビルドでは明示の
+`--no-as-needed`。バックエンドは `libtorch.so` 経由でしか届かない）。
+
+**新しい仮説**（ROCm 版 libtorch が要る。ここでは何も計測できない）：
+- **H31** 手動リンクの libtch は ROCm アーカイブに対してもそのまま動く（`torch_api.cpp`
+  に `__HIP_PLATFORM_AMD__` などの追加 define は不要）。
+- **H32** `libtorch-cxx11-abi-shared-with-deps-2.13.0+rocmX.Y` アーカイブは HIP ランタイム、
+  MIOpen、rocBLAS、hipBLASLt、RCCL を `lib/` に同梱している（`ldd
+  libtorch-rocm/lib/libtorch_hip.so | grep 'not found'` で確認）。していなければ同じ X.Y の
+  AMD ROCm ランタイムパッケージ。
+- **H33** そのアーカイブに `gfx1201` のコードオブジェクトがある（`strings -n 7
+  libtorch_hip.so | grep -oE 'gfx[0-9a-f]+' | sort -u`）。ローカルでは見えない；PyTorch の
+  ROCm 7.x ビルドにはあるはずで、ROCm 6.x にはない見込み。
+- **H34** ROCm で `atc_cudnn_is_available` は 1（hipify されたフック経由で MIOpen が cuDNN の
+  代わりになる）。
+- **H35** ROCm で `at_context_has_hip` は True；`at_context_has_cuda` も True かは不明
+  （`GpuBackend` は HIP を先に見るのでどちらでも正しい。テストが両方を印字）。
+- **H36** tch-rs `rnn.rs` の平坦化呼び出しは記憶から再構成（リポジトリはローカルにない）：
+  `is_cuda && cudnn_is_available`、stride0 4、mode 2（LSTM）/ 3（GRU）、proj_size 0。
+  **解決**：取りまとめ側のセッションが tch-rs 4227b89b `src/nn/rnn.rs`（154〜166 行、
+  239〜251 行）で確認し一致。tch-rs はバイアスなしでも stride0 を 4 に固定するが、DESIGN 4.8
+  はその場合 2（PyTorch）とし、明記済みの逸脱。
+
+**ユーザー側の前提**（設計セッションでは行っていない。説明のみ）：
+1. download.pytorch.org から `libtorch-cxx11-abi-shared-with-deps-2.13.0+rocmX.Y.zip`
+   （CPU と同じ 2.13.0 の ROCm 版。2.13.0 向けに提供される最も高い ROCm バージョンを選ぶ —
+   RDNA4/gfx1201 は ROCm 7.x が要る）を取得し、リポジトリ直下に `libtorch-rocm/` として
+   展開（git-ignore）。何かビルドする前に上の 2 つのワンライナーで H33 と H32 を確認。
+2. H32 が外れたら：X.Y に対応する AMD の ROCm ランタイムパッケージ（`rocm-hip-runtime`、
+   `miopen-hip`、`rocblas`、`hipblaslt`、`rccl`、`hipfft`、`hipsparse`、`rocsolver`、
+   `hiprand`）を AMD のリポジトリから入れる。手動リンクモードなら SDK（`rocm-dev`/cmake
+   ファイル）は不要。
+3. デバイスへのアクセス：`/dev/kfd` と `/dev/dri/renderD*` は `root:render` に ACL（`+`）
+   付きで、デスクトップのログインからは `test -r /dev/kfd -a -w /dev/kfd` が既に通る
+   （logind がシートに付与）ので、ローカルセッションからの実行には何も要らない。ssh/cron
+   から走らせる場合だけユーザーを `render` と `video` に追加（`sudo usermod -aG
+   render,video joerg`、再ログイン）。アクセスがないと `rocm-smi`（sysfs を読む）には
+   見えていても HIP はデバイスなしと報告する。
+4. CUDA 機の場合：`+cuXYZ` アーカイブを `libtorch-cuda/` に、NVIDIA ドライバ。ほかは変種を
+   `cuda` にするだけで同一。
+
+**ローカル実装リスト**（機械的。順序に意味がある）：
+1. `csrc/libtch/CMakeLists.txt`：DESIGN 4.8 の `TCH_LIBTORCH_DIR` 分岐；従来の方法で
+   `build/libtch` を再ビルドして変化なしを確認し、`-DTCH_LIBTORCH_DIR=$PWD/libtorch` で
+   `build/libtch-manual` に 1 回ビルドして手動経路（CPU）が `tests/api` を通すことを確認。
+2. `src/TchSys.pas`：上の L2 外部宣言（`uint64_t` は QWord、`int64_t` は Int64、C `bool` は
+   `Boolean`、`int` は `cint`）；ユニットコメントの「未宣言」リストを空にする。
+3. `src/Tch.pas`：4.7 ブロックへの追加、`TGpuBackend`、`GpuBackend`、`TDevice.ToString`；
+   どの呼び出しが CPU で安全かを API コメントに書く。
+4. `src/TchJit.pas`：`JitFuserCudaEnabled`/`SetJitFuserCudaEnabled`。
+5. `src/TchNN.pas`：`TRNN` の protected コンストラクタ（`FFlatWeights` が完成したあと）に
+   上記のガード付き・握りつぶしの平坦化呼び出し。
+6. `tests/mock/mock_tch.c` のスタブ + `mock_test.pas` の確認；`tests/jit` に CPU での
+   フューザーフラグの往復を追加。CPU ビルドで `tests/mock/run.sh`、`tests/api`、`tests/nn`、
+   `tests/jit` を実行：変化なし。
+7. `tests/gpu/gpu_test.pas` と `tests/gpu/run.sh`（変種引数、可視性変数、
+   `-Flbuild/libtch-$v -k-rpath=...`）；まず `build/libtch` に対して走らせる：ちょうど
+   `SKIP: no GPU in this libtorch`、exit 0。
+8. ユーザー側の前提が済んだら：`cmake -S csrc/libtch -B build/libtch-rocm
+   -DTCH_LIBTORCH_DIR=$PWD/libtorch-rocm -DCMAKE_BUILD_TYPE=Release && cmake --build
+   build/libtch-rocm -j 8`；`ldd build/libtch-rocm/libtch.so | grep 'not found'` が空で
+   あること。
+9. `tests/gpu/run.sh rocm`：項目 1 の能力印字、H13 と H30 の結果、H31〜H35 の結果を各仮説の
+   横（DESIGN 4.8 とここ）に記録；次に CPU リンクの `tests/nn` と `tests/jit` のバイナリの
+   前に `LD_LIBRARY_PATH=build/libtch-rocm` — GPU 版 libtorch をロードしても CPU テンソルで
+   全部通る（同じ ABI）。
+10. ここに「ローカルセッション7」の節を追加（en + jp）；H31〜H36 を解決または修正済みと
+    記す；数値が違えば DESIGN 4.8 を更新。
+
 ## 設計セッション7（2026-10-11）：マイルストーン3のレイヤーを設計
 
 下の「引き継ぎ（ローカルセッション4の終了時点）」の項目2への回答。項目3
@@ -206,7 +321,7 @@ L2 と C の変更なし）：
   （計測用で、マスクしないモードは設計上クラッシュまたはハングする）。
 - 依頼どおり手を付けていないもの：マイルストーン3のレイヤー、CUDA/ROCm。
 
-## 引き継ぎ（2026-10-11、ローカルセッション4の終了時点）— 項目1と2は上の設計セッション6と7で回答済み
+## 引き継ぎ（2026-10-11、ローカルセッション4の終了時点）— 項目1、2、3は上の設計セッション6、7、8で回答済み
 
 **設計のみ**（CLAUDE.md）。止まっているものはなく、以下はどれも任意の次の
 マイルストーン。本物の libtorch が必要なものは H26 以降として記すこと。
@@ -220,7 +335,8 @@ L2 と C の変更なし）：
    タグ 14 で例外）が必要。
 2. **マイルストーン3のレイヤー**（DESIGN 4.6.5 の先送りリスト）— *設計済み：DESIGN
    4.6.10、上の設計セッション7。*
-3. **CUDA/ROCm。** これまで CPU のみ（H13 の実デバイスへの移動は未検証、
+3. **CUDA/ROCm** — *設計済み：DESIGN 4.8、上の設計セッション8。* これまで CPU のみ
+   （H13 の実デバイスへの移動は未検証、
    `atm_fuser_cuda_*` は未宣言）。ローカル機には AMD Radeon RX 9070（Navi 48）と
    `rocm-smi` がある。ROCm 版 libtorch はまだ試していない。よって先に設計する GPU の
    経路は ROCm（libtorch の HIP ビルドはデバイスを CUDA として報告する）。

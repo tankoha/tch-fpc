@@ -2900,6 +2900,11 @@ needs the ROCm libtorch, which is not on this machine yet.
   `hipfft`, `hipsparse`, `rocsolver`, `hiprand`/`rocrand`) — the archive's
   ROCm version is in its name (`+rocmX.Y`), and nothing else about the
   design changes. Either way the kernel driver is already there.
+  **(H32) resolved** (local session 5, `2.13.0+rocm7.1`): `ldd` finds
+  everything; `libamdhip64`, `libMIOpen`, `librocblas`, `libhipblaslt`,
+  `librccl`, `libhsa-runtime64` are bundled in `lib/`. Do not point a
+  global `LD_LIBRARY_PATH` at it: system tools then load its bundled
+  `libtinfo.so.6`.
 - **Pascal link line is unchanged**: `external 'tch'`,
   `-Fl<build dir> -k-rpath=$PWD/<build dir>`; `libtch.so`'s own RUNPATH
   (set by cmake) finds `libtorch*.so` in the variant's `lib/`. Switching
@@ -2916,6 +2921,8 @@ needs the ROCm libtorch, which is not on this machine yet.
   'gfx[0-9a-f]+' | sort -u` (the offload bundle ids are plain text). If
   `gfx1201` is absent, this GPU needs a newer archive; no
   `HSA_OVERRIDE_GFX_VERSION` tricks (that is a different ISA).
+  **(H33) resolved** (local session 5): the `2.13.0+rocm7.1` archive has
+  gfx1201 and gfx1200, gfx11xx, gfx1030, gfx9xx; not gfx1036.
 - **C wrapper and Pascal layer: no semantic change.** `device_of_int`,
   `at_device` and all `atc_*` already exist in `torch_api.{h,cpp}`
   (tch-rs's); only L2 declarations and L3 wrappers are added below.

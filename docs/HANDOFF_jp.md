@@ -4,6 +4,46 @@
 
 再開するときは最初にこれを読んでください。決定事項と理由は [DESIGN_jp.md](DESIGN_jp.md) にあります。
 
+## ローカルセッション5（2026-10-11〜12）：3つの設計がそろい、ROCm 版 libtorch を入手 — ここから再開
+
+**現状。** 以下はすべてコミット・push 済み。やりかけのものはなく、作業ツリーはクリーン。
+
+- **設計セッション6〜8（下の各節）** は、このローカルセッションから Claude Fable 5.1 の
+  サブエージェントとして1件ずつ実行し、ここで確認してコミットした：TorchScript の
+  オブジェクト（DESIGN 4.6.9）、マイルストーン3のレイヤー（4.6.10）、CUDA/ROCm（4.8）。
+  費用は Anthropic のクレジットで1件あたり約5〜6ドル。読む節を指定し、ツール呼び出しの
+  目安を示し、ダウンロードを禁じた絞った依頼にすると後の回ほど安くなった。H36 はここで
+  tch-rs 4227b89b の `src/nn/rnn.rs` と照合して解決（バイアスなしで stride0 を 2 にするのは
+  明記済みの逸脱）。
+- **`docs/UML.md` / `UML_jp.md`**：実装済みと予定の要素を描いた Mermaid の図8枚（ユニット、
+  ユニットごとのクラス図、ForwardIV の所有権とファインチューニングのシーケンス、ビルドの
+  変種）と状況表。予定の要素を実装したら更新する。
+- **ROCm 版 libtorch を入手**（設計セッション8のユーザー側の前提1）：
+  `https://download.pytorch.org/libtorch/rocm7.1/` の
+  `libtorch-shared-with-deps-2.13.0+rocm7.1.zip` を `libtorch-rocm/` に展開（12GB、
+  `build-version` は `2.13.0+rocm7.1`。zip は展開後に削除）。`.gitignore` に `libtorch-*/`
+  を追加。アーカイブ名から `cxx11-abi` は消えているが cxx11 ABI。2.14.1+rocm7.14（1.6GB）も
+  あったが、生成 op が 2.13.0 由来なので採らなかった。
+  - **(H33) 解決：** `libtorch_hip.so` に `gfx1201`（RX 9070）がある。gfx1200、gfx11xx、
+    gfx1030、gfx9xx もある。`gfx1036`（iGPU）はないので `HIP_VISIBLE_DEVICES=0` は引き続き
+    必須。
+  - **(H32) 解決：** `ldd libtorch_hip.so` で not found なし。`libamdhip64`、`libMIOpen`、
+    `librocblas`、`libhipblaslt`、`librccl`、`libhsa-runtime64` が `lib/` に同梱。AMD の
+    ROCm パッケージは不要。
+  - **罠：** `LD_LIBRARY_PATH=libtorch-rocm/lib` にするとシステムのツールが同梱の
+    `libtinfo.so.6` を読む（bash が "no version information available" と警告）。
+    全体の `LD_LIBRARY_PATH` は使わず、DESIGN 4.8 のビルドごとの rpath を使う。
+- **ユーザーとの約束（自動メモリにもある）：** 大きなダウンロードが終わったら報告して
+  止まる。展開・検証は指示があってから。
+
+**次（ユーザーが 18:00 のトークンリセット後に始める。指定がなければどれからか聞く）：**
+- **4.8 GPU** — ROCm の前提はそろったので、下の設計セッション8のローカル手順を1から
+  始められる（ユーザー側の前提1〜3は完了：アーカイブあり、H32 成立、ローカルログインから
+  デバイスにアクセス可）。未検証の仮説は H31、H34、H35。
+- **4.6.9 TorchScript のオブジェクト** と **4.6.10 マイルストーン3のレイヤー** — CPU だけで
+  できる。ローカル手順は下の設計セッション6と7の節。
+- いつもどおり最後に DESIGN/HANDOFF/UML（en + jp）を更新する。
+
 ## 設計セッション8（2026-10-11）：CUDA/ROCm を設計
 
 下の「引き継ぎ（ローカルセッション4の終了時点）」の項目3への回答 — 最後に残っていた

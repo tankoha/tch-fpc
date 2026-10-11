@@ -2664,6 +2664,10 @@ AMD Radeon RX 9070（`gfx1201`）での ROCm。CUDA との違いは展開する 
   `miopen-hip`、`rocblas`、`hipblaslt`、`rccl`、`hipfft`、`hipsparse`、`rocsolver`、
   `hiprand`/`rocrand`）を入れる — アーカイブの ROCm バージョンは名前（`+rocmX.Y`）にあり、
   設計のほかの部分は何も変わらない。どちらにせよカーネルドライバは既にある。
+  **(H32) 解決**（ローカルセッション5、`2.13.0+rocm7.1`）：`ldd` で not found なし。
+  `libamdhip64`、`libMIOpen`、`librocblas`、`libhipblaslt`、`librccl`、`libhsa-runtime64` が
+  `lib/` に同梱。全体の `LD_LIBRARY_PATH` をここに向けないこと（システムのツールが同梱の
+  `libtinfo.so.6` を読む）。
 - **Pascal のリンク行は不変**：`external 'tch'`、`-Fl<build dir> -k-rpath=$PWD/<build dir>`；
   `libtch.so` 自身の RUNPATH（cmake が設定）が変種の `lib/` の `libtorch*.so` を見つける。
   変種の切り替え = 別の `-Fl`/`-k-rpath` でテストを再コンパイル、または CPU リンクの
@@ -2676,6 +2680,8 @@ AMD Radeon RX 9070（`gfx1201`）での ROCm。CUDA との違いは展開する 
   `strings -n 7 libtorch-rocm/lib/libtorch_hip.so | grep -oE 'gfx[0-9a-f]+' | sort -u` で
   手で確認できる（オフロードバンドルの id は平文）。`gfx1201` がなければこの GPU には
   新しいアーカイブが要る。`HSA_OVERRIDE_GFX_VERSION` の小細工はしない（ISA が違う）。
+  **(H33) 解決**（ローカルセッション5）：`2.13.0+rocm7.1` のアーカイブに gfx1201 がある。
+  gfx1200、gfx11xx、gfx1030、gfx9xx もあり、gfx1036 はない。
 - **C ラッパーと Pascal 層：意味的な変更なし。** `device_of_int`、`at_device`、すべての
   `atc_*` は既に `torch_api.{h,cpp}`（tch-rs のもの）にある。追加するのは下の L2 宣言と
   L3 ラッパーだけ。

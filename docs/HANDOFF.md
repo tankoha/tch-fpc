@@ -4,6 +4,54 @@ Japanese version: [HANDOFF_jp.md](HANDOFF_jp.md)
 
 Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 
+## Local session 5 (2026-10-11/12): three designs in, ROCm libtorch obtained — resume here
+
+**Where things stand.** Everything below is committed and pushed. Nothing
+is half-done; the working tree is clean.
+
+- **Design sessions 6–8 (sections below)** were run as Claude Fable 5.1
+  sub-agents from this local session, one item at a time, each reviewed
+  and committed here: TorchScript objects (DESIGN 4.6.9), milestone 3
+  layers (4.6.10), CUDA/ROCm (4.8). Cost was about $5–6 per design on
+  Anthropic credit; a focused prompt (named sections only, a tool-call
+  budget, no downloads) kept the later ones cheaper. H36 was checked here
+  against tch-rs 4227b89b `src/nn/rnn.rs` (resolved; stride0 2 without
+  biases is a stated deviation).
+- **`docs/UML.md` / `UML_jp.md`**: eight Mermaid diagrams of what is
+  implemented and what is planned (units, class diagrams per unit, the
+  ForwardIV ownership and fine-tuning sequences, build variants) plus a
+  status table. Update it when a planned element is implemented.
+- **ROCm libtorch obtained** (the user-side prerequisite 1 of design
+  session 8): `libtorch-shared-with-deps-2.13.0+rocm7.1.zip` from
+  `https://download.pytorch.org/libtorch/rocm7.1/`, unpacked as
+  `libtorch-rocm/` (12 GB, `build-version` = `2.13.0+rocm7.1`; the zip was
+  deleted afterwards). `.gitignore` now has `libtorch-*/`. The archive
+  name has no `cxx11-abi` part any more; it is the cxx11 ABI. A
+  2.14.1+rocm7.14 archive (1.6 GB) exists too but was not taken: our
+  generated ops are from 2.13.0.
+  - **(H33) resolved:** `libtorch_hip.so` contains `gfx1201` (RX 9070),
+    also gfx1200, gfx11xx, gfx1030, gfx9xx; not `gfx1036` (the iGPU), so
+    `HIP_VISIBLE_DEVICES=0` stays required.
+  - **(H32) resolved:** `ldd libtorch_hip.so` finds everything;
+    `libamdhip64`, `libMIOpen`, `librocblas`, `libhipblaslt`, `librccl`,
+    `libhsa-runtime64` are bundled in `lib/`. No AMD ROCm packages needed.
+  - **Trap:** `LD_LIBRARY_PATH=libtorch-rocm/lib` makes system tools load
+    the bundled `libtinfo.so.6` (bash warns "no version information
+    available"). Use the per-build rpath of DESIGN 4.8, never a global
+    `LD_LIBRARY_PATH`.
+- **Working agreement with the user (also in auto-memory):** after a large
+  download finishes, report and stop; unpack/verify only when asked.
+
+**Next (the user starts it after their 18:00 token reset; ask which first
+if they do not say):**
+- **4.8 GPU** — the ROCm prerequisites are met, so design session 8's
+  local list below can start at its step 1 (prerequisite steps 1–3 are
+  done: archive present, H32 holds, device access works from the local
+  login). H31, H34, H35 are the open hypotheses.
+- **4.6.9 TorchScript objects** and **4.6.10 milestone 3 layers** — CPU
+  only, local lists in design sessions 6 and 7 below.
+- Keep DESIGN/HANDOFF/UML (en + jp) current at the end, as usual.
+
 ## Design session 8 (2026-10-11): CUDA/ROCm designed
 
 Answers item 3 of "Handing back (end of local session 4)" below — the last

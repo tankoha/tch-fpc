@@ -1,7 +1,8 @@
 { L3 nn: initialisation, var store, save/load, optimizers, modules and the
-  milestone 2 layers (DESIGN.md 4.6). Ported from tch-rs 4227b89b
-  src/nn/ (init, var_store, optimizer, linear, conv, batch_norm, layer_norm,
-  sparse, sequential, func .rs); each section names its source file.
+  milestone 2 and 3 layers (DESIGN.md 4.6, 4.6.10). Ported from tch-rs
+  4227b89b src/nn/ (init, var_store, optimizer, linear, conv,
+  conv_transpose, batch_norm, layer_norm, group_norm, sparse, rnn,
+  sequential, func, mod .rs); each section names its source file.
 
   Lifetimes: a TVarStore must outlive its TVarPath values, its layers' use of
   the store and every TOptimizer built on it. Free optimizers first, then the
@@ -180,6 +181,30 @@ type
     PaddingMode: TPaddingMode;
   end;
 
+  { ConvConfigND<[i64; N]> (conv.rs): Stride, Padding and Dilation all of
+    length Nd. }
+  TConvConfigND = record
+    Stride, Padding, Dilation: TInt64Array;
+    Groups: Int64;
+    Bias: Boolean;
+    WsInit, BsInit: TInit;
+    PaddingMode: TPaddingMode;
+  end;
+
+  { conv_transpose.rs; no padding modes, as tch-rs }
+  TConvTransposeConfig = record
+    Stride, Padding, OutputPadding, Dilation, Groups: Int64;
+    Bias: Boolean;
+    WsInit, BsInit: TInit;
+  end;
+
+  TConvTransposeConfigND = record
+    Stride, Padding, OutputPadding, Dilation: TInt64Array;
+    Groups: Int64;
+    Bias: Boolean;
+    WsInit, BsInit: TInit;
+  end;
+
   TBatchNormConfig = record
     CudnnEnabled: Boolean;
     Eps, Momentum: Double;
@@ -200,11 +225,41 @@ type
     PaddingIdx: Int64;
   end;
 
+  TGroupNormConfig = record
+    CudnnEnabled: Boolean;
+    Eps: Double;
+    Affine: Boolean;
+    WsInit, BsInit: TInit;
+  end;
+
+  { rnn.rs RNNConfig, shared by TLSTM and TGRU. BIhInit and BHhInit are
+    plain TInit (tch-rs: Option<Init>); HasBiases False ignores them. }
+  TRNNConfig = record
+    HasBiases: Boolean;
+    NumLayers: Int64;
+    Dropout: Double;
+    Train: Boolean;
+    Bidirectional, BatchFirst: Boolean;
+    WIhInit, WHhInit, BIhInit, BHhInit: TInit;
+  end;
+
 function DefaultLinearConfig: TLinearConfig;
 function DefaultConvConfig: TConvConfig;
 function DefaultBatchNormConfig: TBatchNormConfig;
 function DefaultLayerNormConfig: TLayerNormConfig;
 function DefaultEmbeddingConfig: TEmbeddingConfig;
+function DefaultConvConfigND(Nd: Integer): TConvConfigND;
+{ Create::conv's make_array: the scalar repeated Nd times }
+function ConvConfigToND(const Cfg: TConvConfig; Nd: Integer): TConvConfigND;
+function DefaultConvTransposeConfig: TConvTransposeConfig;
+function DefaultConvTransposeConfigND(Nd: Integer): TConvTransposeConfigND;
+function ConvTransposeConfigToND(const Cfg: TConvTransposeConfig;
+  Nd: Integer): TConvTransposeConfigND;
+function DefaultGroupNormConfig: TGroupNormConfig;
+function DefaultRNNConfig: TRNNConfig;
+{ PaddingMode::pad; pmZeros pads with 'constant' }
+function PadWithMode(const X: TTensor; Mode: TPaddingMode;
+  const Pad: array of Int64): TTensor;
 
 type
   TLinear = class(TModule)
@@ -216,16 +271,75 @@ type
     function Forward(const X: TTensor; Train: Boolean = False): TTensor; override;
   end;
 
-  TConv2D = class(TModule)
+  { Conv<ND> (conv.rs). Nd = Length(KSizes) = 1..3; the padding modes
+    other than pmZeros pad in PyTorch's order (DESIGN 4.6.10). }
+  TConvND = class(TModule)
   private
-    FCfg: TConvConfig;
+    FNd: Integer;
+    FCfg: TConvConfigND;
     FPadTwice: TInt64Array;       // reversed padding repeated twice
+    FZeroPad: TInt64Array;
   public
-    Weight, Bias: TTensor;
+    Weight, Bias: TTensor;        // Bias.IsNil when the layer has none
+    constructor Create(const P: TVarPath; InDim, OutDim: Int64;
+      const KSizes: array of Int64; const Cfg: TConvConfigND); overload;
+    function Forward(const X: TTensor; Train: Boolean = False): TTensor; override;
+    property Nd: Integer read FNd;
+  end;
+
+  TConv1D = class(TConvND)
+  public
     constructor Create(const P: TVarPath; InDim, OutDim, KSize: Int64); overload;
     constructor Create(const P: TVarPath; InDim, OutDim, KSize: Int64;
       const Cfg: TConvConfig); overload;
+  end;
+
+  TConv2D = class(TConvND)
+  public
+    constructor Create(const P: TVarPath; InDim, OutDim, KSize: Int64); overload;
+    constructor Create(const P: TVarPath; InDim, OutDim, KSize: Int64;
+      const Cfg: TConvConfig); overload;
+  end;
+
+  TConv3D = class(TConvND)
+  public
+    constructor Create(const P: TVarPath; InDim, OutDim, KSize: Int64); overload;
+    constructor Create(const P: TVarPath; InDim, OutDim, KSize: Int64;
+      const Cfg: TConvConfig); overload;
+  end;
+
+  { ConvTransposeND<ND> (conv_transpose.rs); weight [In, Out div Groups, K..] }
+  TConvTransposeND = class(TModule)
+  private
+    FNd: Integer;
+    FCfg: TConvTransposeConfigND;
+  public
+    Weight, Bias: TTensor;
+    constructor Create(const P: TVarPath; InDim, OutDim: Int64;
+      const KSizes: array of Int64; const Cfg: TConvTransposeConfigND); overload;
     function Forward(const X: TTensor; Train: Boolean = False): TTensor; override;
+    property Nd: Integer read FNd;
+  end;
+
+  TConvTranspose1D = class(TConvTransposeND)
+  public
+    constructor Create(const P: TVarPath; InDim, OutDim, KSize: Int64); overload;
+    constructor Create(const P: TVarPath; InDim, OutDim, KSize: Int64;
+      const Cfg: TConvTransposeConfig); overload;
+  end;
+
+  TConvTranspose2D = class(TConvTransposeND)
+  public
+    constructor Create(const P: TVarPath; InDim, OutDim, KSize: Int64); overload;
+    constructor Create(const P: TVarPath; InDim, OutDim, KSize: Int64;
+      const Cfg: TConvTransposeConfig); overload;
+  end;
+
+  TConvTranspose3D = class(TConvTransposeND)
+  public
+    constructor Create(const P: TVarPath; InDim, OutDim, KSize: Int64); overload;
+    constructor Create(const P: TVarPath; InDim, OutDim, KSize: Int64;
+      const Cfg: TConvTransposeConfig); overload;
   end;
 
   { Nd = 1, 2, 3 for batch_norm1d/2d/3d. Uses Train. }
@@ -264,6 +378,88 @@ type
       const Cfg: TEmbeddingConfig); overload;
     function Forward(const X: TTensor; Train: Boolean = False): TTensor; override;
   end;
+
+  { group_norm.rs }
+  TGroupNorm = class(TModule)
+  private
+    FCfg: TGroupNormConfig;
+    FNumGroups, FNumChannels: Int64;
+  public
+    Weight, Bias: TTensor;        // IsNil when Affine is False
+    constructor Create(const P: TVarPath; NumGroups, NumChannels: Int64); overload;
+    constructor Create(const P: TVarPath; NumGroups, NumChannels: Int64;
+      const Cfg: TGroupNormConfig); overload;
+    function Forward(const X: TTensor; Train: Boolean = False): TTensor; override;
+    property NumGroups: Int64 read FNumGroups;
+    property NumChannels: Int64 read FNumChannels;
+  end;
+
+  { LSTMState((h, c)) and GRUState(h): TGRU leaves C nil. }
+  TRNNState = record
+    H, C: TTensor;
+  end;
+
+  { trait RNN (rnn.rs); not a TModule, as tch-rs. Input is [batch, seq,
+    features] when BatchFirst, else [seq, batch, features]; BatchFirst
+    False is honoured by Step and Seq (tch-rs ignores it there). }
+  TRNN = class abstract
+  private
+    FFlatWeights: TTensorArray;
+    FHiddenDim: Int64;
+    FCfg: TRNNConfig;
+  protected
+    { rnn_weights; GateMul 4 (LSTM) or 3 (GRU) }
+    {$push}{$warn 3018 off}
+    constructor Create(const P: TVarPath; InDim, AHiddenDim, GateMul: Int64;
+      const Cfg: TRNNConfig);
+    {$pop}
+    function BatchDimIndex: Integer; inline;
+    function NumDirections: Int64;
+  public
+    { zeros [NumLayers * NumDirections, BatchDim, HiddenDim], kind and
+      device of the weights at call time }
+    function ZeroState(BatchDim: Int64): TRNNState; virtual; abstract;
+    { one time step; Input [batch, features]. S := Step(X, S) is safe. }
+    function Step(const Input: TTensor; const State: TRNNState): TRNNState;
+    { the whole sequence from ZeroState }
+    function Seq(const Input: TTensor; out State: TRNNState): TTensor;
+    { InState and OutState must be distinct variables: an out record is
+      finalised on entry (H8), so SeqInit(X, S, S) raises "undefined
+      tensor passed as hx". }
+    function SeqInit(const Input: TTensor; const InState: TRNNState;
+      out OutState: TRNNState): TTensor; virtual; abstract;
+    { the op's params, in registration order }
+    property FlatWeights: TTensorArray read FFlatWeights;
+    property HiddenDim: Int64 read FHiddenDim;
+    property Config: TRNNConfig read FCfg;
+  end;
+
+  TLSTM = class(TRNN)
+  public
+    constructor Create(const P: TVarPath; InDim, AHiddenDim: Int64); overload;
+    constructor Create(const P: TVarPath; InDim, AHiddenDim: Int64;
+      const Cfg: TRNNConfig); overload;
+    function ZeroState(BatchDim: Int64): TRNNState; override;
+    function SeqInit(const Input: TTensor; const InState: TRNNState;
+      out OutState: TRNNState): TTensor; override;
+  end;
+
+  TGRU = class(TRNN)
+  public
+    constructor Create(const P: TVarPath; InDim, AHiddenDim: Int64); overload;
+    constructor Create(const P: TVarPath; InDim, AHiddenDim: Int64;
+      const Cfg: TRNNConfig); overload;
+    function ZeroState(BatchDim: Int64): TRNNState; override;
+    function SeqInit(const Input: TTensor; const InState: TRNNState;
+      out OutState: TRNNState): TTensor; override;
+  end;
+
+  { nn::Id: returns X (same handle) }
+  TIdentity = class(TModule)
+  public
+    function Forward(const X: TTensor; Train: Boolean = False): TTensor; override;
+  end;
+
 
   { --- function modules and sequential (nn/func.rs, nn/sequential.rs) --- }
   TTensorFunc    = function(const X: TTensor): TTensor;
@@ -1072,6 +1268,95 @@ begin
   Result.PaddingIdx := -1;
 end;
 
+function Repeated(V: Int64; N: Integer): TInt64Array;
+var
+  I: Integer;
+begin
+  Result := nil;
+  SetLength(Result, N);
+  for I := 0 to N - 1 do
+    Result[I] := V;
+end;
+
+function DefaultConvConfigND(Nd: Integer): TConvConfigND;
+begin
+  Result := ConvConfigToND(DefaultConvConfig, Nd);
+end;
+
+function ConvConfigToND(const Cfg: TConvConfig; Nd: Integer): TConvConfigND;
+begin
+  Result.Stride := Repeated(Cfg.Stride, Nd);
+  Result.Padding := Repeated(Cfg.Padding, Nd);
+  Result.Dilation := Repeated(Cfg.Dilation, Nd);
+  Result.Groups := Cfg.Groups;
+  Result.Bias := Cfg.Bias;
+  Result.WsInit := Cfg.WsInit;
+  Result.BsInit := Cfg.BsInit;
+  Result.PaddingMode := Cfg.PaddingMode;
+end;
+
+function DefaultConvTransposeConfig: TConvTransposeConfig;
+begin
+  Result.Stride := 1;
+  Result.Padding := 0;
+  Result.OutputPadding := 0;
+  Result.Dilation := 1;
+  Result.Groups := 1;
+  Result.Bias := True;
+  Result.WsInit := TInit.KaimingUniform;
+  Result.BsInit := TInit.Constant(0);
+end;
+
+function DefaultConvTransposeConfigND(Nd: Integer): TConvTransposeConfigND;
+begin
+  Result := ConvTransposeConfigToND(DefaultConvTransposeConfig, Nd);
+end;
+
+function ConvTransposeConfigToND(const Cfg: TConvTransposeConfig;
+  Nd: Integer): TConvTransposeConfigND;
+begin
+  Result.Stride := Repeated(Cfg.Stride, Nd);
+  Result.Padding := Repeated(Cfg.Padding, Nd);
+  Result.OutputPadding := Repeated(Cfg.OutputPadding, Nd);
+  Result.Dilation := Repeated(Cfg.Dilation, Nd);
+  Result.Groups := Cfg.Groups;
+  Result.Bias := Cfg.Bias;
+  Result.WsInit := Cfg.WsInit;
+  Result.BsInit := Cfg.BsInit;
+end;
+
+function DefaultGroupNormConfig: TGroupNormConfig;
+begin
+  Result.CudnnEnabled := True;
+  Result.Eps := 1e-5;
+  Result.Affine := True;
+  Result.WsInit := TInit.Constant(1);
+  Result.BsInit := TInit.Constant(0);
+end;
+
+function DefaultRNNConfig: TRNNConfig;
+begin
+  Result.HasBiases := True;
+  Result.NumLayers := 1;
+  Result.Dropout := 0;
+  Result.Train := True;
+  Result.Bidirectional := False;
+  Result.BatchFirst := True;
+  Result.WIhInit := TInit.KaimingUniform;
+  Result.WHhInit := TInit.KaimingUniform;
+  Result.BIhInit := TInit.Constant(0);
+  Result.BHhInit := TInit.Constant(0);
+end;
+
+function PadWithMode(const X: TTensor; Mode: TPaddingMode;
+  const Pad: array of Int64): TTensor;
+const
+  ModeNames: array[TPaddingMode] of AnsiString =
+    ('constant', 'reflect', 'replicate', 'circular');
+begin
+  Result := X.pad(Pad, ModeNames[Mode], NoDouble);
+end;
+
 { TLinear (linear.rs) }
 
 constructor TLinear.Create(const P: TVarPath; InDim, OutDim: Int64);
@@ -1101,7 +1386,96 @@ begin
   Result := X.linear(Weight, Bias);
 end;
 
-{ TConv2D (conv.rs, scalar ConvConfig) }
+{ TConvND (conv.rs) }
+
+{ Raises unless Length(KSizes) is 1..3 and each per-dimension array has
+  that length. }
+function CheckNd(const What: String; const KSizes: array of Int64;
+  const Arrays: array of TInt64Array): Integer;
+var
+  I: Integer;
+begin
+  Result := Length(KSizes);
+  if (Result < 1) or (Result > 3) then
+    raise ETorchError.CreateFmt('%s: %d kernel sizes, expected 1..3',
+      [What, Result]);
+  for I := 0 to High(Arrays) do
+    if Length(Arrays[I]) <> Result then
+      raise ETorchError.CreateFmt('%s: a config array has length %d, ' +
+        'expected %d', [What, Length(Arrays[I]), Result]);
+end;
+
+{ [Out, In div Groups, K1, .., KNd] or, transposed, [In, Out div Groups, ..] }
+function KernelDims(D0, D1: Int64; const KSizes: array of Int64): TInt64Array;
+var
+  I: Integer;
+begin
+  Result := nil;
+  SetLength(Result, 2 + Length(KSizes));
+  Result[0] := D0;
+  Result[1] := D1;
+  for I := 0 to High(KSizes) do
+    Result[2 + I] := KSizes[I];
+end;
+
+constructor TConvND.Create(const P: TVarPath; InDim, OutDim: Int64;
+  const KSizes: array of Int64; const Cfg: TConvConfigND);
+var
+  I: Integer;
+begin
+  inherited Create;
+  FNd := CheckNd('conv', KSizes, [Cfg.Stride, Cfg.Padding, Cfg.Dilation]);
+  FCfg := Cfg;
+  FCfg.Stride := Copy(Cfg.Stride);
+  FCfg.Padding := Copy(Cfg.Padding);
+  FCfg.Dilation := Copy(Cfg.Dilation);
+  { PyTorch's order: last dimension's left/right first (DESIGN 4.6.10) }
+  SetLength(FPadTwice, 2 * FNd);
+  for I := 0 to FNd - 1 do
+  begin
+    FPadTwice[2 * I] := FCfg.Padding[FNd - 1 - I];
+    FPadTwice[2 * I + 1] := FCfg.Padding[FNd - 1 - I];
+  end;
+  FZeroPad := Repeated(0, FNd);
+  if Cfg.Bias then
+    Bias := P.Variable('bias', [OutDim], Cfg.BsInit);
+  Weight := P.Variable('weight', KernelDims(OutDim, InDim div Cfg.Groups, KSizes),
+    Cfg.WsInit);
+end;
+
+function TConvND.Forward(const X: TTensor; Train: Boolean): TTensor;
+var
+  Y: TTensor;
+  Pad: TInt64Array;
+begin
+  if FCfg.PaddingMode = pmZeros then
+  begin
+    Y := X;
+    Pad := FCfg.Padding;
+  end
+  else
+  begin
+    Y := PadWithMode(X, FCfg.PaddingMode, FPadTwice);
+    Pad := FZeroPad;
+  end;
+  case FNd of
+    1: Result := Y.conv1d(Weight, Bias, FCfg.Stride, Pad, FCfg.Dilation, FCfg.Groups);
+    2: Result := Y.conv2d(Weight, Bias, FCfg.Stride, Pad, FCfg.Dilation, FCfg.Groups);
+  else
+    Result := Y.conv3d(Weight, Bias, FCfg.Stride, Pad, FCfg.Dilation, FCfg.Groups);
+  end;
+end;
+
+constructor TConv1D.Create(const P: TVarPath; InDim, OutDim, KSize: Int64);
+begin
+  Create(P, InDim, OutDim, KSize, DefaultConvConfig);
+end;
+
+constructor TConv1D.Create(const P: TVarPath; InDim, OutDim, KSize: Int64;
+  const Cfg: TConvConfig);
+begin
+  inherited Create(P, InDim, OutDim, [KSize], ConvConfigToND(Cfg, 1));
+end;
 
 constructor TConv2D.Create(const P: TVarPath; InDim, OutDim, KSize: Int64);
 begin
@@ -1110,35 +1484,86 @@ end;
 
 constructor TConv2D.Create(const P: TVarPath; InDim, OutDim, KSize: Int64;
   const Cfg: TConvConfig);
-var
-  I: Integer;
+begin
+  inherited Create(P, InDim, OutDim, [KSize, KSize], ConvConfigToND(Cfg, 2));
+end;
+
+constructor TConv3D.Create(const P: TVarPath; InDim, OutDim, KSize: Int64);
+begin
+  Create(P, InDim, OutDim, KSize, DefaultConvConfig);
+end;
+
+constructor TConv3D.Create(const P: TVarPath; InDim, OutDim, KSize: Int64;
+  const Cfg: TConvConfig);
+begin
+  inherited Create(P, InDim, OutDim, [KSize, KSize, KSize], ConvConfigToND(Cfg, 3));
+end;
+
+{ TConvTransposeND (conv_transpose.rs) }
+
+constructor TConvTransposeND.Create(const P: TVarPath; InDim, OutDim: Int64;
+  const KSizes: array of Int64; const Cfg: TConvTransposeConfigND);
 begin
   inherited Create;
+  FNd := CheckNd('conv_transpose', KSizes, [Cfg.Stride, Cfg.Padding,
+    Cfg.OutputPadding, Cfg.Dilation]);
   FCfg := Cfg;
-  SetLength(FPadTwice, 4);
-  for I := 0 to 3 do
-    FPadTwice[I] := Cfg.Padding;
+  FCfg.Stride := Copy(Cfg.Stride);
+  FCfg.Padding := Copy(Cfg.Padding);
+  FCfg.OutputPadding := Copy(Cfg.OutputPadding);
+  FCfg.Dilation := Copy(Cfg.Dilation);
   if Cfg.Bias then
     Bias := P.Variable('bias', [OutDim], Cfg.BsInit);
-  Weight := P.Variable('weight', [OutDim, InDim div Cfg.Groups, KSize, KSize],
+  Weight := P.Variable('weight', KernelDims(InDim, OutDim div Cfg.Groups, KSizes),
     Cfg.WsInit);
 end;
 
-function TConv2D.Forward(const X: TTensor; Train: Boolean): TTensor;
-const
-  ModeNames: array[TPaddingMode] of AnsiString =
-    ('zeros', 'reflect', 'replicate', 'circular');
-var
-  S, D: Int64;
+{ the generated argument order puts groups before dilation }
+function TConvTransposeND.Forward(const X: TTensor; Train: Boolean): TTensor;
 begin
-  S := FCfg.Stride;
-  D := FCfg.Dilation;
-  if FCfg.PaddingMode = pmZeros then
-    Result := X.conv2d(Weight, Bias, [S, S], [FCfg.Padding, FCfg.Padding],
-      [D, D], FCfg.Groups)
+  case FNd of
+    1: Result := X.conv_transpose1d(Weight, Bias, FCfg.Stride, FCfg.Padding,
+         FCfg.OutputPadding, FCfg.Groups, FCfg.Dilation);
+    2: Result := X.conv_transpose2d(Weight, Bias, FCfg.Stride, FCfg.Padding,
+         FCfg.OutputPadding, FCfg.Groups, FCfg.Dilation);
   else
-    Result := X.pad(FPadTwice, ModeNames[FCfg.PaddingMode], NoDouble).conv2d(
-      Weight, Bias, [S, S], [0, 0], [D, D], FCfg.Groups);
+    Result := X.conv_transpose3d(Weight, Bias, FCfg.Stride, FCfg.Padding,
+      FCfg.OutputPadding, FCfg.Groups, FCfg.Dilation);
+  end;
+end;
+
+constructor TConvTranspose1D.Create(const P: TVarPath; InDim, OutDim, KSize: Int64);
+begin
+  Create(P, InDim, OutDim, KSize, DefaultConvTransposeConfig);
+end;
+
+constructor TConvTranspose1D.Create(const P: TVarPath; InDim, OutDim, KSize: Int64;
+  const Cfg: TConvTransposeConfig);
+begin
+  inherited Create(P, InDim, OutDim, [KSize], ConvTransposeConfigToND(Cfg, 1));
+end;
+
+constructor TConvTranspose2D.Create(const P: TVarPath; InDim, OutDim, KSize: Int64);
+begin
+  Create(P, InDim, OutDim, KSize, DefaultConvTransposeConfig);
+end;
+
+constructor TConvTranspose2D.Create(const P: TVarPath; InDim, OutDim, KSize: Int64;
+  const Cfg: TConvTransposeConfig);
+begin
+  inherited Create(P, InDim, OutDim, [KSize, KSize], ConvTransposeConfigToND(Cfg, 2));
+end;
+
+constructor TConvTranspose3D.Create(const P: TVarPath; InDim, OutDim, KSize: Int64);
+begin
+  Create(P, InDim, OutDim, KSize, DefaultConvTransposeConfig);
+end;
+
+constructor TConvTranspose3D.Create(const P: TVarPath; InDim, OutDim, KSize: Int64;
+  const Cfg: TConvTransposeConfig);
+begin
+  inherited Create(P, InDim, OutDim, [KSize, KSize, KSize],
+    ConvTransposeConfigToND(Cfg, 3));
 end;
 
 { TBatchNorm (batch_norm.rs) }
@@ -1244,6 +1669,169 @@ function TEmbedding.Forward(const X: TTensor; Train: Boolean): TTensor;
 begin
   Result := TTensor.embedding(Weight, X, FCfg.PaddingIdx,
     FCfg.ScaleGradByFreq, FCfg.Sparse);
+end;
+
+{ TGroupNorm (group_norm.rs) }
+
+constructor TGroupNorm.Create(const P: TVarPath; NumGroups, NumChannels: Int64);
+begin
+  Create(P, NumGroups, NumChannels, DefaultGroupNormConfig);
+end;
+
+constructor TGroupNorm.Create(const P: TVarPath; NumGroups, NumChannels: Int64;
+  const Cfg: TGroupNormConfig);
+begin
+  inherited Create;
+  FCfg := Cfg;
+  FNumGroups := NumGroups;
+  FNumChannels := NumChannels;
+  if Cfg.Affine then
+  begin
+    Weight := P.Variable('weight', [NumChannels], Cfg.WsInit);
+    Bias := P.Variable('bias', [NumChannels], Cfg.BsInit);
+  end;
+end;
+
+function TGroupNorm.Forward(const X: TTensor; Train: Boolean): TTensor;
+begin
+  Result := X.group_norm(FNumGroups, Weight, Bias, FCfg.Eps, FCfg.CudnnEnabled);
+end;
+
+{ TRNN (rnn.rs) }
+
+constructor TRNN.Create(const P: TVarPath; InDim, AHiddenDim, GateMul: Int64;
+  const Cfg: TRNNConfig);
+var
+  L, D, K: Integer;
+  GateDim, InL: Int64;
+  Sfx: String;
+begin
+  inherited Create;
+  FHiddenDim := AHiddenDim;
+  FCfg := Cfg;
+  GateDim := GateMul * AHiddenDim;
+  FFlatWeights := nil;
+  K := 0;
+  if Cfg.HasBiases then
+    SetLength(FFlatWeights, 4 * Cfg.NumLayers * NumDirections)
+  else
+    SetLength(FFlatWeights, 2 * Cfg.NumLayers * NumDirections);
+  for L := 0 to Cfg.NumLayers - 1 do
+    for D := 0 to NumDirections - 1 do
+    begin
+      if L = 0 then
+        InL := InDim
+      else
+        InL := AHiddenDim * NumDirections;
+      if D = 1 then
+        Sfx := IntToStr(L) + '_reverse'
+      else
+        Sfx := IntToStr(L);
+      FFlatWeights[K] := P.Variable('weight_ih_l' + Sfx, [GateDim, InL], Cfg.WIhInit);
+      FFlatWeights[K + 1] := P.Variable('weight_hh_l' + Sfx, [GateDim, AHiddenDim],
+        Cfg.WHhInit);
+      Inc(K, 2);
+      if Cfg.HasBiases then
+      begin
+        FFlatWeights[K] := P.Variable('bias_ih_l' + Sfx, [GateDim], Cfg.BIhInit);
+        FFlatWeights[K + 1] := P.Variable('bias_hh_l' + Sfx, [GateDim], Cfg.BHhInit);
+        Inc(K, 2);
+      end;
+    end;
+end;
+
+function TRNN.BatchDimIndex: Integer;
+begin
+  if FCfg.BatchFirst then
+    Result := 0
+  else
+    Result := 1;
+end;
+
+function TRNN.NumDirections: Int64;
+begin
+  if FCfg.Bidirectional then
+    Result := 2
+  else
+    Result := 1;
+end;
+
+function TRNN.Step(const Input: TTensor; const State: TRNNState): TRNNState;
+begin
+  SeqInit(Input.unsqueeze(1 - BatchDimIndex), State, Result);
+end;
+
+function TRNN.Seq(const Input: TTensor; out State: TRNNState): TTensor;
+begin
+  Result := SeqInit(Input, ZeroState(Input.Shape[BatchDimIndex]), State);
+end;
+
+function RNNZeros(R: TRNN; BatchDim: Int64): TTensor;
+begin
+  Result := TTensor.zeros([R.Config.NumLayers * (1 + Ord(R.Config.Bidirectional)),
+    BatchDim, R.HiddenDim], R.FlatWeights[0].Kind, R.FlatWeights[0].Device);
+end;
+
+{ TLSTM }
+
+constructor TLSTM.Create(const P: TVarPath; InDim, AHiddenDim: Int64);
+begin
+  Create(P, InDim, AHiddenDim, DefaultRNNConfig);
+end;
+
+constructor TLSTM.Create(const P: TVarPath; InDim, AHiddenDim: Int64;
+  const Cfg: TRNNConfig);
+begin
+  inherited Create(P, InDim, AHiddenDim, 4, Cfg);
+end;
+
+{ H and C share one handle, as tch-rs's shallow_clone }
+function TLSTM.ZeroState(BatchDim: Int64): TRNNState;
+begin
+  Result.H := RNNZeros(Self, BatchDim);
+  Result.C := Result.H;
+end;
+
+function TLSTM.SeqInit(const Input: TTensor; const InState: TRNNState;
+  out OutState: TRNNState): TTensor;
+begin
+  Input.lstm([InState.H, InState.C], FFlatWeights, FCfg.HasBiases,
+    FCfg.NumLayers, FCfg.Dropout, FCfg.Train, FCfg.Bidirectional,
+    FCfg.BatchFirst, Result, OutState.H, OutState.C);
+end;
+
+{ TGRU }
+
+constructor TGRU.Create(const P: TVarPath; InDim, AHiddenDim: Int64);
+begin
+  Create(P, InDim, AHiddenDim, DefaultRNNConfig);
+end;
+
+constructor TGRU.Create(const P: TVarPath; InDim, AHiddenDim: Int64;
+  const Cfg: TRNNConfig);
+begin
+  inherited Create(P, InDim, AHiddenDim, 3, Cfg);
+end;
+
+function TGRU.ZeroState(BatchDim: Int64): TRNNState;
+begin
+  Result.H := RNNZeros(Self, BatchDim);
+  Result.C := Default(TTensor);
+end;
+
+function TGRU.SeqInit(const Input: TTensor; const InState: TRNNState;
+  out OutState: TRNNState): TTensor;
+begin
+  Input.gru(InState.H, FFlatWeights, FCfg.HasBiases, FCfg.NumLayers,
+    FCfg.Dropout, FCfg.Train, FCfg.Bidirectional, FCfg.BatchFirst, Result,
+    OutState.H);
+end;
+
+{ TIdentity (mod.rs Id) }
+
+function TIdentity.Forward(const X: TTensor; Train: Boolean): TTensor;
+begin
+  Result := X;
 end;
 
 { ---------------------------------------------------------------- func / sequential }

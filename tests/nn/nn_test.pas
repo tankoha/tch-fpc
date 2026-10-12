@@ -1,7 +1,8 @@
-{ Milestone 2 (DESIGN.md 4.6.7) against the real libtorch: TInit, TVarStore,
-  save/load, optimizers, layers, TSequential, and hypotheses H13-H18.
-  Expected values are worked out by hand in DESIGN.md 4.6.7 or follow the
-  named tch-rs 4227b89b test.
+{ Milestones 2 and 3 (DESIGN.md 4.6.7, 4.6.10) against the real libtorch:
+  TInit, TVarStore, save/load, optimizers, layers, TSequential, hypotheses
+  H13-H18, and the milestone 3 layers (group 11). Expected values are
+  worked out by hand in DESIGN.md 4.6.7 and 4.6.10 or follow the named
+  tch-rs 4227b89b test.
 
   Build (from the repo root, after building build/libtch):
     fpc -Mobjfpc -Sh -Fusrc -FUbuild/nn -Flbuild/libtch \
@@ -877,6 +878,438 @@ begin
   end;
 end;
 
+{ 11. Milestone 3 layers (DESIGN.md 4.6.10) }
+
+function SameArr(const A, B: TInt64Array): Boolean;
+var
+  K: Integer;
+begin
+  Result := Length(A) = Length(B);
+  if Result then
+    for K := 0 to High(A) do
+      if A[K] <> B[K] then
+        Exit(False);
+end;
+
+function SameInit(const A, B: TInit): Boolean;
+begin
+  Result := (A.Kind = B.Kind) and (A.A = B.A) and (A.B = B.B) and
+    (A.Dist = B.Dist) and (A.Fan = B.Fan) and (A.NonLin = B.NonLin);
+end;
+
+function Names(VS: TVarStore): String;
+var
+  NT: TNamedTensorArray;
+  K: Integer;
+begin
+  NT := VS.Variables;
+  Result := '';
+  for K := 0 to High(NT) do
+  begin
+    if K > 0 then
+      Result := Result + ' ';
+    Result := Result + NT[K].Name;
+  end;
+end;
+
+function ConvConfigNoBias: TConvConfig;
+begin
+  Result := DefaultConvConfig;
+  Result.Bias := False;
+end;
+
+function ApplyConv1D(Mode: TPaddingMode): String;
+var
+  VS: TVarStore;
+  Conv: TConv1D;
+  Cfg: TConvConfig;
+begin
+  VS := TVarStore.Create(TDevice.Cpu);
+  Conv := nil;
+  try
+    Cfg := DefaultConvConfig;
+    Cfg.Padding := 1;
+    Cfg.Bias := False;
+    Cfg.PaddingMode := Mode;
+    Conv := TConv1D.Create(VS.Root, 1, 1, 3, Cfg);
+    TInit.Constant(1).Apply(Conv.Weight);
+    Result := Values(Conv.Forward(TTensor.FromArray([1.0, 2, 3]).view([1, 1, 3])));
+  finally
+    Conv.Free;
+    VS.Free;
+  end;
+end;
+
+procedure TestPadAndConvND;
+var
+  VS: TVarStore;
+  Conv: TConvND;
+  C1: TConv1D;
+  C3: TConv3D;
+  Cfg: TConvConfigND;
+  A, B: TConvConfigND;
+  Y: TTensor;
+  Raised: Boolean;
+begin
+  WriteLn('milestone 3: PadWithMode, TConv1D, TConv2D ND, TConv3D');
+  Check(Values(PadWithMode(TTensor.FromArray([1.0, 2, 3]), pmZeros, [1, 1])) = '0 1 2 3 0',
+    '1. pad zeros [1, 1] (tch-rs pad)');
+  Check(Values(PadWithMode(TTensor.FromArray([1.0, 2, 3, 4]).view([1, 2, 2]), pmReflect,
+    [1, 1, 1, 1])) = '4 3 4 3 2 1 2 1 4 3 4 3 2 1 2 1', '1. pad reflect [1, 1, 1, 1] (tch-rs pad)');
+
+  Check(ApplyConv1D(pmZeros) = '3 6 5', '2. conv1d zeros: 3 6 5');
+  Check(ApplyConv1D(pmReflect) = '5 6 7', '2. conv1d reflect: 5 6 7');
+  Check(ApplyConv1D(pmReplicate) = '4 6 8', '2. conv1d replicate: 4 6 8');
+  Check(ApplyConv1D(pmCircular) = '6 6 6', '2. conv1d circular: 6 6 6');
+  VS := TVarStore.Create(TDevice.Cpu);
+  C1 := nil;
+  try
+    C1 := TConv1D.Create(VS.Root, 4, 6, 3);
+    Check((Names(VS) = 'bias weight') and ShapeIs(C1.Bias, [6]) and ShapeIs(C1.Weight, [6, 4, 3]),
+      '2. TConv1D(4, 6, 3) registers bias [6], then weight [6, 4, 3]');
+  finally
+    C1.Free;
+    VS.Free;
+  end;
+
+  VS := TVarStore.Create(TDevice.Cpu);
+  Conv := nil;
+  try
+    Cfg := DefaultConvConfigND(2);
+    Cfg.Padding := [1, 0];
+    Cfg.Bias := False;
+    Cfg.PaddingMode := pmReflect;
+    Conv := TConv2D.Create(VS.Root, 1, 1, [3, 1], Cfg);
+    TInit.Constant(1).Apply(Conv.Weight);
+    Y := Conv.Forward(TTensor.FromArray([1.0, 2, 3, 4]).view([1, 1, 2, 2]));
+    Check(ShapeIs(Y, [1, 1, 2, 2]) and (Values(Y) = '7 10 5 8'),
+      '3. ND padding [1, 0] reflect, KSizes [3, 1]: [[7, 10], [5, 8]] (PyTorch order)');
+  finally
+    Conv.Free;
+    VS.Free;
+  end;
+  A := DefaultConvConfigND(2);
+  B := ConvConfigToND(DefaultConvConfig, 2);
+  Check(SameArr(A.Stride, B.Stride) and SameArr(A.Padding, B.Padding) and
+    SameArr(A.Dilation, B.Dilation) and SameArr(A.Stride, [1, 1]) and
+    SameArr(A.Padding, [0, 0]) and (A.Groups = B.Groups) and (A.Bias = B.Bias) and
+    SameInit(A.WsInit, B.WsInit) and SameInit(A.BsInit, B.BsInit) and
+    (A.PaddingMode = B.PaddingMode), '3. DefaultConvConfigND(2) = ConvConfigToND(DefaultConvConfig, 2)');
+  VS := TVarStore.Create(TDevice.Cpu);
+  try
+    Raised := False;
+    try
+      TConvND.Create(VS.Root, 1, 1, [3, 3, 3, 3], DefaultConvConfigND(4)).Free;
+    except
+      on ETorchError do Raised := True;
+    end;
+    Check(Raised, '3. four kernel sizes raise ETorchError');
+    Raised := False;
+    Cfg := DefaultConvConfigND(2);
+    Cfg.Stride := [1];
+    try
+      TConvND.Create(VS.Root, 1, 1, [3, 3], Cfg).Free;
+    except
+      on ETorchError do Raised := True;
+    end;
+    Check(Raised and (VS.Count = 0), '3. Stride of the wrong length raises before registering');
+  finally
+    VS.Free;
+  end;
+
+  VS := TVarStore.Create(TDevice.Cpu);
+  C3 := nil;
+  Conv := nil;
+  try
+    Cfg := DefaultConvConfigND(3);
+    C3 := TConv3D.Create(VS.Root / 'a', 1, 1, 2, ConvConfigNoBias);
+    TInit.Constant(1).Apply(C3.Weight);
+    Y := C3.Forward(TTensor.FromArray([1.0, 2, 3, 4, 5, 6, 7, 8]).view([1, 1, 2, 2, 2]));
+    Check(ShapeIs(Y, [1, 1, 1, 1, 1]) and (Values(Y) = '36'), '4. TConv3D(1, 1, 2) on 1..8: [36]');
+    Cfg.Padding := [1, 0, 0];
+    Conv := TConvND.Create(VS.Root / 'b', 2, 3, [3, 3, 3], Cfg);
+    Check(ShapeIs(Conv.Weight, [3, 2, 3, 3, 3]) and (Conv.Nd = 3) and
+      ShapeIs(Conv.Forward(TTensor.randn([1, 2, 4, 4, 4])), [1, 3, 4, 2, 2]),
+      '4. TConvND(2, 3, [3, 3, 3]), Padding [1, 0, 0]: [1, 3, 4, 2, 2]');
+  finally
+    Conv.Free;
+    C3.Free;
+    VS.Free;
+  end;
+end;
+
+function TransposeValues(Nd, Stride, OutputPadding: Int64; const X: TTensor): TTensor;
+var
+  VS: TVarStore;
+  L: TConvTransposeND;
+  Cfg: TConvTransposeConfig;
+begin
+  VS := TVarStore.Create(TDevice.Cpu);
+  L := nil;
+  try
+    Cfg := DefaultConvTransposeConfig;
+    Cfg.Bias := False;
+    Cfg.Stride := Stride;
+    Cfg.OutputPadding := OutputPadding;
+    if Nd = 1 then
+      L := TConvTranspose1D.Create(VS.Root, 1, 1, 2, Cfg)
+    else
+      L := TConvTranspose2D.Create(VS.Root, 1, 1, 2, Cfg);
+    TInit.Constant(1).Apply(L.Weight);
+    Result := L.Forward(X);
+  finally
+    L.Free;
+    VS.Free;
+  end;
+end;
+
+procedure TestConvTransposeAndGroupNorm;
+var
+  VS: TVarStore;
+  T3: TConvTranspose3D;
+  GN: TGroupNorm;
+  GCfg: TGroupNormConfig;
+  X2, X1, Y: TTensor;
+  D: TDoubleArray;
+begin
+  WriteLn('milestone 3: TConvTranspose1D/2D/3D, TGroupNorm');
+  X2 := TTensor.FromArray([1.0, 2, 3, 4]).view([1, 1, 2, 2]);
+  Y := TransposeValues(2, 1, 0, X2);
+  Check(ShapeIs(Y, [1, 1, 3, 3]) and (Values(Y) = '1 3 2 4 10 6 3 7 4'),
+    '5. TConvTranspose2D stride 1: [1 3 2 4 10 6 3 7 4]');
+  Y := TransposeValues(2, 2, 0, X2);
+  Check(ShapeIs(Y, [1, 1, 4, 4]) and (Values(Y) = '1 1 2 2 1 1 2 2 3 3 4 4 3 3 4 4'),
+    '5. TConvTranspose2D stride 2: [1 1 2 2 1 1 2 2 3 3 4 4 3 3 4 4]');
+  X1 := TTensor.FromArray([1.0, 2, 3]).view([1, 1, 3]);
+  Check(Values(TransposeValues(1, 1, 0, X1)) = '1 3 5 3', '5. TConvTranspose1D: [1 3 5 3]');
+  Y := TransposeValues(1, 2, 1, X1);
+  Check(ShapeIs(Y, [1, 1, 7]) and (Values(Y) = '1 1 2 2 3 3 0'),
+    '5. TConvTranspose1D stride 2, OutputPadding 1: [1 1 2 2 3 3 0]');
+  VS := TVarStore.Create(TDevice.Cpu);
+  T3 := nil;
+  try
+    T3 := TConvTranspose3D.Create(VS.Root, 2, 3, 3);
+    Check((Names(VS) = 'bias weight') and ShapeIs(T3.Bias, [3]) and
+      ShapeIs(T3.Weight, [2, 3, 3, 3, 3]), '5. TConvTranspose3D(2, 3, 3): bias [3], then weight [2, 3, 3, 3, 3]');
+    Check(ShapeIs(T3.Forward(TTensor.randn([1, 2, 4, 4, 4])), [1, 3, 6, 6, 6]),
+      '5. TConvTranspose3D: [1, 2, 4, 4, 4] -> [1, 3, 6, 6, 6]');
+  finally
+    T3.Free;
+    VS.Free;
+  end;
+
+  VS := TVarStore.Create(TDevice.Cpu);
+  GN := nil;
+  try
+    GN := TGroupNorm.Create(VS.Root, 2, 4);
+    Check((Names(VS) = 'weight bias') and ShapeIs(GN.Weight, [4]) and ShapeIs(GN.Bias, [4]),
+      '6. TGroupNorm(2, 4) registers weight [4], bias [4]');
+    D := GN.Forward(TTensor.FromArray([1.0, 2, 3, 4]).view([1, 4, 1])).ToDoubleArray;
+    Check(Near(D[0], -1, 1e-4) and Near(D[1], 1, 1e-4) and Near(D[2], -1, 1e-4) and
+      Near(D[3], 1, 1e-4), Format('6. GroupNorm(2, 4) on [1, 2, 3, 4]: %.5f %.5f %.5f %.5f',
+      [D[0], D[1], D[2], D[3]]));
+    FreeAndNil(GN);
+    GCfg := DefaultGroupNormConfig;
+    GCfg.Affine := False;
+    GN := TGroupNorm.Create(VS.Root / 'na', 2, 4, GCfg);
+    D := GN.Forward(TTensor.FromArray([1.0, 2, 3, 4]).view([1, 4, 1])).ToDoubleArray;
+    Check((VS.Count = 2) and GN.Weight.IsNil and Near(D[0], -1, 1e-4) and Near(D[3], 1, 1e-4),
+      '6. Affine False registers nothing and still normalises');
+    FreeAndNil(GN);
+    GN := TGroupNorm.Create(VS.Root / 't', 2, 10);
+    Check(ShapeIs(GN.Forward(TTensor.randn([1, 10, 7])), [1, 10, 7]),
+      '6. tch-rs group_norm_test: GroupNorm(2, 10) keeps [1, 10, 7]');
+  finally
+    GN.Free;
+    VS.Free;
+  end;
+end;
+
+{ tch-rs gru_test / lstm_test configs: one layer type, one config }
+procedure CheckRNN(IsLSTM: Boolean; const Cfg: TRNNConfig; const What: String);
+var
+  VS: TVarStore;
+  R: TRNN;
+  S: TRNNState;
+  Y: TTensor;
+  Dirs, LayerDim, NVars: Int64;
+begin
+  Dirs := 1 + Ord(Cfg.Bidirectional);
+  LayerDim := Cfg.NumLayers * Dirs;
+  if Cfg.HasBiases then
+    NVars := 4 * LayerDim
+  else
+    NVars := 2 * LayerDim;
+  VS := TVarStore.Create(TDevice.Cpu);
+  R := nil;
+  try
+    if IsLSTM then
+      R := TLSTM.Create(VS.Root, 2, 4, Cfg)
+    else
+      R := TGRU.Create(VS.Root, 2, 4, Cfg);
+    S := R.Step(TTensor.randn([5, 2]), R.ZeroState(5));
+    Y := R.Seq(TTensor.randn([5, 3, 2]), S);
+    Check((VS.Count = NVars) and (Length(R.FlatWeights) = NVars) and
+      ShapeIs(R.Step(TTensor.randn([5, 2]), R.ZeroState(5)).H, [LayerDim, 5, 4]) and
+      (IsLSTM = not R.ZeroState(5).C.IsNil) and ShapeIs(S.H, [LayerDim, 5, 4]) and
+      (not IsLSTM or ShapeIs(S.C, [LayerDim, 5, 4])) and (IsLSTM or S.C.IsNil) and
+      ShapeIs(Y, [5, 3, 4 * Dirs]), Format('7. %s: %d variables, Step [%d, 5, 4], Seq [5, 3, %d]',
+      [What, NVars, LayerDim, 4 * Dirs]));
+  finally
+    R.Free;
+    VS.Free;
+  end;
+end;
+
+procedure TestRNN;
+const
+  Kinds: array[Boolean] of String = ('GRU', 'LSTM');
+var
+  IsLSTM: Boolean;
+  Cfg: TRNNConfig;
+  VS: TVarStore;
+  R: TRNN;
+  G: TGRU;
+  L: TLSTM;
+  S, S2: TRNNState;
+  Y: TTensor;
+  Raised: Boolean;
+  Msg, Expected: String;
+  Guard: IInterface;
+begin
+  WriteLn('milestone 3: TGRU, TLSTM (tch-rs gru_test, lstm_test), hand numbers');
+  for IsLSTM := False to True do
+  begin
+    Cfg := DefaultRNNConfig;
+    CheckRNN(IsLSTM, Cfg, Kinds[IsLSTM] + ' default');
+    Cfg.HasBiases := False;
+    CheckRNN(IsLSTM, Cfg, Kinds[IsLSTM] + ' no biases');
+    Cfg := DefaultRNNConfig;
+    Cfg.Bidirectional := True;
+    CheckRNN(IsLSTM, Cfg, Kinds[IsLSTM] + ' bidirectional');
+    Cfg := DefaultRNNConfig;
+    Cfg.NumLayers := 2;
+    CheckRNN(IsLSTM, Cfg, Kinds[IsLSTM] + ' 2 layers');
+    Cfg.Bidirectional := True;
+    CheckRNN(IsLSTM, Cfg, Kinds[IsLSTM] + ' 2 layers bidirectional');
+  end;
+
+  Expected := 'weight_ih_l0 weight_hh_l0 bias_ih_l0 bias_hh_l0 weight_ih_l0_reverse ' +
+    'weight_hh_l0_reverse bias_ih_l0_reverse bias_hh_l0_reverse weight_ih_l1 ' +
+    'weight_hh_l1 bias_ih_l1 bias_hh_l1 weight_ih_l1_reverse weight_hh_l1_reverse ' +
+    'bias_ih_l1_reverse bias_hh_l1_reverse';
+  VS := TVarStore.Create(TDevice.Cpu);
+  R := nil;
+  try
+    R := TGRU.Create(VS.Root, 2, 4, Cfg);
+    Check((Names(VS) = Expected) and ShapeIs(R.FlatWeights[8], [12, 8]) and
+      ShapeIs(R.FlatWeights[0], [12, 2]) and ShapeIs(R.FlatWeights[1], [12, 4]),
+      '7. GRU 2 layers bidirectional: names in order, weight_ih_l1 [12, 8]');
+    FreeAndNil(R);
+    VS.Free;
+    VS := TVarStore.Create(TDevice.Cpu);
+    R := TLSTM.Create(VS.Root, 2, 4, Cfg);
+    Check((Names(VS) = Expected) and ShapeIs(R.FlatWeights[8], [16, 8]),
+      '7. LSTM 2 layers bidirectional: same names, weight_ih_l1 [16, 8]');
+    FreeAndNil(R);
+    Cfg := DefaultRNNConfig;
+    Cfg.BatchFirst := False;
+    R := TGRU.Create(VS.Root / 'bf', 2, 4, Cfg);
+    Y := R.Seq(TTensor.randn([3, 5, 2]), S);
+    Check(ShapeIs(Y, [3, 5, 4]) and ShapeIs(S.H, [1, 5, 4]) and
+      ShapeIs(R.Step(TTensor.randn([5, 2]), R.ZeroState(5)).H, [1, 5, 4]),
+      '7. BatchFirst False: Seq on [3, 5, 2] -> [3, 5, 4], h [1, 5, 4]; Step batch 5');
+  finally
+    R.Free;
+    VS.Free;
+  end;
+
+  VS := TVarStore.Create(TDevice.Cpu);
+  G := nil;
+  L := nil;
+  try
+    G := TGRU.Create(VS.Root / 'g', 1, 1);
+    L := TLSTM.Create(VS.Root / 'l', 1, 1);
+    Guard := NoGradGuard;
+    for Y in G.FlatWeights do
+      Y.CopyFrom(Y.zeros_like);
+    for Y in L.FlatWeights do
+      Y.CopyFrom(Y.zeros_like);
+    G.FlatWeights[2].CopyFrom(TTensor.FromArray([0.0, 0, 1]));
+    L.FlatWeights[2].CopyFrom(TTensor.FromArray([0.0, 0, 1, 0]));
+    Guard := nil;
+    S := G.Step(TTensor.zeros([1, 1]), G.ZeroState(1));
+    Check(Near(S.H.DoubleValue([0, 0, 0]), 0.380797, 1e-5),
+      Format('8. GRU hand number: H = %.6f (tanh(1) / 2 = 0.380797)', [S.H.DoubleValue([0, 0, 0])]));
+    S := L.Step(TTensor.zeros([1, 1]), L.ZeroState(1));
+    Check(Near(S.C.DoubleValue([0, 0, 0]), 0.380797, 1e-5) and
+      Near(S.H.DoubleValue([0, 0, 0]), 0.181700, 1e-5),
+      Format('8. LSTM hand numbers: C = %.6f (0.380797), H = %.6f (0.181700)',
+      [S.C.DoubleValue([0, 0, 0]), S.H.DoubleValue([0, 0, 0])]));
+
+    S := G.ZeroState(1);
+    Raised := False;
+    Msg := '';
+    try
+      G.SeqInit(TTensor.zeros([1, 1, 1]), S, S);
+    except
+      on E: ETorchError do
+      begin
+        Raised := True;
+        Msg := E.Message;
+      end;
+    end;
+    Check(Raised and (Pos('hx', Msg) > 0), '9. SeqInit(X, S, S) raises: ' + Msg);
+    S := G.ZeroState(1);
+    S := G.Step(TTensor.zeros([1, 1]), S);
+    S2 := S;
+    S := G.Step(TTensor.zeros([1, 1]), S);
+    Check(Near(S2.H.DoubleValue([0, 0, 0]), 0.380797, 1e-5) and
+      (S.H.DoubleValue([0, 0, 0]) > S2.H.DoubleValue([0, 0, 0])),
+      '9. S := Step(X, S) works (second step builds on the first)');
+  finally
+    L.Free;
+    G.Free;
+    VS.Free;
+  end;
+end;
+
+procedure TestIdentity;
+var
+  Id: TIdentity;
+  Seq: TSequential;
+  X: TTensor;
+begin
+  WriteLn('milestone 3: TIdentity');
+  X := TTensor.FromArray([1.0, -1.0, 2.0]);
+  Id := TIdentity.Create;
+  try
+    Check(Id.Forward(X).Raw = X.Raw, '10. TIdentity.Forward(X) is X (same handle)');
+  finally
+    Id.Free;
+  end;
+  Seq := TSequential.Create;
+  try
+    Seq.Add(TIdentity.Create).AddFn(@ReluFn);
+    Check(Values(Seq.Forward(X)) = '1 0 2', '10. TIdentity + ReLU behaves like ReLU');
+  finally
+    Seq.Free;
+  end;
+end;
+
+procedure TestMilestone3;
+var
+  Before: Integer;
+begin
+  Before := TchLiveHandles;
+  TestPadAndConvND;
+  TestConvTransposeAndGroupNorm;
+  TestRNN;
+  TestIdentity;
+  Check(TchLiveHandles = Before, Format('11. live handles %d -> %d after the milestone 3 layers',
+    [Before, TchLiveHandles]));
+end;
+
 { 10. Handles: optimizer, layers, store freed in that order }
 procedure Scenario;
 var
@@ -926,6 +1359,7 @@ begin
     TestSaveLoad;
     TestLayers;
     TestSequential;
+    TestMilestone3;
     TestHandles;
   end;
   Check(TchLiveHandles = 0, 'no live handles at the end');

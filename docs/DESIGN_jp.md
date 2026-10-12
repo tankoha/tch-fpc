@@ -2428,7 +2428,7 @@ record は測らずに却下：`specialize TConvConfigND<TInt3>` は互いに無
   private
     FFlatWeights: TTensorArray; FHiddenDim: Int64; FCfg: TRNNConfig;
   protected
-    constructor Create(const P: TVarPath; InDim, HiddenDim, GateMul: Int64; const Cfg: TRNNConfig);  // rnn_weights
+    constructor Create(const P: TVarPath; InDim, AHiddenDim, GateMul: Int64; const Cfg: TRNNConfig);  // rnn_weights
     function BatchDimIndex: Integer; inline; // BatchFirst なら 0、でなければ 1
   public
     function ZeroState(BatchDim: Int64): TRNNState; virtual; abstract;
@@ -2441,8 +2441,8 @@ record は測らずに却下：`specialize TConvConfigND<TInt3>` は互いに無
   end;
   TLSTM = class(TRNN)
   public
-    constructor Create(const P: TVarPath; InDim, HiddenDim: Int64); overload;
-    constructor Create(const P: TVarPath; InDim, HiddenDim: Int64; const Cfg: TRNNConfig); overload;
+    constructor Create(const P: TVarPath; InDim, AHiddenDim: Int64); overload;
+    constructor Create(const P: TVarPath; InDim, AHiddenDim: Int64; const Cfg: TRNNConfig); overload;
     function ZeroState(BatchDim: Int64): TRNNState; override;
     function SeqInit(const Input: TTensor; const InState: TRNNState; out OutState: TRNNState): TTensor; override;
   end;
@@ -2522,6 +2522,15 @@ record は測らずに却下：`specialize TConvConfigND<TInt3>` は互いに無
   チェーンが要る）。
 - **(H30)** CUDA/ROCm の store での cuDNN 平坦化呼び出し（項目3）— 条件・呼び出し・
   テストは 4.8（「GPU 上の H13 と H30」、GPU テスト項目 8）に移った。
+
+**ローカルセッション7（2026-10-12）で `src/TchNN.pas` に実装。** `tests/nn/nn_test.pas`
+のグループ 11（44 チェック）は libtorch 2.13.0 CPU で上の数値どおりにすべて通る。設計が
+見落としていたコンパイラの事実が2つ（どちらも *実測*）：コンストラクタの引数名
+`HiddenDim` はプロパティ `HiddenDim` と重複識別子になる（FPC は引数名をクラスのメンバと
+照合する）ので、RNN のコンストラクタは `AHiddenDim` を取る。protected の `TRNN.Create` は
+警告 3018（"Constructor should be public"）を出すので、`TJitModule.CreateRaw` と同じく
+`{$push}{$warn 3018 off}` で抑える。任意のモック確認（ローカル手順の項目7）は省いた：
+名前と順序は libtorch に対して確認している。
 
 テスト一覧、`tests/nn/nn_test.pas` のグループ11「マイルストーン3のレイヤー」
 （数値は tch-rs と記したもの以外、ここで生成 op に対して*実測*）：
@@ -2954,7 +2963,7 @@ JIT を除く 4.6 を実装。`tests/nn/nn_test.pas`（本物の libtorch）は 
 パッチなし。取り込み済みの `foo6.pt`/`foo7.pt` に対するテスト `jit6`/`jit_double_free` を
 `tests/jit/jit_test.pas` のグループ 14 として、加えてモックの `TestObjects`。大半は
 libtorch 2.13.0 に対して実測済み。H26〜H28 は成立（結果は 4.6.9）。その後も
-残るもの：マイルストーン3のレイヤーと CUDA/ROCm。
+残るもの：マイルストーン3のレイヤー（その後ローカルセッション7で実装）と CUDA/ROCm。
 
 **CUDA/ROCm（設計セッション8、2026-10-11 で設計）：** 4.8 — 変種ごとに libtorch ディレクトリ
 1つと `build/libtch-<変種>` 1つ、フォークの CMakeLists に `TCH_LIBTORCH_DIR` の手動リンク

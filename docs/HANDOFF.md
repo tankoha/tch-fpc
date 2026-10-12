@@ -4,7 +4,41 @@ Japanese version: [HANDOFF_jp.md](HANDOFF_jp.md)
 
 Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 
-## Local session 6 (2026-10-12): TorchScript objects (4.6.9) implemented — resume here
+## Local session 7 (2026-10-12): milestone 3 layers (4.6.10) implemented — resume here
+
+**Where things stand.** 4.6.10 is implemented and committed; the working
+tree is clean. Steps 1–6, 8 and 9 of design session 7's local list are
+done; step 7 (optional mock check) was skipped, since names and order are
+checked against libtorch.
+
+- `src/TchNN.pas`: `TConvConfigND`, `DefaultConvConfigND`,
+  `ConvConfigToND`, `PadWithMode` (replaces the private `ModeNames`),
+  `TConvND` + `TConv1D/2D/3D` (`TConv2D` rebased, API unchanged), the
+  conv-transpose family, `TGroupNorm`, `TRNNConfig`/`TRNNState`/`TRNN`/
+  `TLSTM`/`TGRU`, `TIdentity`.
+- `tests/nn/nn_test.pas` group 11, items 1–11 of 4.6.10 (44 checks): all
+  OK against libtorch 2.13.0 CPU, every measured number reproduced
+  (conv1d modes, PyTorch-order ND padding `[[7, 10], [5, 8]]`, transpose
+  1D/2D/3D, group norm ±0.99998, GRU `0.380797`, LSTM `0.380797 /
+  0.181700`, the ten tch-rs RNN configs, `BatchFirst False`). Group 8's
+  conv numbers are unchanged through the new base.
+- Regression: `tests/abi`, `tests/api`, `tests/nn`, `tests/jit`, mock —
+  all OK.
+- `docs/UML.md`/`UML_jp.md`: 4.6.10 elements no longer planned.
+
+**Deviations from the design, found while implementing** (recorded at the
+end of DESIGN 4.6.10):
+- The RNN constructors' parameter is `AHiddenDim`: `HiddenDim` is a
+  duplicate identifier next to the `HiddenDim` property.
+- The protected `TRNN.Create` draws warning 3018; silenced with
+  `{$push}{$warn 3018 off}` as `TJitModule.CreateRaw`.
+
+**Next:** **4.8 GPU** — the only design item left unimplemented. ROCm
+prerequisites are met (`libtorch-rocm/`, H32/H33); start at step 1 of
+design session 8's local list below. H31, H34, H35 open. The `TRNN`
+cuDNN flatten call (H30) now has its `TRNN` to go into.
+
+## Local session 6 (2026-10-12): TorchScript objects (4.6.9) implemented
 
 **Where things stand.** 4.6.9 is implemented and committed; the working
 tree is clean. Steps 1–8 of design session 6's local list are done.

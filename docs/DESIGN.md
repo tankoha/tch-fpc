@@ -2634,7 +2634,7 @@ constructor calls `inherited Create(P, In, Out, [K, K], ConvConfigToND(Cfg, 2))`
   private
     FFlatWeights: TTensorArray; FHiddenDim: Int64; FCfg: TRNNConfig;
   protected
-    constructor Create(const P: TVarPath; InDim, HiddenDim, GateMul: Int64; const Cfg: TRNNConfig);  // rnn_weights
+    constructor Create(const P: TVarPath; InDim, AHiddenDim, GateMul: Int64; const Cfg: TRNNConfig);  // rnn_weights
     function BatchDimIndex: Integer; inline; // 0 when BatchFirst else 1
   public
     function ZeroState(BatchDim: Int64): TRNNState; virtual; abstract;
@@ -2647,8 +2647,8 @@ constructor calls `inherited Create(P, In, Out, [K, K], ConvConfigToND(Cfg, 2))`
   end;
   TLSTM = class(TRNN)
   public
-    constructor Create(const P: TVarPath; InDim, HiddenDim: Int64); overload;
-    constructor Create(const P: TVarPath; InDim, HiddenDim: Int64; const Cfg: TRNNConfig); overload;
+    constructor Create(const P: TVarPath; InDim, AHiddenDim: Int64); overload;
+    constructor Create(const P: TVarPath; InDim, AHiddenDim: Int64; const Cfg: TRNNConfig); overload;
     function ZeroState(BatchDim: Int64): TRNNState; override;
     function SeqInit(const Input: TTensor; const InState: TRNNState; out OutState: TRNNState): TTensor; override;
   end;
@@ -2740,6 +2740,17 @@ Not measurable with CPU libtorch here, kept as hypotheses:
 - **(H30)** the cuDNN flatten call on a CUDA/ROCm store (item 3) — the
   condition, the call and its test are now in 4.8 ("H13 and H30 on the
   GPU", GPU test item 8).
+
+**Implemented in local session 7 (2026-10-12)** in `src/TchNN.pas`;
+group 11 of `tests/nn/nn_test.pas` (44 checks) passes against libtorch
+2.13.0 CPU with every number above. Two compiler facts the design missed,
+both *measured*: a constructor parameter named `HiddenDim` is a duplicate
+identifier next to the `HiddenDim` property (FPC checks parameter names
+against the class's members), so the RNN constructors take `AHiddenDim`;
+and the protected `TRNN.Create` draws warning 3018 ("Constructor should
+be public"), silenced with `{$push}{$warn 3018 off}` as
+`TJitModule.CreateRaw`. The optional mock check (item 7 of the local
+list) was skipped: names and order are checked against libtorch.
 
 Test list, group 11 "Milestone 3 layers" in `tests/nn/nn_test.pas`
 (numbers *measured* here through the generated ops unless marked tch-rs):
@@ -3230,7 +3241,7 @@ four L2 externals, no fork patch; tests `jit6`/`jit_double_free` on the
 vendored `foo6.pt`/`foo7.pt` as group 14 of `tests/jit/jit_test.pas`, plus
 the mock's `TestObjects`. Most of it is measured against libtorch 2.13.0;
 H26–H28 hold (results in 4.6.9). Still open after it: the milestone 3
-layers and CUDA/ROCm.
+layers (implemented since, local session 7) and CUDA/ROCm.
 
 **CUDA/ROCm (designed in design session 8, 2026-10-11):** 4.8 — one
 libtorch directory and one `build/libtch-<variant>` per variant, a

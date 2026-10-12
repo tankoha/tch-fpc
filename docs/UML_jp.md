@@ -2,16 +2,16 @@
 
 （[UML.md](UML.md) の日本語訳です。内容が食い違う場合は英語版が正です。）
 
-実装済みのもの（マイルストーン1〜3）と、設計済みでまだ実装していないもの（DESIGN 4.6.10
-マイルストーン3のレイヤー、4.8 GPU デバイス）の図です。予定の要素には `planned` の
-ステレオタイプか破線を付けています。時点：2026-10-12、ローカルセッション6の後。正は
+実装済みのもの（マイルストーン1〜3）と、設計済みでまだ実装していないもの（DESIGN 4.8
+GPU デバイス）の図です。予定の要素には `planned` の
+ステレオタイプか破線を付けています。時点：2026-10-12、ローカルセッション7の後。正は
 DESIGN.md で、このファイルはそれを図にしただけです。
 
 目次：
 1. [層とユニット](#1-層とユニット)
 2. [Tch：テンソルの中核](#2-tchテンソルの中核)
 3. [TchNN：ストア、モジュール、オプティマイザ](#3-tchnnストアモジュールオプティマイザ)
-4. [TchNN：マイルストーン3のレイヤー（予定）](#4-tchnnマイルストーン3のレイヤー予定)
+4. [TchNN：マイルストーン3のレイヤー](#4-tchnnマイルストーン3のレイヤー)
 5. [TchJit：値とモジュール](#5-tchjit値とモジュール)
 6. [シーケンス：ForwardIV と ivalue の所有権](#6-シーケンスforwardiv-と-ivalue-の所有権)
 7. [シーケンス：TorchScript モジュールのファインチューニング](#7-シーケンスtorchscript-モジュールのファインチューニング)
@@ -260,9 +260,9 @@ classDiagram
 
 寿命の規則（DESIGN 4.6）：先にオプティマイザ、次にレイヤー、最後にストアを解放する。
 
-## 4. TchNN：マイルストーン3のレイヤー（予定）
+## 4. TchNN：マイルストーン3のレイヤー
 
-DESIGN 4.6.10。`TConv2D` は公開 API を変えずに共通の `TConvND` の下へ移る。RNN は tch-rs
+DESIGN 4.6.10。`TConv2D` は公開 API を変えずに共通の `TConvND` の下にある。RNN は tch-rs
 と同じく `TModule` ではない。
 
 ```mermaid
@@ -272,7 +272,7 @@ classDiagram
     +Forward(X, Train) TTensor*
   }
   class TConvConfigND {
-    <<record, planned>>
+    <<record>>
     +Stride, Padding, Dilation: TInt64Array
     +Groups: Int64
     +Bias: Boolean
@@ -280,7 +280,6 @@ classDiagram
     +PaddingMode: TPaddingMode
   }
   class TConvND {
-    <<planned>>
     -FNd: Integer
     -FCfg: TConvConfigND
     +Weight, Bias: TTensor
@@ -288,49 +287,41 @@ classDiagram
     +Forward(X, Train) TTensor
   }
   class TConv1D {
-    <<planned>>
   }
   class TConv2D {
     existing API, body moves to TConvND
   }
   class TConv3D {
-    <<planned>>
   }
   class TConvTransposeND {
-    <<planned>>
     -FCfg: TConvTransposeConfigND
     +Weight, Bias: TTensor
   }
   class TConvTranspose1D {
-    <<planned>>
   }
   class TConvTranspose2D {
-    <<planned>>
   }
   class TConvTranspose3D {
-    <<planned>>
   }
   class TGroupNorm {
-    <<planned>>
     +Weight, Bias: TTensor
     +NumGroups, NumChannels: Int64
   }
   class TIdentity {
-    <<planned>>
     Forward returns X
   }
   class TRNNState {
-    <<record, planned>>
+    <<record>>
     +H, C: TTensor
   }
   class TRNNConfig {
-    <<record, planned>>
+    <<record>>
     +HasBiases, Bidirectional, BatchFirst
     +NumLayers: Int64
     +Dropout: Double
   }
   class TRNN {
-    <<abstract, planned>>
+    <<abstract>>
     -FFlatWeights: TTensorArray
     -FHiddenDim: Int64
     +ZeroState(BatchDim) TRNNState*
@@ -339,10 +330,8 @@ classDiagram
     +SeqInit(Input, InState, out OutState) TTensor*
   }
   class TLSTM {
-    <<planned>>
   }
   class TGRU {
-    <<planned>>
     C stays nil
   }
   TModule <|-- TConvND
@@ -559,5 +548,5 @@ flowchart LR
 | `TInit`、`TVarStore`、保存と読み込み、オプティマイザ、マイルストーン2のレイヤー | 4.6.1〜4.6.7 | 実装済み（マイルストーン2） |
 | JIT：`TIValue`、`TJitModule`、`TTrainableJitModule` | 4.6.8 | 実装済み（マイルストーン3）、H19〜H25 成立 |
 | TorchScript のオブジェクト（`IJitObject`） | 4.6.9 | 実装済み（ローカルセッション6、2026-10-12） |
-| Conv1D/3D、ConvTranspose、GroupNorm、LSTM/GRU、Identity | 4.6.10 | 設計済み（セッション7）、H29〜H30 未検証 |
+| Conv1D/3D、ConvTranspose、GroupNorm、LSTM/GRU、Identity | 4.6.10 | 実装済み（ローカルセッション7、2026-10-12） |
 | GPU：ROCm / CUDA のビルドと API | 4.8 | 設計済み（セッション8）、H31〜H35 未検証。ROCm 版 libtorch が必要 |

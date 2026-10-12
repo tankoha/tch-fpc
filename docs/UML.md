@@ -3,16 +3,16 @@
 Japanese version: [UML_jp.md](UML_jp.md)
 
 Diagrams of what is implemented (milestones 1–3) and what is designed but
-not implemented yet (DESIGN 4.6.10 milestone 3 layers, 4.8 GPU devices).
+not implemented yet (DESIGN 4.8 GPU devices).
 Planned elements carry the `planned` stereotype or the dashed style.
-State: 2026-10-12, after local session 6. DESIGN.md stays the source of
+State: 2026-10-12, after local session 7. DESIGN.md stays the source of
 truth; this file only draws it.
 
 Contents:
 1. [Layers and units](#1-layers-and-units)
 2. [Tch: tensor core](#2-tch-tensor-core)
 3. [TchNN: store, modules, optimizer](#3-tchnn-store-modules-optimizer)
-4. [TchNN: milestone 3 layers (planned)](#4-tchnn-milestone-3-layers-planned)
+4. [TchNN: milestone 3 layers](#4-tchnn-milestone-3-layers)
 5. [TchJit: values and modules](#5-tchjit-values-and-modules)
 6. [Sequence: ForwardIV and ivalue ownership](#6-sequence-forwardiv-and-ivalue-ownership)
 7. [Sequence: fine-tuning a TorchScript module](#7-sequence-fine-tuning-a-torchscript-module)
@@ -264,9 +264,9 @@ classDiagram
 Lifetime rule (DESIGN 4.6): free optimizers first, then layers, then the
 store.
 
-## 4. TchNN: milestone 3 layers (planned)
+## 4. TchNN: milestone 3 layers
 
-DESIGN 4.6.10. `TConv2D` moves under a common `TConvND` with its public
+DESIGN 4.6.10. `TConv2D` sits under a common `TConvND` with its public
 API unchanged; RNNs are not `TModule`s, as in tch-rs.
 
 ```mermaid
@@ -276,7 +276,7 @@ classDiagram
     +Forward(X, Train) TTensor*
   }
   class TConvConfigND {
-    <<record, planned>>
+    <<record>>
     +Stride, Padding, Dilation: TInt64Array
     +Groups: Int64
     +Bias: Boolean
@@ -284,7 +284,6 @@ classDiagram
     +PaddingMode: TPaddingMode
   }
   class TConvND {
-    <<planned>>
     -FNd: Integer
     -FCfg: TConvConfigND
     +Weight, Bias: TTensor
@@ -292,49 +291,41 @@ classDiagram
     +Forward(X, Train) TTensor
   }
   class TConv1D {
-    <<planned>>
   }
   class TConv2D {
     existing API, body moves to TConvND
   }
   class TConv3D {
-    <<planned>>
   }
   class TConvTransposeND {
-    <<planned>>
     -FCfg: TConvTransposeConfigND
     +Weight, Bias: TTensor
   }
   class TConvTranspose1D {
-    <<planned>>
   }
   class TConvTranspose2D {
-    <<planned>>
   }
   class TConvTranspose3D {
-    <<planned>>
   }
   class TGroupNorm {
-    <<planned>>
     +Weight, Bias: TTensor
     +NumGroups, NumChannels: Int64
   }
   class TIdentity {
-    <<planned>>
     Forward returns X
   }
   class TRNNState {
-    <<record, planned>>
+    <<record>>
     +H, C: TTensor
   }
   class TRNNConfig {
-    <<record, planned>>
+    <<record>>
     +HasBiases, Bidirectional, BatchFirst
     +NumLayers: Int64
     +Dropout: Double
   }
   class TRNN {
-    <<abstract, planned>>
+    <<abstract>>
     -FFlatWeights: TTensorArray
     -FHiddenDim: Int64
     +ZeroState(BatchDim) TRNNState*
@@ -343,10 +334,8 @@ classDiagram
     +SeqInit(Input, InState, out OutState) TTensor*
   }
   class TLSTM {
-    <<planned>>
   }
   class TGRU {
-    <<planned>>
     C stays nil
   }
   TModule <|-- TConvND
@@ -564,5 +553,5 @@ flowchart LR
 | `TInit`, `TVarStore`, save/load, optimizers, milestone 2 layers | 4.6.1–4.6.7 | implemented (milestone 2) |
 | JIT: `TIValue`, `TJitModule`, `TTrainableJitModule` | 4.6.8 | implemented (milestone 3), H19–H25 hold |
 | TorchScript objects (`IJitObject`) | 4.6.9 | implemented (local session 6, 2026-10-12) |
-| Conv1D/3D, ConvTranspose, GroupNorm, LSTM/GRU, Identity | 4.6.10 | designed (session 7), H29–H30 open |
+| Conv1D/3D, ConvTranspose, GroupNorm, LSTM/GRU, Identity | 4.6.10 | implemented (local session 7, 2026-10-12) |
 | GPU: ROCm / CUDA builds and API | 4.8 | designed (session 8), H31–H35 open; needs a ROCm libtorch |

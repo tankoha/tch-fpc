@@ -4,7 +4,35 @@
 
 再開するときは最初にこれを読んでください。決定事項と理由は [DESIGN_jp.md](DESIGN_jp.md) にあります。
 
-## ローカルセッション6（2026-10-12）：TorchScript のオブジェクト（4.6.9）を実装 — ここから再開
+## ローカルセッション7（2026-10-12）：マイルストーン3のレイヤー（4.6.10）を実装 — ここから再開
+
+**現状。** 4.6.10 は実装・コミット済み。作業ツリーはクリーン。設計セッション7のローカル
+手順 1〜6、8、9 は完了。手順7（任意のモック確認）は省いた：名前と順序は libtorch に対して
+確認している。
+
+- `src/TchNN.pas`：`TConvConfigND`、`DefaultConvConfigND`、`ConvConfigToND`、
+  `PadWithMode`（非公開の `ModeNames` を置き換え）、`TConvND` ＋ `TConv1D/2D/3D`
+  （`TConv2D` は基底を付け替え、API は不変）、転置畳み込みの一族、`TGroupNorm`、
+  `TRNNConfig`/`TRNNState`/`TRNN`/`TLSTM`/`TGRU`、`TIdentity`。
+- `tests/nn/nn_test.pas` のグループ 11、4.6.10 の項目 1〜11（44 チェック）：libtorch
+  2.13.0 CPU ですべて OK。実測済みの数値をすべて再現（conv1d の各モード、PyTorch 順の
+  ND パディング `[[7, 10], [5, 8]]`、転置 1D/2D/3D、group norm ±0.99998、GRU
+  `0.380797`、LSTM `0.380797 / 0.181700`、tch-rs の RNN 設定 10 通り、`BatchFirst
+  False`）。グループ 8 の畳み込みの数値は新しい基底を通しても不変。
+- 回帰：`tests/abi`、`tests/api`、`tests/nn`、`tests/jit`、モック — すべて OK。
+- `docs/UML.md`/`UML_jp.md`：4.6.10 の要素から planned を外した。
+
+**実装中に見つかった設計との違い**（DESIGN 4.6.10 の末尾に記録）：
+- RNN のコンストラクタの引数は `AHiddenDim`：`HiddenDim` はプロパティ `HiddenDim` と
+  重複識別子になる。
+- protected の `TRNN.Create` は警告 3018 を出す。`TJitModule.CreateRaw` と同じく
+  `{$push}{$warn 3018 off}` で抑える。
+
+**次：** **4.8 GPU** — 未実装で残る唯一の設計項目。ROCm の前提はそろっている
+（`libtorch-rocm/`、H32/H33）。下の設計セッション8のローカル手順の 1 から始める。
+H31、H34、H35 は未解決。`TRNN` の cuDNN 平坦化呼び出し（H30）は入れ先の `TRNN` ができた。
+
+## ローカルセッション6（2026-10-12）：TorchScript のオブジェクト（4.6.9）を実装
 
 **現状。** 4.6.9 は実装・コミット済み。作業ツリーはクリーン。設計セッション6のローカル
 手順 1〜8 は完了。

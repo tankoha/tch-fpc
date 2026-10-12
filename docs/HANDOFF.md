@@ -4,7 +4,55 @@ Japanese version: [HANDOFF_jp.md](HANDOFF_jp.md)
 
 Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 
-## Local session 5 (2026-10-11/12): three designs in, ROCm libtorch obtained — resume here
+## Local session 6 (2026-10-12): TorchScript objects (4.6.9) implemented — resume here
+
+**Where things stand.** 4.6.9 is implemented and committed; the working
+tree is clean. Steps 1–8 of design session 6's local list are done.
+
+- `src/TchSys.pas`: the four externals (`atm_create_class_`,
+  `ati_object_method_`, `ati_object_getattr_`, `ati_clone`); "Not
+  declared" is down to `atm_fuser_cuda_*`.
+- `src/TchJit.pas`: `ivObject = 14`, `IJitObject` (forward-declared
+  before `TIValue`), `TJitObjectHandle`, `FromObject`/`:=`/`AsObject`,
+  `ToC` clones, `FromC` keeps the pointer (`Keep`),
+  `TJitModule.CreateClass`, `JitLiveObjects`.
+- `tests/jit/jit_test.pas`: `TestObjects`, items a–g of 4.6.9 (29
+  checks), all OK against libtorch 2.13.0 CPU. **H26, H27, H28 hold**
+  (results recorded in DESIGN 4.6.9). `[O, 42]` converts element-wise
+  through `:=` (was unmeasured).
+- Mock: `mock_tch.c` tag-14 objects, `jit_mock_test.pas` `TestObjects`;
+  `tests/mock/run.sh` OK.
+- Regression: `tests/abi`, `tests/api`, `tests/nn`, `tests/jit`, mock —
+  all OK.
+- `docs/UML.md`/`UML_jp.md`: 4.6.9 elements no longer planned.
+
+**Deviations from the design, found while implementing:**
+- `CreateClass(const ClassName: …)` does not compile: `ClassName` is
+  `TObject.ClassName` (duplicate identifier). The parameter is
+  `QualifiedName`; DESIGN 4.6.9 updated.
+- Mock counts: a mock object is one cell **plus one per attribute**
+  (attributes are cloned ivalues), so the design's
+  `mock_live_ivalues = 1` is `Cells` (3 for `[1, 2.5]`) in the test. Item
+  7 (failing Device sibling) is checked as a delta around the statement:
+  temporaries from items 5–6 still hold handles inside the routine (H1).
+  The delta is 0 — the converted sibling is released at once.
+
+**Working with Haiku (new this session).** The user wants Claude Haiku
+4.5 sub-agents for mechanical work and for running tests and reporting.
+This session: Haiku wrote the mock stubs (from the 4.6.9 spec), synced
+UML en/jp, ran the regression. Its mock had a leak (`ati_object_method_`
+cloned the elements and `ati_tuple` cloned them again), and it reported
+the resulting failures as "unrelated"; its UML edit missed one sentence.
+Both fixed here. So: give Haiku fully specified tasks, tell it to report
+failures verbatim without interpreting them, and review its diff.
+
+**Next (ask which first if the user does not say):**
+- **4.6.10 milestone 3 layers** (CPU only; local list in design session 7
+  below). 4.8's `TRNN` flatten call depends on it.
+- **4.8 GPU** (ROCm prerequisites met; design session 8's local list
+  from step 1; H31, H34, H35 open).
+
+## Local session 5 (2026-10-11/12): three designs in, ROCm libtorch obtained
 
 **Where things stand.** Everything below is committed and pushed. Nothing
 is half-done; the working tree is clean.

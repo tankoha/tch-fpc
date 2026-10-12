@@ -1911,7 +1911,7 @@ type
   fine). `TchCheck` after each `ati_*`.
 - **`FromC`** (tch-rs `from_c`): `try … finally ati_free(P)`; `nil` raises
   `ETorchError`; `Tag := ati_tag(P); TchCheck` — 14 raises
-  `ETorchError('ivalue: TorchScript objects are not supported yet')`, any
+  `ETorchError('ivalue: TorchScript objects are not supported yet')` (until 4.6.9), any
   other value outside the enum raises too (C itself throws
   "unsupported tag" for a Device). Then: Tensor →
   `TTensor.FromRaw(ati_to_tensor(P))` after `TchCheck`; scalars →
@@ -2330,8 +2330,8 @@ type
 
   TJitModule = class
     ...
-    { atm_create_class_: ClassName is qualified, e.g. '__torch__.InputObject' }
-    function CreateClass(const ClassName: String; const Inputs: array of TIValue): IJitObject;
+    { atm_create_class_: QualifiedName is e.g. '__torch__.InputObject' (not ClassName: that is TObject.ClassName, a duplicate identifier — measured in local session 6) }
+    function CreateClass(const QualifiedName: String; const Inputs: array of TIValue): IJitObject;
   end;
 
 function JitLiveObjects: Integer;               // live TJitObjectHandle count, as TchLiveHandles
@@ -2361,8 +2361,8 @@ type
   raise on the impossible non-object). Class names are qualified, as the
   measured message shows.
 - `[O, 42]` as an `array of TIValue` argument should convert element-wise
-  through the `:=` operator like `[T, 42, 1.5]` does (M5); not measured
-  for an interface element — the fallback is `TIValue.FromObject(O)`.
+  through the `:=` operator like `[T, 42, 1.5]` does (M5). *Measured* in
+  local session 6: it does (`add_them([O])`, `Tuple([O, 42])`).
 
 **Ownership on every path** (the heart of the design; each line names who
 frees what):
@@ -2400,7 +2400,7 @@ frees what):
    `TJitModule.MethodIV`: `Cs := IValuesToC(Inputs)` (objects cloned);
    `P := ati_object_method_(FRaw, PChar(Name), Cs, n)` /
    `ati_object_getattr_(FRaw, PChar(Name))` /
-   `atm_create_class_(FModule, PChar(ClassName), Cs, n)`; `TchCheck` inside
+   `atm_create_class_(FModule, PChar(QualifiedName), Cs, n)`; `TchCheck` inside
    a `try … finally FreeIValues(Cs)`; `Result := TIValue.FromC(P)`. C copies
    `self` (`inputs.push_back(*i)`), so `FRaw` stays valid. `GetAttr` keeps
    tch-rs's nil check (`ETorchError('ivalue: getattr returned nil')`,
@@ -2523,6 +2523,13 @@ and `names`; `ati_length` on 14 fails like libtorch. The existing
   `isTensor` check in `torch_api.cpp` is read, not run).
 - **(H28)** `10^4` object method calls leave `JitLiveObjects`,
   `TchLiveHandles` and RSS flat.
+- **Results (local session 6, 2026-10-12, libtorch 2.13.0 CPU):** H26,
+  H27 and H28 hold. Tuple, `GenericList` and `GenericDict` value each give
+  a fresh tag-14 pointer (`Raw` differs) whose attributes read back;
+  `CreateClass('__torch__.TorchScriptClass', [x]).y() = [6, 8, 10]`;
+  `Forward` raises "forward did not return a tensor"; `10^4` method calls:
+  live handles 2, objects 1 before and after, RSS 127148 KiB → 127148 KiB.
+  The six messages tested (items a, b, d) matched the table.
 - Not testable with the vendored assets and therefore not claimed: that a
   mutation through one clone is visible through another (no asset has a
   mutating method, and `Define` cannot declare a TorchScript class). It
@@ -3216,14 +3223,14 @@ the end of 4.6.8); `tests/mock/jit_mock_test.pas` covers the plumbing. The
 TorchScript objects (tag 14), the milestone 3 layers (4.6.5 deferred
 list), CUDA/ROCm.
 
-**TorchScript objects (designed in design session 6, 2026-10-11):** 4.6.9
+**TorchScript objects (designed in design session 6, 2026-10-11; implemented in local session 6, 2026-10-12):** 4.6.9
 — `ivObject = 14`, the refcounted `IJitObject` handle inside `TIValue`
 (`MethodIV`, `GetAttr`), `TJitModule.CreateClass`, `JitLiveObjects`, the
 four L2 externals, no fork patch; tests `jit6`/`jit_double_free` on the
 vendored `foo6.pt`/`foo7.pt` as group 14 of `tests/jit/jit_test.pas`, plus
 the mock's `TestObjects`. Most of it is measured against libtorch 2.13.0;
-H26–H28 and the implementation order are in HANDOFF.md. Still open after
-it: the milestone 3 layers and CUDA/ROCm.
+H26–H28 hold (results in 4.6.9). Still open after it: the milestone 3
+layers and CUDA/ROCm.
 
 **CUDA/ROCm (designed in design session 8, 2026-10-11):** 4.8 — one
 libtorch directory and one `build/libtch-<variant>` per variant, a

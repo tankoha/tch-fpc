@@ -2,10 +2,10 @@
 
 （[UML.md](UML.md) の日本語訳です。内容が食い違う場合は英語版が正です。）
 
-実装済みのもの（マイルストーン1〜3）と、設計済みでまだ実装していないもの（DESIGN 4.6.9
-TorchScript のオブジェクト、4.6.10 マイルストーン3のレイヤー、4.8 GPU デバイス）の図です。
-予定の要素には `planned` のステレオタイプか破線を付けています。時点：2026-10-11、設計
-セッション8の後。正は DESIGN.md で、このファイルはそれを図にしただけです。
+実装済みのもの（マイルストーン1〜3）と、設計済みでまだ実装していないもの（DESIGN 4.6.10
+マイルストーン3のレイヤー、4.8 GPU デバイス）の図です。予定の要素には `planned` の
+ステレオタイプか破線を付けています。時点：2026-10-12、ローカルセッション6の後。正は
+DESIGN.md で、このファイルはそれを図にしただけです。
 
 目次：
 1. [層とユニット](#1-層とユニット)
@@ -368,8 +368,8 @@ GPU 上のストアでは、`TRNN` のコンストラクタが `_cudnn_rnn_flatt
 ## 5. TchJit：値とモジュール
 
 `TIValue` はタグ付きレコードで、タグの値は `ati_tag` と同じ。`ToC` は呼び出し側が解放する
-C の ivalue を作り、`FromC` は受け取った ivalue を消費する（DESIGN 4.6.8）。オブジェクトの
-ハンドルは予定（4.6.9）。
+C の ivalue を作り、`FromC` は受け取った ivalue を消費する（DESIGN 4.6.8）。タグ 14 は
+参照カウント付きのオブジェクトハンドルが保持する（4.6.9）。
 
 ```mermaid
 classDiagram
@@ -384,7 +384,7 @@ classDiagram
     +Ints, Doubles, Bools, Strings, Tensors
     +Items: TIValueArray
     +Dev: TDevice
-    +Obj: IJitObject  planned
+    +Obj: IJitObject
     +Tuple / GenericList / GenericDict ...$
     +operator := from TTensor, Int64, Double, Boolean, String
     +AsTensor() / AsInt() / AsString() ...
@@ -397,7 +397,7 @@ classDiagram
     ivNone=0 .. ivTensorList=10
     ivGenericList=12
     ivGenericDict=13
-    ivObject=14  planned
+    ivObject=14
     ivStringList=20 input only
     ivDevice=21 input only
   }
@@ -417,7 +417,7 @@ classDiagram
     +NamedParameters() TNamedTensorArray
     +RegisterParameter(Name, T, IsBuffer)
     +Define(Source)
-    +CreateClass(ClassName, Inputs) IJitObject  planned
+    +CreateClass(QualifiedName, Inputs) IJitObject
   }
   class TTrainableJitModule {
     -FInner: TJitModule
@@ -432,29 +432,28 @@ classDiagram
     <<abstract>>
   }
   class IJitObject {
-    <<interface, planned>>
+    <<interface>>
     +Raw() PTorchIValue
     +MethodIV(Name, Inputs) TIValue
     +GetAttr(Name) TIValue
   }
   class TJitObjectHandle {
-    <<planned>>
     -FRaw: PTorchIValue
     +Destroy() ati_free
   }
   TIValue --> TIValueTag
   TIValue o-- "many" TIValue : Items
-  TIValue ..> IJitObject : planned
+  TIValue ..> IJitObject
   IJitObject <|.. TJitObjectHandle
   TModule <|-- TTrainableJitModule
   TTrainableJitModule *-- TJitModule : owns
   TJitModule ..> TIValue
-  TJitModule ..> IJitObject : CreateClass, planned
+  TJitModule ..> IJitObject : CreateClass
 ```
 
 グローバル：`JitGetProfilingMode` / `JitSetProfilingMode`、
 `JitGetTensorExprFuserEnabled` / `JitSetTensorExprFuserEnabled`、
-`JitSetGraphExecutorOptimize`。予定：`JitLiveObjects`（4.6.9）、
+`JitSetGraphExecutorOptimize`、`JitLiveObjects`。予定：
 `JitFuserCudaEnabled` / `SetJitFuserCudaEnabled`（4.8）。
 
 ## 6. シーケンス：ForwardIV と ivalue の所有権
@@ -484,7 +483,7 @@ sequenceDiagram
   V-->>U: TIValue (Pascal-owned copy)
 ```
 
-予定（4.6.9）：タグ 14 では `FromC` がポインタを解放せず `TJitObjectHandle` に持たせ、
+タグ 14 では `FromC` がポインタを解放せず `TJitObjectHandle` に持たせ、
 `ToC` は `ati_clone(Obj.Raw)` を渡す。
 
 ## 7. シーケンス：TorchScript モジュールのファインチューニング
@@ -559,6 +558,6 @@ flowchart LR
 | `TTensor`、データの入出力、演算子、自動微分、`FromArray` の改訂 | 4.1〜4.4、4.7 | 実装済み（マイルストーン1、ローカルセッション4） |
 | `TInit`、`TVarStore`、保存と読み込み、オプティマイザ、マイルストーン2のレイヤー | 4.6.1〜4.6.7 | 実装済み（マイルストーン2） |
 | JIT：`TIValue`、`TJitModule`、`TTrainableJitModule` | 4.6.8 | 実装済み（マイルストーン3）、H19〜H25 成立 |
-| TorchScript のオブジェクト（`IJitObject`） | 4.6.9 | 設計済み（セッション6）、H26〜H28 未検証 |
+| TorchScript のオブジェクト（`IJitObject`） | 4.6.9 | 実装済み（ローカルセッション6、2026-10-12） |
 | Conv1D/3D、ConvTranspose、GroupNorm、LSTM/GRU、Identity | 4.6.10 | 設計済み（セッション7）、H29〜H30 未検証 |
 | GPU：ROCm / CUDA のビルドと API | 4.8 | 設計済み（セッション8）、H31〜H35 未検証。ROCm 版 libtorch が必要 |

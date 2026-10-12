@@ -3,13 +3,14 @@
   and src/nn/mod.rs (TrainableCModule).
 
   Deviations from tch-rs, stated in DESIGN 4.6.8:
-  - TorchScript objects (ati_tag 14) are not supported yet.
   - CreateEmpty, RegisterParameter and Define use the fork's atm_create,
     atm_register_parameter and atm_define (TorchScript from Pascal).
   - TTrainableJitModule.Forward applies Train through atm_train/atm_eval.
+  - CreateClass returns the object, not an IValue (DESIGN 4.6.9).
 
   Lifetimes: a TTrainableJitModule shares its parameters with the var
-  store; free optimizers, then the module, then the store. }
+  store; free optimizers, then the module, then the store. A
+  TorchScript object does not keep its module alive and does not need to. }
 unit TchJit;
 
 {$mode objfpc}{$H+}
@@ -27,8 +28,11 @@ type
   TIValueTag = (ivNone = 0, ivTensor = 1, ivDouble = 2, ivInt = 3,
     ivBool = 4, ivTuple = 5, ivIntList = 6, ivDoubleList = 7,
     ivBoolList = 8, ivString = 9, ivTensorList = 10, ivGenericList = 12,
-    ivGenericDict = 13, ivStringList = 20, ivDevice = 21);
+    ivGenericDict = 13, ivObject = 14, ivStringList = 20, ivDevice = 21);
   TBooleanArray = array of Boolean;
+
+  { forward: TIValue holds one, its methods use TIValue }
+  IJitObject = interface;
 
   { A TorchScript value. Copies share Items: treat a value as immutable.
     Default(TIValue) is None. }
@@ -50,6 +54,7 @@ type
     { ivTuple, ivGenericList; ivGenericDict: k0, v0, k1, v1, ... }
     Items: TIValueArray;
     Dev: TDevice;                 // ivDevice (input only)
+    Obj: IJitObject;              // ivObject (nil otherwise)
     class function None: TIValue; static;
     class function FromTensor(const T: TTensor): TIValue; static;
     class function FromInt(V: Int64): TIValue; static;
@@ -57,6 +62,7 @@ type
     class function FromBool(V: Boolean): TIValue; static;
     class function FromString(const V: String): TIValue; static;
     class function FromDevice(const V: TDevice): TIValue; static;
+    class function FromObject(const O: IJitObject): TIValue; static;
     class function Tuple(const A: array of TIValue): TIValue; static;
     class function IntList(const A: array of Int64): TIValue; static;
     class function DoubleList(const A: array of Double): TIValue; static;
@@ -71,6 +77,7 @@ type
     class operator :=(V: Double): TIValue;
     class operator :=(V: Boolean): TIValue;
     class operator :=(const V: String): TIValue;
+    class operator :=(const O: IJitObject): TIValue;
     function IsNone: Boolean;
     { 'Tensor', 'Tuple', ... as tch-rs's type_str }
     function TagName: String;
@@ -84,6 +91,7 @@ type
     function AsDoubleList: TDoubleArray;
     function AsBoolList: TBooleanArray;
     function AsTensorList: TTensorArray;
+    function AsObject: IJitObject;
     { tuple/list: element count; dict: pair count; typed lists: length }
     function Count: Integer;
     function Item(Index: Integer): TIValue;    // ivTuple or ivGenericList
@@ -95,6 +103,16 @@ type
     class function FromC(P: PTorchIValue): TIValue; static;
   end;
   TIValueArray = TIValue.TIValueArray;
+
+  { A TorchScript object (tch-rs Object). Copies of a TIValue share it;
+    the C IValue is freed when the last reference goes. }
+  IJitObject = interface
+    ['{6C2B8E41-3F7A-4D95-B0E2-91A4C5D7F318}']
+    { borrowed; always tag 14 }
+    function Raw: PTorchIValue;
+    function MethodIV(const Name: String; const Inputs: array of TIValue): TIValue;
+    function GetAttr(const Name: String): TIValue;
+  end;
 
   TTraceFunc = function(const Inputs: TTensorArray): TTensorArray;
   TTraceMethod = function(const Inputs: TTensorArray): TTensorArray of object;
@@ -141,6 +159,9 @@ type
       IsBuffer: Boolean = False);
     { TorchScript source: def at column 0, lines joined with #10. }
     procedure Define(const Source: String);
+    { QualifiedName is e.g. '__torch__.InputObject'; runs __init__. }
+    function CreateClass(const QualifiedName: String;
+      const Inputs: array of TIValue): IJitObject;
     property Raw: PTorchModule read FModule;
   end;
 
@@ -176,11 +197,29 @@ procedure JitSetProfilingMode(B: Boolean);
 function JitGetTensorExprFuserEnabled: Boolean;
 procedure JitSetTensorExprFuserEnabled(B: Boolean);
 procedure JitSetGraphExecutorOptimize(B: Boolean);
+{ live TorchScript object handles, as TchLiveHandles }
+function JitLiveObjects: Integer;
 
 implementation
 
 type
   TIValuePtrArray = array of PTorchIValue;
+
+  TJitObjectHandle = class(TInterfacedObject, IJitObject)
+  private
+    FRaw: PTorchIValue;
+  public
+    { takes ownership of P }
+    constructor Create(P: PTorchIValue);
+    { ati_free; never raises }
+    destructor Destroy; override;
+    function Raw: PTorchIValue;
+    function MethodIV(const Name: String; const Inputs: array of TIValue): TIValue;
+    function GetAttr(const Name: String): TIValue;
+  end;
+
+var
+  LiveObjects: Integer = 0;
 
 { An enum with explicit values cannot index an array. }
 function TagNames(T: TIValueTag): String;
@@ -199,6 +238,7 @@ begin
     ivTensorList: Result := 'TensorList';
     ivGenericList: Result := 'GenericList';
     ivGenericDict: Result := 'GenericDict';
+    ivObject: Result := 'Object';
     ivStringList: Result := 'StringList';
     ivDevice: Result := 'Device';
   else
@@ -295,6 +335,13 @@ begin
   Result := Default(TIValue);
   Result.Tag := ivDevice;
   Result.Dev := V;
+end;
+
+class function TIValue.FromObject(const O: IJitObject): TIValue;
+begin
+  Result := Default(TIValue);
+  Result.Tag := ivObject;
+  Result.Obj := O;
 end;
 
 function CopyIValues(const A: array of TIValue): TIValueArray;
@@ -411,6 +458,11 @@ begin
   Result := TIValue.FromString(V);
 end;
 
+class operator TIValue.:=(const O: IJitObject): TIValue;
+begin
+  Result := TIValue.FromObject(O);
+end;
+
 function TIValue.IsNone: Boolean;
 begin
   Result := Tag = ivNone;
@@ -488,6 +540,13 @@ begin
   if Tag <> ivTensorList then
     RaiseTagMismatch(ivTensorList, Self);
   Result := Tensors;
+end;
+
+function TIValue.AsObject: IJitObject;
+begin
+  if Tag <> ivObject then
+    RaiseTagMismatch(ivObject, Self);
+  Result := Obj;
 end;
 
 function TIValue.Count: Integer;
@@ -575,6 +634,13 @@ begin
         Result := ati_tensor_list(PPTorchTensor(Pointer(Ptrs)), Length(Ptrs));
       end;
     ivDevice: Result := ati_device(Dev.ToC);
+    { a clone: the caller frees it, the handle keeps its own (tch-rs issue 475) }
+    ivObject:
+      begin
+        if Obj = nil then
+          raise ETorchError.Create('ivalue: nil object');
+        Result := ati_clone(Obj.Raw);
+      end;
     ivTuple, ivGenericList, ivGenericDict:
       begin
         if (Tag = ivGenericDict) and Odd(Length(Items)) then
@@ -611,11 +677,13 @@ var
   Bytes: TBytes;
   Slots: TTensorPtrArray;
   Cs: TIValuePtrArray;
+  Keep: Boolean;
 begin
   if P = nil then
     raise ETorchError.Create('ivalue: nil pointer');
   Result := Default(TIValue);
   Cs := nil;
+  Keep := False;
   try
     CTag := ati_tag(P);
     TchCheck;
@@ -721,14 +789,74 @@ begin
           for K := 0 to N - 1 do
             Result.Tensors[K] := TTensor.FromRaw(Slots[K]);
         end;
-      14: raise ETorchError.Create('ivalue: TorchScript objects are not supported yet');
+      14:
+        begin
+          Result.Tag := ivObject;
+          Result.Obj := TJitObjectHandle.Create(P);
+          Keep := True;
+        end;
     else
       raise ETorchError.CreateFmt('ivalue: unsupported tag %d', [CTag]);
     end;
   finally
     FreeIValues(Cs);
-    ati_free(P);
+    { tag 14: the handle owns P }
+    if not Keep then
+      ati_free(P);
   end;
+end;
+
+{ TJitObjectHandle }
+
+{ FRaw is assigned last: if anything before it raised, the destructor
+  frees nothing and FromC's finally frees P. }
+constructor TJitObjectHandle.Create(P: PTorchIValue);
+begin
+  inherited Create;
+  InterLockedIncrement(LiveObjects);
+  FRaw := P;
+end;
+
+destructor TJitObjectHandle.Destroy;
+begin
+  if FRaw <> nil then
+    ati_free(FRaw);
+  InterLockedDecrement(LiveObjects);
+  inherited Destroy;
+end;
+
+function TJitObjectHandle.Raw: PTorchIValue;
+begin
+  Result := FRaw;
+end;
+
+{ C pushes a copy of FRaw as self, so FRaw stays valid. }
+function TJitObjectHandle.MethodIV(const Name: String;
+  const Inputs: array of TIValue): TIValue;
+var
+  Cs: TIValuePtrArray;
+  P: PTorchIValue;
+begin
+  Cs := IValuesToC(Inputs);
+  try
+    P := ati_object_method_(FRaw, PChar(Name), PPTorchIValue(Pointer(Cs)),
+      Length(Cs));
+    TchCheck;
+  finally
+    FreeIValues(Cs);
+  end;
+  Result := TIValue.FromC(P);
+end;
+
+function TJitObjectHandle.GetAttr(const Name: String): TIValue;
+var
+  P: PTorchIValue;
+begin
+  P := ati_object_getattr_(FRaw, PChar(Name));
+  TchCheck;
+  if P = nil then
+    raise ETorchError.Create('ivalue: getattr returned nil');
+  Result := TIValue.FromC(P);
 end;
 
 { TJitModule }
@@ -1017,6 +1145,23 @@ begin
   TchCheck;
 end;
 
+function TJitModule.CreateClass(const QualifiedName: String;
+  const Inputs: array of TIValue): IJitObject;
+var
+  Cs: TIValuePtrArray;
+  P: PTorchIValue;
+begin
+  Cs := IValuesToC(Inputs);
+  try
+    P := atm_create_class_(FModule, PChar(QualifiedName),
+      PPTorchIValue(Pointer(Cs)), Length(Cs));
+    TchCheck;
+  finally
+    FreeIValues(Cs);
+  end;
+  Result := TIValue.FromC(P).AsObject;
+end;
+
 { TTrainableJitModule }
 
 constructor TTrainableJitModule.Create(const FileName: String;
@@ -1127,6 +1272,11 @@ end;
 procedure JitSetGraphExecutorOptimize(B: Boolean);
 begin
   at_set_graph_executor_optimize(B);
+end;
+
+function JitLiveObjects: Integer;
+begin
+  Result := LiveObjects;
 end;
 
 end.

@@ -1,8 +1,9 @@
 { TchJit plumbing against the mock libtch (tests/mock/run.sh), no libtorch:
   TIValue ToC/FromC round trips and their error paths (no C ivalue left
   behind), module construction and argument passing, the tracing error
-  path, TTrainableJitModule registration. TorchScript itself and every
-  number of jit_test are not coverable here (DESIGN.md 4.6.8, "Mock"). }
+  path, TTrainableJitModule registration, TorchScript object plumbing
+  (DESIGN.md 4.6.9). TorchScript itself and every number of jit_test are
+  not coverable here (DESIGN.md 4.6.8, "Mock"). }
 program jit_mock_test;
 
 {$mode objfpc}{$H+}
@@ -25,6 +26,7 @@ function mock_registered: cint; cdecl; external 'tch';
 function mock_defines: cint; cdecl; external 'tch';
 function mock_last_load_str_size: cint; cdecl; external 'tch';
 function mock_last_method: PChar; cdecl; external 'tch';
+function mock_last_class: PChar; cdecl; external 'tch';
 function mock_last_module_file: PChar; cdecl; external 'tch';
 function mock_last_source: PChar; cdecl; external 'tch';
 
@@ -245,6 +247,80 @@ begin
   Check(mock_live_modules = 0, 'traced modules freed');
 end;
 
+{ Counts are compared in TestObjects: temporaries keep handles alive
+  until the routine returns (H1). }
+procedure ObjectsInner(M: TJitModule);
+var
+  O: IJitObject;
+  V, A, B: TIValue;
+  Raised: Boolean;
+  Cells, Before, BeforeObj: Integer;
+begin
+  O := M.CreateClass('__torch__.Foo', [1, 2.5]);
+  { the mock object is one cell plus one per attribute }
+  Cells := mock_live_ivalues;
+  Check((StrPas(mock_last_class) = '__torch__.Foo') and (Cells = 3) and
+    (JitLiveObjects = 1), '1. CreateClass: class name passed, object + 2 attributes, one handle');
+  Check(O.GetAttr('a1').AsDouble = 2.5, '2. GetAttr a1 = 2.5');
+  Raised := False;
+  try
+    O.GetAttr('zz');
+  except
+    on ETorchNativeError do Raised := True;
+  end;
+  Check(Raised and (mock_live_ivalues = Cells), '2. GetAttr zz raises, ivalues back to the object''s');
+  V := O.MethodIV('m', ['x']);
+  Check((StrPas(mock_last_method) = 'm') and (V.Count = 3) and (V.Item(0).AsInt = 1) and
+    (V.Item(1).AsDouble = 2.5) and (V.Item(2).AsString = 'x'), '3. MethodIV m(x) = (1, 2.5, x)');
+  Raised := False;
+  try
+    O.MethodIV('fail', [O]);
+  except
+    on ETorchNativeError do Raised := True;
+  end;
+  Check(Raised and (mock_live_ivalues = Cells), '3. MethodIV fail raises, the cloned input is freed');
+  A := TIValue.FromObject(O);
+  B := A;
+  A := Default(TIValue);
+  Check((B.AsObject.Raw = O.Raw) and (mock_live_ivalues = Cells) and (JitLiveObjects = 1),
+    '4. copies share the handle');
+  V := RoundTrip(TIValue.Tuple([O, 42]));
+  Check((V.Item(0).Tag = ivObject) and (V.Item(0).AsObject.GetAttr('a0').AsInt = 1) and
+    (V.Item(1).AsInt = 42), '5. Tuple([O, 42]) round trip');
+  Check((mock_live_ivalues = 2 * Cells) and (JitLiveObjects = 2), '5. two objects alive, each its own cells');
+  V := M.MethodIV('f', [O]);
+  Check((StrPas(mock_last_method) = 'f') and (V.Item(0).Tag = ivObject), '6. module MethodIV(f, [O])');
+  V := Default(TIValue);
+  { a delta: the temporaries of items 5 and 6 still hold handles (H1) }
+  Before := mock_live_ivalues;
+  BeforeObj := JitLiveObjects;
+  Raised := False;
+  try
+    RoundTrip(TIValue.Tuple([O, TIValue.FromDevice(TDevice.Cpu)]));
+  except
+    on ETorchError do Raised := True;
+  end;
+  Check(Raised and (mock_live_ivalues = Before) and (JitLiveObjects = BeforeObj),
+    '7. failing Device sibling: the converted object is released');
+end;
+
+procedure TestObjects;
+var
+  M: TJitModule;
+  Before: Integer;
+begin
+  WriteLn('objects: create, getattr, method, sharing, containers');
+  Before := TchLiveHandles;
+  M := TJitModule.Create('model.pt');
+  try
+    ObjectsInner(M);
+  finally
+    M.Free;
+  end;
+  Check((JitLiveObjects = 0) and (mock_live_ivalues = 0) and (TchLiveHandles = Before),
+    '4.-7. everything released after the caller returns');
+end;
+
 procedure TestTrainable;
 var
   VS: TVarStore;
@@ -279,10 +355,12 @@ begin
   TestModule;
   TestTracing;
   TestTrainable;
+  TestObjects;
   Check(JitGetProfilingMode, 'profiling getter');
   Check(TchLiveHandles = 0, 'no live handles');
   Check(mock_live_tensors = 0, 'mock: no tensors left');
   Check(mock_live_ivalues = 0, 'mock: no ivalues left');
+  Check(JitLiveObjects = 0, 'no live objects');
   if Failures = 0 then
     WriteLn('OK')
   else

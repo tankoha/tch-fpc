@@ -532,12 +532,14 @@ typedef struct mock_ivalue {
   int64_t i;                    /* 3, 4 */
   double d;                     /* 2 */
   char *s;                      /* 9 */
-  int n;                        /* list length; dict: pairs */
+  int n;                        /* list length; dict: pairs; 14: num attrs */
   int64_t *ints;                /* 6 */
   double *doubles;              /* 7 */
   char *bools;                  /* 8 */
   mock_tensor **tensors;        /* 10 */
-  struct mock_ivalue **items;   /* 5, 12; 13: 2n, k0 v0 k1 v1 ... */
+  struct mock_ivalue **items;   /* 5, 12; 13: 2n, k0 v0 k1 v1 ...; 14: attrs */
+  char *cls;                    /* 14: class name */
+  char **names;                 /* 14: attribute names (a0, a1, ...) */
 } mock_ivalue;
 
 static int live_ivalues = 0;
@@ -570,6 +572,12 @@ static mock_ivalue *iv_clone(const mock_ivalue *s) {
     v->items = calloc(m + 1, sizeof(mock_ivalue *));
     for (int k = 0; k < m; k++) v->items[k] = iv_clone(s->items[k]);
   }
+  if (s->cls) v->cls = iv_strdup(s->cls);
+  if (s->names) {
+    v->names = malloc((s->n + 1) * sizeof(char *));
+    for (int k = 0; k < s->n; k++) v->names[k] = iv_strdup(s->names[k]);
+    v->names[s->n] = NULL;
+  }
   return v;
 }
 
@@ -580,6 +588,8 @@ void ati_free(ivalue i) {
   free(v->s); free(v->ints); free(v->doubles); free(v->bools);
   if (v->tensors) { for (int k = 0; k < v->n; k++) at_free(v->tensors[k]); free(v->tensors); }
   if (v->items) { for (int k = 0; k < iv_nitems(v); k++) ati_free(v->items[k]); free(v->items); }
+  free(v->cls);
+  if (v->names) { for (int k = 0; k < v->n; k++) free(v->names[k]); free(v->names); }
   free(v);
   live_ivalues--;
 }
@@ -657,7 +667,11 @@ int ati_length(ivalue i) {
     case 5: case 6: case 7: case 8: case 10: case 12: case 13: return v->n;
     case 9: return (int)strlen(v->s);
   }
-  set_err("mock: unsupported tag for length");
+  if (v->tag == 14) {
+    set_err("unsupported tag for length Object");
+  } else {
+    set_err("mock: unsupported tag for length");
+  }
   return -1;
 }
 int ati_tuple_length(ivalue i) { return expect_tag(i, 5) ? ((mock_ivalue *)i)->n : -1; }
@@ -696,6 +710,7 @@ static int live_modules = 0, module_training = -1, last_to_device = 99, last_to_
 static int tracing_begins = 0, tracing_ends = 0, last_end_noutputs = -1;
 static int creates = 0, registered = 0, defines = 0, last_load_str_size = -1;
 static char last_method[64], last_module_file[256], last_source[256];
+static char last_class[256];
 static int profiling_mode = 1, fuser_enabled = 0;
 int mock_live_modules(void) { return live_modules; }
 int mock_module_training(void) { return module_training; }
@@ -709,6 +724,7 @@ int mock_registered(void) { return registered; }
 int mock_defines(void) { return defines; }
 int mock_last_load_str_size(void) { return last_load_str_size; }
 const char *mock_last_method(void) { return last_method; }
+const char *mock_last_class(void) { return last_class; }
 const char *mock_last_module_file(void) { return last_module_file; }
 const char *mock_last_source(void) { return last_source; }
 
@@ -737,6 +753,63 @@ ivalue atm_method_(module m, char *name, ivalue *ivalues, int n) {
   (void)m; snprintf(last_method, sizeof last_method, "%s", name);
   return ati_tuple(ivalues, n);
 }
+ivalue atm_create_class_(module m, char *clz_name, ivalue *ivalues, int nivalues) {
+  (void)m;
+  snprintf(last_class, sizeof last_class, "%s", clz_name);
+  if (strstr(clz_name, "missing")) { set_err("mock: open class failed"); return NULL; }
+  mock_ivalue *obj = iv_new(14);
+  obj->cls = iv_strdup(clz_name);
+  obj->n = nivalues;
+  if (nivalues > 0) {
+    obj->items = calloc(nivalues + 1, sizeof(mock_ivalue *));
+    obj->names = malloc((nivalues + 1) * sizeof(char *));
+    for (int k = 0; k < nivalues; k++) {
+      obj->items[k] = iv_clone(ivalues[k]);
+      char buf[16];
+      snprintf(buf, sizeof buf, "a%d", k);
+      obj->names[k] = iv_strdup(buf);
+    }
+    obj->names[nivalues] = NULL;
+  }
+  return obj;
+}
+
+ivalue ati_object_getattr_(ivalue i, char *attr_name) {
+  mock_ivalue *v = i;
+  if (!expect_tag(v, 14)) return NULL;
+  for (int k = 0; k < v->n; k++) {
+    if (strcmp(v->names[k], attr_name) == 0) {
+      return iv_clone(v->items[k]);
+    }
+  }
+  char buf[128];
+  snprintf(buf, sizeof buf, "mock: no attribute %s", attr_name);
+  set_err(buf);
+  return NULL;
+}
+
+ivalue ati_object_method_(ivalue i, char *method_name, ivalue *ivalues, int nivalues) {
+  mock_ivalue *v = i;
+  if (!expect_tag(v, 14)) return NULL;
+  snprintf(last_method, sizeof last_method, "%s", method_name);
+  if (strcmp(method_name, "fail") == 0) {
+    set_err("mock: object method failed");
+    return NULL;
+  }
+  /* a tuple of the attributes followed by the arguments (ati_tuple clones) */
+  int total = v->n + nivalues;
+  ivalue *tuple_items = malloc((total + 1) * sizeof(ivalue));
+  for (int k = 0; k < v->n; k++) tuple_items[k] = v->items[k];
+  for (int k = 0; k < nivalues; k++) tuple_items[v->n + k] = ivalues[k];
+  ivalue result = ati_tuple(tuple_items, total);
+  free(tuple_items);
+  return result;
+}
+
+ivalue ati_clone(ivalue i) {
+  return iv_clone((const mock_ivalue *)i);
+}
+
 void atm_eval(module m) { (void)m; module_training = 0; }
 void atm_train(module m) { (void)m; module_training = 1; }
 void atm_to(module m, int device, int dtype, bool non_blocking) {

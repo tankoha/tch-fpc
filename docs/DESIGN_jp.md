@@ -1788,7 +1788,7 @@ type
   の後に `TchCheck`。
 - **`FromC`**（tch-rs の `from_c`）：`try … finally ati_free(P)`。`nil` は `ETorchError`。
   `Tag := ati_tag(P); TchCheck` — 14 は `ETorchError('ivalue: TorchScript objects are not
-  supported yet')`、列挙の外の他の値も例外（Device に対しては C 自身が "unsupported tag"
+  supported yet')`（4.6.9 まで）、列挙の外の他の値も例外（Device に対しては C 自身が "unsupported tag"
   を投げる）。その後：Tensor → `TchCheck` の後の `TTensor.FromRaw(ati_to_tensor(P))`。
   スカラー → `ati_to_int`/`double`/`bool` + `TchCheck`。String → `ati_to_string`、
   `StrPas`、`tchf_free`（`strdup` 済み、2章）。型付きリスト → `N := ati_length`、`N` 個の
@@ -2156,8 +2156,8 @@ type
 
   TJitModule = class
     ...
-    { atm_create_class_：ClassName は修飾名、例 '__torch__.InputObject' }
-    function CreateClass(const ClassName: String; const Inputs: array of TIValue): IJitObject;
+    { atm_create_class_：QualifiedName は例 '__torch__.InputObject'（ClassName ではない：TObject.ClassName と重複識別子になる。ローカルセッション6で実測） }
+    function CreateClass(const QualifiedName: String; const Inputs: array of TIValue): IJitObject;
   end;
 
 function JitLiveObjects: Integer;               // 生きている TJitObjectHandle の数。TchLiveHandles と同じ
@@ -2185,8 +2185,8 @@ type
   と `AsObject` に通す（ありえない非オブジェクトには `AsObject` が例外を出す）。クラス名は
   実測したメッセージのとおり修飾名。
 - `array of TIValue` 引数としての `[O, 42]` は、`[T, 42, 1.5]`（M5）と同様に `:=`
-  オペレータで要素ごとに変換されるはず。インターフェース要素では未実測 — 代替は
-  `TIValue.FromObject(O)`。
+  オペレータで要素ごとに変換されるはず。ローカルセッション6で *実測*：変換される
+  （`add_them([O])`、`Tuple([O, 42])`）。
 
 **すべての経路での所有権**（設計の核心。各行で誰が何を解放するかを言う）：
 1. **`FromC`、タグ 14。** `Result.Tag := ivObject; Result.Obj :=
@@ -2215,7 +2215,7 @@ type
 5. **`MethodIV` / `GetAttr` / `CreateClass`。** `TJitModule.MethodIV` と同じ形：
    `Cs := IValuesToC(Inputs)`（オブジェクトはクローン）。`P := ati_object_method_(FRaw,
    PChar(Name), Cs, n)` / `ati_object_getattr_(FRaw, PChar(Name))` /
-   `atm_create_class_(FModule, PChar(ClassName), Cs, n)`。`try … finally FreeIValues(Cs)`
+   `atm_create_class_(FModule, PChar(QualifiedName), Cs, n)`。`try … finally FreeIValues(Cs)`
    の中で `TchCheck`。`Result := TIValue.FromC(P)`。C は `self` をコピーする
    （`inputs.push_back(*i)`）ので `FRaw` は有効なまま。`GetAttr` は tch-rs の nil 確認を
    残す（`ETorchError('ivalue: getattr returned nil')`。`PROTECT` 下では `TchCheck` の後は
@@ -2320,6 +2320,13 @@ n)`：`expect_tag(o, 14)`、`mock_last_method` を記録。`name == "fail"` は�
   だけで、走らせていない）。
 - **(H28)** `10^4` 回のオブジェクトメソッド呼び出しで `JitLiveObjects`、`TchLiveHandles`、
   RSS が平坦。
+- **結果（ローカルセッション6、2026-10-12、libtorch 2.13.0 CPU）：** H26、H27、H28 は
+  成立。タプル、`GenericList`、`GenericDict` の値はそれぞれ新しいタグ 14 のポインタ
+  （`Raw` が異なる）を与え、属性が読み戻せる。
+  `CreateClass('__torch__.TorchScriptClass', [x]).y() = [6, 8, 10]`。`Forward` は
+  "forward did not return a tensor" を出す。`10^4` 回のメソッド呼び出し：生存ハンドル 2、
+  オブジェクト 1 が前後で同じ、RSS 127148 KiB → 127148 KiB。テストした6つのメッセージ（項目 a、b、d）は
+  表どおりに一致。
 - 取り込み済みの資材では確認できず、よって主張しないこと：一方のクローンを通じた変更が
   他方から見えること（変更するメソッドを持つ資材がなく、`Define` は TorchScript の
   クラスを宣言できない）。`IValue` のコピーコンストラクタから従うが、後の資材で確認
@@ -2941,12 +2948,12 @@ JIT を除く 4.6 を実装。`tests/nn/nn_test.pas`（本物の libtorch）は 
 確認する。`FromArray` の改訂（4.3）と 4.6.7 の積み残しも反映済み。残り：TorchScript の
 オブジェクト（タグ 14）、マイルストーン3のレイヤー（4.6.5 の先送りリスト）、CUDA/ROCm。
 
-**TorchScript のオブジェクト（設計セッション6、2026-10-11 で設計）：** 4.6.9 —
+**TorchScript のオブジェクト（設計セッション6、2026-10-11 で設計。ローカルセッション6、2026-10-12 で実装）：** 4.6.9 —
 `ivObject = 14`、`TIValue` 内の参照カウント付きハンドル `IJitObject`（`MethodIV`、
 `GetAttr`）、`TJitModule.CreateClass`、`JitLiveObjects`、L2 の external 4つ、フォークへの
 パッチなし。取り込み済みの `foo6.pt`/`foo7.pt` に対するテスト `jit6`/`jit_double_free` を
 `tests/jit/jit_test.pas` のグループ 14 として、加えてモックの `TestObjects`。大半は
-libtorch 2.13.0 に対して実測済み。H26〜H28 と実装順序は HANDOFF_jp.md にあります。その後も
+libtorch 2.13.0 に対して実測済み。H26〜H28 は成立（結果は 4.6.9）。その後も
 残るもの：マイルストーン3のレイヤーと CUDA/ROCm。
 
 **CUDA/ROCm（設計セッション8、2026-10-11 で設計）：** 4.8 — 変種ごとに libtorch ディレクトリ

@@ -3,10 +3,10 @@
 Japanese version: [UML_jp.md](UML_jp.md)
 
 Diagrams of what is implemented (milestones 1–3) and what is designed but
-not implemented yet (DESIGN 4.6.9 TorchScript objects, 4.6.10 milestone 3
-layers, 4.8 GPU devices). Planned elements carry the `planned` stereotype
-or the dashed style. State: 2026-10-11, after design session 8. DESIGN.md
-stays the source of truth; this file only draws it.
+not implemented yet (DESIGN 4.6.10 milestone 3 layers, 4.8 GPU devices).
+Planned elements carry the `planned` stereotype or the dashed style.
+State: 2026-10-12, after local session 6. DESIGN.md stays the source of
+truth; this file only draws it.
 
 Contents:
 1. [Layers and units](#1-layers-and-units)
@@ -372,8 +372,8 @@ On a GPU store, `TRNN`'s constructor also calls
 ## 5. TchJit: values and modules
 
 `TIValue` is a tagged record whose tags equal `ati_tag`'s; `ToC` makes a
-C ivalue the caller frees, `FromC` consumes one (DESIGN 4.6.8). The object
-handle is planned (4.6.9).
+C ivalue the caller frees, `FromC` consumes one (DESIGN 4.6.8). Tag 14 is held
+by the refcounted object handle (4.6.9).
 
 ```mermaid
 classDiagram
@@ -388,7 +388,7 @@ classDiagram
     +Ints, Doubles, Bools, Strings, Tensors
     +Items: TIValueArray
     +Dev: TDevice
-    +Obj: IJitObject  planned
+    +Obj: IJitObject
     +Tuple / GenericList / GenericDict ...$
     +operator := from TTensor, Int64, Double, Boolean, String
     +AsTensor() / AsInt() / AsString() ...
@@ -401,7 +401,7 @@ classDiagram
     ivNone=0 .. ivTensorList=10
     ivGenericList=12
     ivGenericDict=13
-    ivObject=14  planned
+    ivObject=14
     ivStringList=20 input only
     ivDevice=21 input only
   }
@@ -421,7 +421,7 @@ classDiagram
     +NamedParameters() TNamedTensorArray
     +RegisterParameter(Name, T, IsBuffer)
     +Define(Source)
-    +CreateClass(ClassName, Inputs) IJitObject  planned
+    +CreateClass(QualifiedName, Inputs) IJitObject
   }
   class TTrainableJitModule {
     -FInner: TJitModule
@@ -436,29 +436,28 @@ classDiagram
     <<abstract>>
   }
   class IJitObject {
-    <<interface, planned>>
+    <<interface>>
     +Raw() PTorchIValue
     +MethodIV(Name, Inputs) TIValue
     +GetAttr(Name) TIValue
   }
   class TJitObjectHandle {
-    <<planned>>
     -FRaw: PTorchIValue
     +Destroy() ati_free
   }
   TIValue --> TIValueTag
   TIValue o-- "many" TIValue : Items
-  TIValue ..> IJitObject : planned
+  TIValue ..> IJitObject
   IJitObject <|.. TJitObjectHandle
   TModule <|-- TTrainableJitModule
   TTrainableJitModule *-- TJitModule : owns
   TJitModule ..> TIValue
-  TJitModule ..> IJitObject : CreateClass, planned
+  TJitModule ..> IJitObject : CreateClass
 ```
 
 Globals: `JitGetProfilingMode` / `JitSetProfilingMode`,
 `JitGetTensorExprFuserEnabled` / `JitSetTensorExprFuserEnabled`,
-`JitSetGraphExecutorOptimize`; planned: `JitLiveObjects` (4.6.9),
+`JitSetGraphExecutorOptimize`, `JitLiveObjects`; planned:
 `JitFuserCudaEnabled` / `SetJitFuserCudaEnabled` (4.8).
 
 ## 6. Sequence: ForwardIV and ivalue ownership
@@ -489,9 +488,8 @@ sequenceDiagram
   V-->>U: TIValue (Pascal-owned copy)
 ```
 
-Planned (4.6.9): for tag 14, `FromC` keeps the pointer in a
-`TJitObjectHandle` instead of freeing it, and `ToC` hands out
-`ati_clone(Obj.Raw)`.
+For tag 14, `FromC` keeps the pointer in a `TJitObjectHandle`
+instead of freeing it, and `ToC` hands out `ati_clone(Obj.Raw)`.
 
 ## 7. Sequence: fine-tuning a TorchScript module
 
@@ -565,6 +563,6 @@ flowchart LR
 | `TTensor`, data in/out, operators, autograd, `FromArray` revision | 4.1–4.4, 4.7 | implemented (milestone 1, local session 4) |
 | `TInit`, `TVarStore`, save/load, optimizers, milestone 2 layers | 4.6.1–4.6.7 | implemented (milestone 2) |
 | JIT: `TIValue`, `TJitModule`, `TTrainableJitModule` | 4.6.8 | implemented (milestone 3), H19–H25 hold |
-| TorchScript objects (`IJitObject`) | 4.6.9 | designed (session 6), H26–H28 open |
+| TorchScript objects (`IJitObject`) | 4.6.9 | implemented (local session 6, 2026-10-12) |
 | Conv1D/3D, ConvTranspose, GroupNorm, LSTM/GRU, Identity | 4.6.10 | designed (session 7), H29–H30 open |
 | GPU: ROCm / CUDA builds and API | 4.8 | designed (session 8), H31–H35 open; needs a ROCm libtorch |

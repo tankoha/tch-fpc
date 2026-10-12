@@ -513,6 +513,229 @@ begin
 end;
 
 { 13. errors and handles }
+{ 14. TorchScript objects (tch-rs jit6, jit_double_free; DESIGN 4.6.9) }
+
+function RssKiB: Int64;
+var
+  F: TextFile;
+  Size, Resident: Int64;
+begin
+  AssignFile(F, '/proc/self/statm');
+  Reset(F);
+  Read(F, Size, Resident);
+  CloseFile(F);
+  Result := Resident * 4;
+end;
+
+function FX: TTensor;
+begin
+  Result := TTensor.FromArray([3.0, 4, 5]);
+end;
+
+function FT1: TTensor;
+begin
+  Result := TTensor.FromArray([1.0, 2, 3]);
+end;
+
+function FT2: TTensor;
+begin
+  Result := TTensor.FromArray([4.0, 5, 6]);
+end;
+
+{ Message of the ETorchNativeError the last Call* raised, '' if none. }
+var
+  NativeMsg: String;
+
+procedure NoteNative(E: Exception);
+begin
+  if E is ETorchNativeError then
+    NativeMsg := E.Message
+  else
+    NativeMsg := 'other ' + E.ClassName + ': ' + E.Message;
+end;
+
+function Has(const Sub: String): Boolean;
+begin
+  Result := Pos(Sub, NativeMsg) > 0;
+end;
+
+procedure TestObjectsFoo6;
+var
+  M: TJitModule;
+  R: TIValue;
+  O: IJitObject;
+  Raised: Boolean;
+begin
+  M := TJitModule.Create(Models + 'foo6.pt');
+  try
+    R := M.ForwardIV([FX]);
+    Check((R.Tag = ivObject) and (R.TagName = 'Object'), 'a. foo6: forward is an Object');
+    O := R.AsObject;
+    Check(Values(O.MethodIV('y', []).AsTensor) = '6 8 10', 'a. foo6: y() = [6, 8, 10] (jit6)');
+    Check(Values(O.GetAttr('x').AsTensor) = '3 4 5', 'a. foo6: getattr x = [3, 4, 5]');
+    Raised := False;
+    try
+      R.AsTensor;
+    except
+      on E: ETorchError do
+        Raised := (not (E is ETorchNativeError)) and
+          (E.Message = 'ivalue: expected Tensor, got Object');
+    end;
+    Check(Raised, 'a. AsTensor on an object: ETorchError expected Tensor, got Object');
+    NativeMsg := '';
+    try
+      M.Forward([FX]);
+    except
+      on E: Exception do NoteNative(E);
+    end;
+    Check(Has('forward did not return a tensor'), 'a. Forward (tensor API): ' + NativeMsg + ' (H27)');
+
+    NativeMsg := '';
+    try
+      O.GetAttr('nope');
+    except
+      on E: Exception do NoteNative(E);
+    end;
+    Check(Has('does not have an attribute with name ''nope'''), 'b. GetAttr nope: ' + NativeMsg);
+    NativeMsg := '';
+    try
+      O.MethodIV('nope', []);
+    except
+      on E: Exception do NoteNative(E);
+    end;
+    Check(Has('Couldn''t find method: ''nope'''), 'b. MethodIV nope: ' + NativeMsg);
+    NativeMsg := '';
+    try
+      O.MethodIV('y', [7]);
+    except
+      on E: Exception do NoteNative(E);
+    end;
+    Check(Has('Expected at most 1 argument(s)'), 'b. MethodIV y(7): ' + NativeMsg);
+
+    O := M.CreateClass('__torch__.TorchScriptClass', [FX]);
+    Check(Values(O.MethodIV('y', []).AsTensor) = '6 8 10',
+      'd. foo6: CreateClass TorchScriptClass(x).y() = [6, 8, 10] (H27)');
+  finally
+    M.Free;
+  end;
+end;
+
+procedure TestObjectsFoo7;
+var
+  M: TJitModule;
+  Inp, W, A, B: TIValue;
+  O: IJitObject;
+begin
+  M := TJitModule.Create(Models + 'foo7.pt');
+  try
+    Inp := M.MethodIV('make_input_object', [FT1, FT2]);
+    Check(Inp.Tag = ivObject, 'c. foo7: make_input_object is an Object');
+    Check(Values(M.MethodIV('add_them', [Inp]).AsTensor) = '5 7 9', 'c. add_them = [5, 7, 9]');
+    Check(Values(M.MethodIV('add_them', [Inp]).AsTensor) = '5 7 9',
+      'c. add_them again with the same handle = [5, 7, 9] (jit_double_free)');
+    Check((Values(Inp.AsObject.GetAttr('foo').AsTensor) = '1 2 3') and
+      (Values(Inp.AsObject.GetAttr('bar').AsTensor) = '4 5 6'), 'c. getattr foo, bar');
+
+    O := M.CreateClass('__torch__.InputObject', [FT1, FT2]);
+    Check(Values(M.MethodIV('add_them', [O]).AsTensor) = '5 7 9',
+      'd. CreateClass InputObject; add_them([O]) = [5, 7, 9]');
+    Check(Values(M.MethodIV('add_them', [TIValue.FromObject(O)]).AsTensor) = '5 7 9',
+      'd. add_them([FromObject(O)]) = [5, 7, 9]');
+    NativeMsg := '';
+    try
+      M.CreateClass('InputObject', [FT1, FT2]);
+    except
+      on E: Exception do NoteNative(E);
+    end;
+    Check(Has('Could not find class with name: ''InputObject'' in module.'),
+      'd. CreateClass unqualified: ' + NativeMsg);
+    NativeMsg := '';
+    try
+      M.CreateClass('__torch__.InputObject', [FT1]);
+    except
+      on E: Exception do NoteNative(E);
+    end;
+    Check(Has('__init__() is missing value for argument ''bar'''),
+      'd. CreateClass one argument: ' + NativeMsg);
+    NativeMsg := '';
+    try
+      M.MethodIV('add_them', [5]);
+    except
+      on E: Exception do NoteNative(E);
+    end;
+    Check(Has('Expected a value of type ''__torch__.InputObject'),
+      'd. add_them(5): ' + NativeMsg);
+
+    W := RoundTrip(TIValue.Tuple([O, 42]));
+    Check((W.Count = 2) and (W.Item(1).AsInt = 42) and
+      (Values(W.Item(0).AsObject.GetAttr('foo').AsTensor) = '1 2 3') and
+      (W.Item(0).AsObject.Raw <> O.Raw), 'e. object through a Tuple: fresh IValue, same object');
+    W := RoundTrip(TIValue.GenericList([O]));
+    Check((W.Tag = ivGenericList) and (W.Count = 1) and
+      (Values(W.Item(0).AsObject.GetAttr('bar').AsTensor) = '4 5 6') and
+      (W.Item(0).AsObject.Raw <> O.Raw), 'e. object through a GenericList (H26)');
+    W := RoundTrip(TIValue.GenericDict(['k', O]));
+    Check((W.Tag = ivGenericDict) and (W.Count = 1) and (W.Key(0).AsString = 'k') and
+      (Values(W.Value(0).AsObject.GetAttr('foo').AsTensor) = '1 2 3'),
+      'e. object as a GenericDict value (H26)');
+
+    A := TIValue.FromObject(O);
+    B := A;
+    Check(A.AsObject.Raw = B.AsObject.Raw, 'f. copies share the handle');
+    A := Default(TIValue);
+    Check(Values(B.AsObject.GetAttr('foo').AsTensor) = '1 2 3', 'f. the copy survives the original');
+  finally
+    M.Free;
+  end;
+  Check(Values(O.GetAttr('bar').AsTensor) = '4 5 6', 'f. the object outlives its module');
+end;
+
+procedure ObjectLoop(N: Integer);
+var
+  M: TJitModule;
+  O: IJitObject;
+  V: TIValue;
+  I, Live1, Live2, Obj1, Obj2: Integer;
+  Rss1, Rss2: Int64;
+begin
+  M := TJitModule.Create(Models + 'foo6.pt');
+  try
+    O := M.ForwardIV([FX]).AsObject;
+  finally
+    M.Free;
+  end;
+  for I := 1 to N div 10 do
+    V := O.MethodIV('y', []);
+  Rss1 := RssKiB;
+  Live1 := TchLiveHandles;
+  Obj1 := JitLiveObjects;
+  for I := 1 to N do
+    V := O.MethodIV('y', []);
+  Rss2 := RssKiB;
+  Live2 := TchLiveHandles;
+  Obj2 := JitLiveObjects;
+  WriteLn(Format('  RSS KiB: %d -> %d over %d object method calls', [Rss1, Rss2, N]));
+  Check((Live1 = Live2) and (Obj1 = Obj2), Format('g. live handles %d, objects %d constant (H28)',
+    [Live2, Obj2]));
+  Check(Rss2 - Rss1 < 1024, 'g. RSS flat (< 1 MiB) (H28)');
+  Check(Values(V.AsTensor) = '6 8 10', 'g. last y() = [6, 8, 10]');
+end;
+
+procedure TestObjects;
+var
+  Before, BeforeObj: Integer;
+begin
+  WriteLn('foo6/foo7: TorchScript objects (H26-H28)');
+  Before := TchLiveHandles;
+  BeforeObj := JitLiveObjects;
+  TestObjectsFoo6;
+  TestObjectsFoo7;
+  Check((TchLiveHandles = Before) and (JitLiveObjects = BeforeObj),
+    Format('f. live handles %d -> %d, objects %d -> %d', [Before, TchLiveHandles,
+    BeforeObj, JitLiveObjects]));
+  ObjectLoop(10000);
+end;
+
 procedure TestErrors;
 var
   M: TJitModule;
@@ -558,7 +781,9 @@ begin
   TestTrainFlag;
   TestGlobals;
   TestErrors;
+  TestObjects;
   Check(TchLiveHandles = 0, 'no live handles at the end');
+  Check(JitLiveObjects = 0, 'no live objects at the end');
   if Failures = 0 then
     WriteLn('OK')
   else

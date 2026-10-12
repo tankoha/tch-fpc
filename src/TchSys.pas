@@ -107,8 +107,7 @@ procedure ato_free(opt: PTorchOptimizer); cdecl; external LibTch;
   except atm_free, ati_free and at_set_graph_executor_optimize; the
   constructors return nil on error. atm_named_parameters calls back with
   the load callback's signature. ati_to_string returns a strdup'd string
-  (tchf_free). Not declared: TorchScript objects (atm_create_class_,
-  ati_object_*, ati_clone) and atm_fuser_cuda_*. }
+  (tchf_free). Not declared: atm_fuser_cuda_*. }
 type
   PTorchModule = Pointer;
   PTorchIValue = Pointer;
@@ -204,6 +203,15 @@ procedure ati_to_bool_list(i: PTorchIValue; outputs: PChar; n: cint);
 procedure ati_to_tensor_list(i: PTorchIValue; outputs: PPTorchTensor;
   n: cint); cdecl; external LibTch;
 procedure ati_free(i: PTorchIValue); cdecl; external LibTch;
+function atm_create_class_(m: PTorchModule; clz_name: PChar;
+  ivalues: PPTorchIValue; nivalues: cint): PTorchIValue; cdecl;
+  external LibTch;
+function ati_object_method_(i: PTorchIValue; method_name: PChar;
+  ivalues: PPTorchIValue; nivalues: cint): PTorchIValue; cdecl;
+  external LibTch;
+function ati_object_getattr_(i: PTorchIValue; attr_name: PChar):
+  PTorchIValue; cdecl; external LibTch;
+function ati_clone(i: PTorchIValue): PTorchIValue; cdecl; external LibTch;
 
 implementation
 

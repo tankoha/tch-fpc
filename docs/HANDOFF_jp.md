@@ -4,7 +4,47 @@
 
 再開するときは最初にこれを読んでください。決定事項と理由は [DESIGN_jp.md](DESIGN_jp.md) にあります。
 
-## ローカルセッション5（2026-10-11〜12）：3つの設計がそろい、ROCm 版 libtorch を入手 — ここから再開
+## ローカルセッション6（2026-10-12）：TorchScript のオブジェクト（4.6.9）を実装 — ここから再開
+
+**現状。** 4.6.9 は実装・コミット済み。作業ツリーはクリーン。設計セッション6のローカル
+手順 1〜8 は完了。
+
+- `src/TchSys.pas`：external 4つ（`atm_create_class_`、`ati_object_method_`、
+  `ati_object_getattr_`、`ati_clone`）。「未宣言」は `atm_fuser_cuda_*` だけになった。
+- `src/TchJit.pas`：`ivObject = 14`、`IJitObject`（`TIValue` の前で前方宣言）、
+  `TJitObjectHandle`、`FromObject`/`:=`/`AsObject`、`ToC` はクローン、`FromC` は
+  ポインタを保持（`Keep`）、`TJitModule.CreateClass`、`JitLiveObjects`。
+- `tests/jit/jit_test.pas`：`TestObjects`、4.6.9 の項目 a〜g（29 チェック）、
+  libtorch 2.13.0 CPU ですべて OK。**H26、H27、H28 は成立**（結果は DESIGN 4.6.9 に
+  記録）。`[O, 42]` は `:=` で要素ごとに変換される（未実測だった）。
+- モック：`mock_tch.c` のタグ 14 オブジェクト、`jit_mock_test.pas` の `TestObjects`。
+  `tests/mock/run.sh` は OK。
+- 回帰：`tests/abi`、`tests/api`、`tests/nn`、`tests/jit`、モック — すべて OK。
+- `docs/UML.md`/`UML_jp.md`：4.6.9 の要素から planned を外した。
+
+**実装中に見つかった設計との違い：**
+- `CreateClass(const ClassName: …)` はコンパイルできない：`ClassName` は
+  `TObject.ClassName`（重複識別子）。引数名は `QualifiedName`。DESIGN 4.6.9 を更新。
+- モックの数：モックのオブジェクトは1セル **＋属性ごとに1セル**（属性はクローンした
+  ivalue）なので、設計の `mock_live_ivalues = 1` はテストでは `Cells`（`[1, 2.5]` で 3）。
+  項目7（Device の兄弟が失敗）は文の前後の差分で確認する：ルーチン内では項目5〜6の
+  一時変数がまだハンドルを持っている（H1）。差分は 0 — 変換済みの兄弟はすぐ解放される。
+
+**Haiku との分担（このセッションから）。** ユーザーは、機械的な作業とテスト実行・報告に
+Claude Haiku 4.5 のサブエージェントを使いたい。このセッションでは Haiku がモックのスタブ
+（4.6.9 の仕様から）、UML の en/jp 同期、回帰の実行を担当した。モックにはリークがあり
+（`ati_object_method_` が要素をクローンし、`ati_tuple` がさらにクローンしていた）、
+その結果の失敗を「無関係」と報告した。UML の編集は1文を取りこぼした。どちらもここで
+修正済み。したがって：Haiku には仕様が完全に決まった作業を渡し、失敗は解釈せずそのまま
+報告させ、差分はレビューする。
+
+**次（指定がなければどれからか聞く）：**
+- **4.6.10 マイルストーン3のレイヤー**（CPU のみ。ローカル手順は下の設計セッション7）。
+  4.8 の `TRNN` の flatten 呼び出しはこれに依存する。
+- **4.8 GPU**（ROCm の前提はそろっている。設計セッション8のローカル手順の 1 から。
+  H31、H34、H35 は未解決）。
+
+## ローカルセッション5（2026-10-11〜12）：3つの設計がそろい、ROCm 版 libtorch を入手
 
 **現状。** 以下はすべてコミット・push 済み。やりかけのものはなく、作業ツリーはクリーン。
 

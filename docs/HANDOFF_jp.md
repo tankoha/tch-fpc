@@ -25,17 +25,30 @@
   場合も新しい `Raw` を確認。モックの GPU スタブは本物が失敗する所で失敗し、
   `jit_mock_test` にフューザーフラグのテスト。
 
-**レビューで出て未修正のもの（ユーザーに聞く）：**
-- コード：改名後の `name__N` が既にあると `TVarStore.AddEntry` がストアを半端な状態に
-  する。例外を出したレイヤーのコンストラクタは変数をストアに残す（実測：`Groups = 0` の
-  `TConv2D`）。`TBatchNorm` は `Nd` を検査しない。2つ目を巻き戻すか事前検査にするかは
-  設計判断。
+**追加対応（同日）：修正・コミット済み。**
+- `TVarStore.AddEntry`：`<name>__<Count>` も既にあれば次の空いている番号。確認はすべて
+  ストアを変える前（旧コードではテストが `EListError` で失敗する）。`TBatchNorm` は
+  `Nd` が 1〜3 でなければ登録前に例外。
+- コンパイラの仮説を判定に：`tests/compiler/h3`、`h10`、`h11` が結果を確認し、`run.sh`
+  は 0 以外の終了を数える。`tests/ownership` が H1 の数を判定。`tests/fpu/run.sh` が
+  全モードを判定（マスクありは +Inf が2回、nomask-small は EZeroDivide、nomask-large と
+  pool-first は異常終了かハング）。
+- テストのなかった API をテスト：メソッドのトレース（例外を出すものを含む）、
+  `CreateFromStream(S, Device)`、`TTrainableJitModule` の `CreateFromStream`/
+  `ForwardIV`/`Method`/`MethodIV`/`SetTrain`/`SetEval`/`Inner`、バッファ。
+  `NonLinearityGain`、`KaimingNormal`、`TVarPath` の補助関数、`BackwardStepClipNorm`、
+  転置畳み込みと layer norm の設定、`TRNN` のプロパティ。`SetCudnnUserEnabled`、
+  `TchMaskFpuExceptions`。
+- **新しいテストが見つけた不具合：** `NonLinearityGain(nlTanh)` が 1.6666666269 だった。
+  FPC が `5.0 / 3.0` を Single で畳み込むため。`Double(5) / 3` に修正（DESIGN 4.6.1）。
+- `tests/common/layers.inc`：`tests/nn` と `tests/gpu` が共有する、畳み込みの
+  パディングと RNN の手計算の準備。
+
+**レビューで出てまだ残るもの（ユーザーに聞く）：**
+- 例外を出したレイヤーのコンストラクタは変数をストアに残す（実測：`Groups = 0` の
+  `TConv2D`）。ストアを巻き戻すか、事前条件を先に確かめて残りを文書にするか：設計判断。
 - DESIGN 3 は区別されたポインタ型（`type Pointer`）と `{$packrecords c}` を求めるが、
   コードは素の `Pointer` で packrecords もない。どちらに合わせるか決める。
-- テスト：コンパイラの仮説（H1、H3、H4、H5、H10、H11 の一部）は印字だけで判定して
-  いない。テストのない公開 API（メソッドを渡す `CreateByTracing`、
-  `TTrainableJitModule` のほかのメソッド、`BackwardStepClipNorm` など）。GPU テストは
-  `nn_test` の準備を共有せず写している。
 
 ## ローカルセッション8（2026-10-12）：GPU（4.8）を実装し、RX 9070 で動作
 

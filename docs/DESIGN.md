@@ -1041,7 +1041,7 @@ type
     constructor Create(const P: TVarPath; InDim, OutDim, KSize: Int64; const Cfg: TConvConfig); overload;
     function Forward(const X: TTensor; Train: Boolean = False): TTensor; override;
   end;
-  TBatchNorm = class(TModule)    // Nd = 1, 2, 3 for batch_norm1d/2d/3d
+  TBatchNorm = class(TModule)    // Nd = 1, 2, 3 for batch_norm1d/2d/3d; any other Nd raises ETorchError before registering
   public
     Weight, Bias, RunningMean, RunningVar: TTensor;
     constructor Create(const P: TVarPath; Nd: Integer; OutDim: Int64); overload;
@@ -1190,7 +1190,9 @@ Decisions and rationale (overall shape):
   `[Out, In]` has fan-in `In`, a conv weight `[Out, In div Groups, K, K]`
   has fan-in `In div Groups * K * K`.
 - **Gain** (`NonLinearity::gain`): ReLU `sqrt(2)`, Tanh `5/3`, Linear and
-  Sigmoid `1`, SELU `0.75`, ExplicitGain `g`.
+  Sigmoid `1`, SELU `0.75`, ExplicitGain `g`. *Measured* (overall review): FPC folds
+  `5.0 / 3.0` in Single (1.6666666269), so the code writes `Double(5) / 3`;
+  `tests/nn` checks every gain to 1e-12.
 - **`Make(Dims, Device, Kind)`** is tch-rs `f_init`, op for op (generated
   names as in `TchTensorGenerated_intf.inc`):
 
@@ -1280,6 +1282,10 @@ Decisions and rationale (overall shape):
   named_variables.len())`); tch-rs's `save_and_load_var_store` test
   registers `t123` twice and expects four variables, so files written by
   tch-rs can contain such names and the rule is kept verbatim. If
+  `<full>__<Count>` is taken too (e.g. `x`, `x__2`, then `x` again), the
+  next free number is used; every check happens before the store changes
+  (added after the overall review, which found the store left
+  half-updated by a dictionary error there). If
   `Trainable`: `T.set_requires_grad(True)` (generated; in place, the
   returned handle is discarded) and the index is appended to `FTrainable`.
   The function returns `T` itself: the layer, the store and the caller share

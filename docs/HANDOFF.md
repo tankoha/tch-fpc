@@ -28,19 +28,35 @@ Fixed and committed:
   `Raw`; mock GPU stubs now fail where real libtorch does, plus a fuser
   flag test in `jit_mock_test`.
 
-**Open from the review (not fixed; ask the user):**
-- Code: `TVarStore.AddEntry` can leave the store half-updated when the
-  renamed `name__N` already exists; a layer constructor that raises leaves
-  its variables in the store (measured: `TConv2D` with `Groups = 0`);
-  `TBatchNorm` does not check `Nd`. The rollback-vs-precheck choice for the
-  second is a design decision.
+**Follow-up (same day): fixed and committed.**
+- `TVarStore.AddEntry`: when `<name>__<Count>` is taken too, the next free
+  number; all checks before the store changes (test fails on the old code
+  with `EListError`). `TBatchNorm` raises unless `Nd` is 1..3, before
+  registering.
+- Compiler hypotheses asserted: `tests/compiler/h3`, `h10`, `h11` check
+  their results and `run.sh` counts a non-zero exit; `tests/ownership`
+  asserts the H1 counts; `tests/fpu/run.sh` checks every mode (masked modes
+  +Inf twice, nomask-small EZeroDivide, nomask-large and pool-first must
+  crash or hang).
+- Untested API now tested: tracing a method (incl. a raising one),
+  `CreateFromStream(S, Device)`, `TTrainableJitModule` `CreateFromStream`/
+  `ForwardIV`/`Method`/`MethodIV`/`SetTrain`/`SetEval`/`Inner`, buffers;
+  `NonLinearityGain`, `KaimingNormal`, the `TVarPath` helpers,
+  `BackwardStepClipNorm`, transpose and layer-norm configs, `TRNN`
+  properties; `SetCudnnUserEnabled`, `TchMaskFpuExceptions`.
+- **Bug found by the new tests:** `NonLinearityGain(nlTanh)` was
+  1.6666666269 because FPC folds `5.0 / 3.0` in Single; now `Double(5) / 3`
+  (DESIGN 4.6.1).
+- `tests/common/layers.inc`: the conv padding and RNN hand setups shared by
+  `tests/nn` and `tests/gpu`.
+
+**Still open from the review (ask the user):**
+- A layer constructor that raises leaves its variables in the store
+  (measured: `TConv2D` with `Groups = 0`). Roll the store back, or check
+  preconditions first and document the rest: a design decision.
 - DESIGN 3 wants distinct pointer types (`type Pointer`) and
   `{$packrecords c}`; the code uses plain `Pointer` and no packrecords.
   Decide which side to change.
-- Tests: compiler hypotheses (H1, H3, H4, H5, H10, part of H11) are printed,
-  not asserted; untested public API (method-callback `CreateByTracing`,
-  `TTrainableJitModule`'s other methods, `BackwardStepClipNorm`, ...); the
-  GPU test copies setup from `nn_test` instead of sharing it.
 
 ## Local session 8 (2026-10-12): GPU (4.8) implemented, runs on the RX 9070
 

@@ -585,7 +585,8 @@ function NonLinearityGain(NL: TNonLinearity; ExplicitGain: Double): Double;
 begin
   case NL of
     nlReLU: Result := Sqrt(2.0);
-    nlTanh: Result := 5.0 / 3.0;
+    { Double first: FPC folds 5.0 / 3.0 in Single (1.6666666269) }
+    nlTanh: Result := Double(5) / 3;
     nlSELU: Result := 0.75;
     nlExplicitGain: Result := ExplicitGain;
   else
@@ -918,12 +919,19 @@ function TVarStore.AddEntry(const AFullName: String; const T: TTensor;
   Trainable: Boolean; AGroup: Integer): TTensor;
 var
   N: String;
-  I: Integer;
+  I, K: Integer;
 begin
   TchCheckArg(T, 'tensor', 'TVarPath.Add');
   N := AFullName;
+  { tch-rs's <name>__<Count>; when that is taken too, the next free number
+    (DESIGN 4.6.2). Every check happens before the store changes. }
   if FIndex.ContainsKey(N) then
-    N := N + '__' + IntToStr(Length(FVars));
+  begin
+    K := Length(FVars);
+    while FIndex.ContainsKey(AFullName + '__' + IntToStr(K)) do
+      Inc(K);
+    N := AFullName + '__' + IntToStr(K);
+  end;
   if Trainable then
     T.set_requires_grad(True);
   I := Length(FVars);
@@ -1577,6 +1585,8 @@ constructor TBatchNorm.Create(const P: TVarPath; Nd: Integer; OutDim: Int64;
   const Cfg: TBatchNormConfig);
 begin
   inherited Create;
+  if (Nd < 1) or (Nd > 3) then
+    raise ETorchError.CreateFmt('batch norm: Nd = %d, expected 1..3', [Nd]);
   FNd := Nd;
   FCfg := Cfg;
   if Cfg.Affine then

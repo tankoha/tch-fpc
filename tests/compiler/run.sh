@@ -1,6 +1,7 @@
 #!/bin/bash
 # Compiler acceptance tests (HANDOFF step 7). Run from the repo root.
-# h*.pas must compile and run; xfail_*.pas must FAIL to compile;
+# h*.pas must compile and run with exit status 0 (each asserts its
+# hypothesis, DESIGN.md); xfail_*.pas must FAIL to compile;
 # gen_big.sh builds a 2,657-method record and reports the compile time.
 set -euo pipefail
 out=build/compiler
@@ -10,7 +11,7 @@ for src in tests/compiler/h*.pas; do
   name=$(basename "$src" .pas)
   echo "=== $name"
   if fpc -FU"$out" "$src" -o"$out/$name" >"$out/$name.log" 2>&1; then
-    "$out/$name"
+    "$out/$name" || { echo "  FAIL: exit status $?"; failures=$((failures + 1)); }
   else
     grep -E 'Error|Fatal' "$out/$name.log" || true
     echo "  FAIL: did not compile"

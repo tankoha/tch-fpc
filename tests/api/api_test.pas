@@ -11,7 +11,7 @@
 program api_test;
 
 uses
-  SysUtils, TypInfo, Tch;
+  SysUtils, Math, TypInfo, Tch;
 
 var
   Failures: Integer = 0;
@@ -331,6 +331,14 @@ begin
   Check(RaisesNative(@CallSync), 'CudaSynchronize raises ETorchNativeError');
   Check(RaisesNative(@CallRuntimeVersion), 'GpuRuntimeVersion raises ETorchNativeError');
   Check(RaisesNative(@CallCudnnVersion), 'CudnnVersion raises ETorchNativeError');
+  SetCudnnUserEnabled(False);
+  Check(not CudnnUserEnabled, 'SetCudnnUserEnabled(False) reads back');
+  SetCudnnUserEnabled(True);
+  Check(CudnnUserEnabled, 'SetCudnnUserEnabled(True) reads back');
+  SetExceptionMask([]);
+  TchMaskFpuExceptions;
+  Check(GetExceptionMask = [exInvalidOp, exDenormalized, exZeroDivide, exOverflow,
+    exUnderflow, exPrecision], 'TchMaskFpuExceptions masks every FPU exception again');
 end;
 
 procedure TestElementSizes;

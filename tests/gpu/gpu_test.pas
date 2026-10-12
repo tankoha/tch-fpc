@@ -12,6 +12,8 @@ program gpu_test;
 uses
   SysUtils, TchSys, Tch, TchNN, TchJit;
 
+{$I ../common/layers.inc}
+
 var
   Failures: Integer = 0;
   Gpu: TDevice;
@@ -258,17 +260,9 @@ var
   VS: TVarStore;
   G: TGRU;
   L: TLSTM;
-  W: TTensor;
   S: TRNNState;
-  Conv: TConv2D;
-  CCfg: TConvConfig;
-  Guard: IInterface;
   Mode: TPaddingMode;
   Got: String;
-const
-  ModeNames: array[TPaddingMode] of String = ('zeros', 'reflect', 'replicate', 'circular');
-  Expected: array[TPaddingMode] of String = ('10 10 10 10', '27 24 21 18', '18 21 24 27',
-    '27 24 21 18');
 begin
   WriteLn('layers: RNN hand numbers (H30), Conv2D padding modes');
   WriteLn('  note  flatten condition (IsCuda and CudnnIsAvailable): ', CudnnIsAvailable);
@@ -278,19 +272,13 @@ begin
   try
     G := TGRU.Create(VS.Root / 'g', 1, 1);
     L := TLSTM.Create(VS.Root / 'l', 1, 1);
-    Guard := NoGradGuard;
-    for W in G.FlatWeights do
-      W.CopyFrom(W.zeros_like);
-    for W in L.FlatWeights do
-      W.CopyFrom(W.zeros_like);
-    G.FlatWeights[2].CopyFrom(OnGpu(TTensor.FromArray([0.0, 0, 1])));
-    L.FlatWeights[2].CopyFrom(OnGpu(TTensor.FromArray([0.0, 0, 1, 0])));
-    Guard := nil;
+    SetHandRNNWeights(G, HandGruBias);
+    SetHandRNNWeights(L, HandLstmBias);
     S := G.Step(TTensor.zeros([1, 1], kFloat, Gpu), G.ZeroState(1));
-    Check(S.H.Device.IsCuda and Near(Scalar0(S.H), 0.380797, 1e-5),
+    Check(S.H.Device.IsCuda and Near(Scalar0(S.H), HandGruH, 1e-5),
       Format('8. GRU on the GPU: H = %.6f (0.380797) (H30)', [Scalar0(S.H)]));
     S := L.Step(TTensor.zeros([1, 1], kFloat, Gpu), L.ZeroState(1));
-    Check(Near(Scalar0(S.C), 0.380797, 1e-5) and Near(Scalar0(S.H), 0.181700, 1e-5),
+    Check(Near(Scalar0(S.C), HandLstmC, 1e-5) and Near(Scalar0(S.H), HandLstmH, 1e-5),
       Format('8. LSTM on the GPU: C = %.6f, H = %.6f (0.380797, 0.181700) (H30)',
       [Scalar0(S.C), Scalar0(S.H)]));
   finally
@@ -301,21 +289,9 @@ begin
 
   for Mode := Low(TPaddingMode) to High(TPaddingMode) do
   begin
-    VS := TVarStore.Create(Gpu);
-    Conv := nil;
-    try
-      CCfg := DefaultConvConfig;
-      CCfg.Padding := 1;
-      CCfg.Bias := False;
-      CCfg.PaddingMode := Mode;
-      Conv := TConv2D.Create(VS.Root, 1, 1, 3, CCfg);
-      TInit.Constant(1).Apply(Conv.Weight);
-      Got := Values(Conv.Forward(OnGpu(TTensor.FromArray([1.0, 2, 3, 4]).view([1, 1, 2, 2]))));
-      Check(Got = Expected[Mode], Format('8. conv2d %s on the GPU: %s', [ModeNames[Mode], Got]));
-    finally
-      Conv.Free;
-      VS.Free;
-    end;
+    Got := Values(HandConvPadded(Gpu, Mode));
+    Check(Got = ConvPadExpected[Mode], Format('8. conv2d %s on the GPU: %s',
+      [ConvPadModeNames[Mode], Got]));
   end;
 end;
 

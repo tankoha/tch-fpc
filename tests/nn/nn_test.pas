@@ -15,6 +15,8 @@ program nn_test;
 uses
   SysUtils, Tch, TchNN;
 
+{$I ../common/layers.inc}
+
 var
   Failures: Integer = 0;
 
@@ -224,6 +226,35 @@ begin
 
     U := R.VarCopy('copy', TTensor.FromArray([1.0, 2.0, 3.0]));
     Check((Values(U) = '1 2 3') and U.RequiresGrad, 'VarCopy');
+  finally
+    VS.Free;
+  end;
+end;
+
+{ Review fixes: a renamed duplicate that is itself taken, TBatchNorm's Nd }
+procedure TestStoreEdges;
+var
+  VS: TVarStore;
+  NT: TNamedTensorArray;
+  T: TTensor;
+  Raised: Boolean;
+begin
+  WriteLn('store edges: rename clash, TBatchNorm Nd');
+  VS := TVarStore.Create(TDevice.Cpu);
+  try
+    VS.Root.Zeros('x', [1]);
+    VS.Root.Zeros('x__2', [1]);
+    VS.Root.Zeros('x', [1]);       // x__2 is taken: the next free number
+    NT := VS.Variables;
+    Check((VS.Count = 3) and (NT[2].Name = 'x__3') and VS.TryGet('x__3', T) and
+      (Length(VS.TrainableVariables) = 3), 'duplicate whose x__<Count> is taken becomes x__3');
+    Raised := False;
+    try
+      TBatchNorm.Create(VS.Root / 'bn', 0, 3).Free;
+    except
+      on E: ETorchError do Raised := Pos('Nd = 0', E.Message) > 0;
+    end;
+    Check(Raised and (VS.Count = 3), 'TBatchNorm with Nd = 0 raises before registering');
   finally
     VS.Free;
   end;
@@ -670,31 +701,10 @@ begin
   end;
 end;
 
-function ApplyConv(const Xs: TTensor; Mode: TPaddingMode): String;
-var
-  VS: TVarStore;
-  Conv: TConv2D;
-  Cfg: TConvConfig;
-begin
-  VS := TVarStore.Create(TDevice.Cpu);
-  Conv := nil;
-  try
-    Cfg := DefaultConvConfig;
-    Cfg.Padding := 1;
-    Cfg.Bias := False;
-    Cfg.PaddingMode := Mode;
-    Conv := TConv2D.Create(VS.Root, 1, 1, 3, Cfg);
-    TInit.Constant(1).Apply(Conv.Weight);
-    Result := Values(Conv.Forward(Xs).reshape([-1]));
-  finally
-    Conv.Free;
-    VS.Free;
-  end;
-end;
-
 { 8. Layers }
 procedure TestLayers;
 var
+  Mode: TPaddingMode;
   VS: TVarStore;
   BN: TBatchNorm;
   LN: TLayerNorm;
@@ -710,11 +720,9 @@ var
   NT: TNamedTensorArray;
 begin
   WriteLn('layers: Conv2D padding modes, BatchNorm, LayerNorm, Embedding');
-  Xs := TTensor.FromArray([1.0, 2.0, 3.0, 4.0]).view([1, 1, 2, 2]);
-  Check(ApplyConv(Xs, pmZeros) = '10 10 10 10', 'conv zeros: 10 10 10 10');
-  Check(ApplyConv(Xs, pmReflect) = '27 24 21 18', 'conv reflect: 27 24 21 18');
-  Check(ApplyConv(Xs, pmCircular) = '27 24 21 18', 'conv circular: 27 24 21 18');
-  Check(ApplyConv(Xs, pmReplicate) = '18 21 24 27', 'conv replicate: 18 21 24 27');
+  for Mode := Low(TPaddingMode) to High(TPaddingMode) do
+    Check(Values(HandConvPadded(TDevice.Cpu, Mode)) = ConvPadExpected[Mode],
+      'conv ' + ConvPadModeNames[Mode] + ': ' + ConvPadExpected[Mode]);
 
   VS := TVarStore.Create(TDevice.Cpu);
   Conv := nil;
@@ -1180,7 +1188,6 @@ var
   Y: TTensor;
   Raised: Boolean;
   Msg, Expected: String;
-  Guard: IInterface;
 begin
   WriteLn('milestone 3: TGRU, TLSTM (tch-rs gru_test, lstm_test), hand numbers');
   for IsLSTM := False to True do
@@ -1235,20 +1242,14 @@ begin
   try
     G := TGRU.Create(VS.Root / 'g', 1, 1);
     L := TLSTM.Create(VS.Root / 'l', 1, 1);
-    Guard := NoGradGuard;
-    for Y in G.FlatWeights do
-      Y.CopyFrom(Y.zeros_like);
-    for Y in L.FlatWeights do
-      Y.CopyFrom(Y.zeros_like);
-    G.FlatWeights[2].CopyFrom(TTensor.FromArray([0.0, 0, 1]));
-    L.FlatWeights[2].CopyFrom(TTensor.FromArray([0.0, 0, 1, 0]));
-    Guard := nil;
+    SetHandRNNWeights(G, HandGruBias);
+    SetHandRNNWeights(L, HandLstmBias);
     S := G.Step(TTensor.zeros([1, 1]), G.ZeroState(1));
-    Check(Near(S.H.DoubleValue([0, 0, 0]), 0.380797, 1e-5),
+    Check(Near(S.H.DoubleValue([0, 0, 0]), HandGruH, 1e-5),
       Format('8. GRU hand number: H = %.6f (tanh(1) / 2 = 0.380797)', [S.H.DoubleValue([0, 0, 0])]));
     S := L.Step(TTensor.zeros([1, 1]), L.ZeroState(1));
-    Check(Near(S.C.DoubleValue([0, 0, 0]), 0.380797, 1e-5) and
-      Near(S.H.DoubleValue([0, 0, 0]), 0.181700, 1e-5),
+    Check(Near(S.C.DoubleValue([0, 0, 0]), HandLstmC, 1e-5) and
+      Near(S.H.DoubleValue([0, 0, 0]), HandLstmH, 1e-5),
       Format('8. LSTM hand numbers: C = %.6f (0.380797), H = %.6f (0.181700)',
       [S.C.DoubleValue([0, 0, 0]), S.H.DoubleValue([0, 0, 0])]));
 
@@ -1315,6 +1316,95 @@ begin
     [Before, TchLiveHandles]));
 end;
 
+{ 12. API not covered above (overall review, C17) }
+procedure TestMoreApi;
+var
+  VS: TVarStore;
+  P: TVarPath;
+  W, T, Q: TTensor;
+  Opt: TOptimizer;
+  G: TGRU;
+  RCfg: TRNNConfig;
+  A, B: TConvTransposeConfigND;
+  LCfg: TLayerNormConfig;
+  Std, M: Double;
+  D: TDoubleArray;
+begin
+  WriteLn('more API: TVarPath helpers, inits, ClipNorm, configs, TRNN properties');
+  Check(Near(NonLinearityGain(nlReLU), Sqrt(2), 1e-12) and Near(NonLinearityGain(nlTanh), Double(5) / 3, 1e-12) and
+    (NonLinearityGain(nlSELU) = 0.75) and (NonLinearityGain(nlLinear) = 1) and
+    (NonLinearityGain(nlSigmoid) = 1) and (NonLinearityGain(nlExplicitGain, 2.5) = 2.5),
+    'NonLinearityGain: ReLU sqrt 2, Tanh 5/3, SELU 3/4, Linear and Sigmoid 1, explicit');
+  ManualSeed(11);
+  T := TInit.KaimingNormal.Make([256, 1024], TDevice.Cpu, kFloat);
+  Std := T.std(True).DoubleValue([]);
+  Check(Abs(Std / Sqrt(2 / 1024) - 1) < 0.05,
+    Format('TInit.KaimingNormal [256, 1024]: std %.4f ~ sqrt(2 / fan_in) = %.4f', [Std, Sqrt(2 / 1024)]));
+
+  VS := TVarStore.Create(TDevice.Cpu);
+  Opt := nil;
+  G := nil;
+  try
+    P := VS.Root / 'b';
+    Check((P.FullName('a') = 'b.a') and (VS.Root.FullName('a') = 'a') and
+      (P.Device.DeviceType = dtCpu) and (P.Kind = kFloat) and (P.Group = 0) and
+      (P.SetGroup(2).Group = 2), 'TVarPath: FullName, Device, Kind, Group, SetGroup');
+    W := P.OnesNoTrain('o', [2]);
+    Check((Values(W) = '1 1') and not W.RequiresGrad and (Length(VS.TrainableVariables) = 0),
+      'OnesNoTrain: ones, not trainable');
+    T := TTensor.FromArray([5.0, 6.0]);
+    W := P.Add('added', T, False);
+    Check(W.SameHandle(T) and VS.TryGet('b.added', W) and not W.RequiresGrad,
+      'Add(T, Trainable = False): same handle, registered, no grad');
+    W := P.Variable('v', [3], TInit.Constant(7));
+    Check((Values(W) = '7 7 7') and W.RequiresGrad, 'Variable(Constant(7)): trainable sevens');
+    W := P.RandnStandard('rs', [4, 5]);
+    Check(ShapeIs(W, [4, 5]) and W.RequiresGrad, 'RandnStandard: shape [4, 5], trainable');
+    W := P.Randn('rn', [20000], 3, 0.5);
+    M := MeanOf(W);
+    Std := W.std(True).DoubleValue([]);
+    Check(Near(M, 3, 0.02) and Near(Std, 0.5, 0.02), Format('Randn(3, 0.5): mean %.3f, std %.3f', [M, Std]));
+    W := P.KaimingNormal('kn', [256, 1024]);
+    Check(W.RequiresGrad and (Abs(W.std(True).DoubleValue([]) / Sqrt(2 / 1024) - 1) < 0.05),
+      'TVarPath.KaimingNormal: trainable, std ~ sqrt(2 / fan_in)');
+    W := P.Orthogonal('or', [4, 4], 2);
+    Q := W.matmul(W.t);
+    D := (Q - TTensor.eye(4, kFloat, TDevice.Cpu) * 4).abs.max.ToDoubleArray;
+    Check(D[0] < 1e-4, 'Orthogonal(gain 2) [4, 4]: W Wt = 4 I');
+
+    { clip_grad_norm: grad [3, 4] has norm 5, clipped to norm 1, SGD lr 1 }
+    W := (VS.Root / 'clip').Zeros('w', [2]);
+    Opt := TOptimizer.Sgd(VS, 1.0);
+    Opt.ZeroGrad;
+    Opt.BackwardStepClipNorm((W * TTensor.FromArray([3.0, 4.0])).sum, 1.0);
+    D := W.ToDoubleArray;
+    Check(Near(D[0], -0.6, 1e-5) and Near(D[1], -0.8, 1e-5),
+      Format('BackwardStepClipNorm(1): w = [%.4f, %.4f] (-0.6, -0.8)', [D[0], D[1]]));
+
+    RCfg := DefaultRNNConfig;
+    RCfg.NumLayers := 2;
+    G := TGRU.Create(VS.Root / 'g', 2, 5, RCfg);
+    Check((G.HiddenDim = 5) and (G.Config.NumLayers = 2) and G.Config.BatchFirst,
+      'TRNN.HiddenDim and Config');
+  finally
+    G.Free;
+    Opt.Free;
+    VS.Free;
+  end;
+
+  A := DefaultConvTransposeConfigND(3);
+  B := ConvTransposeConfigToND(DefaultConvTransposeConfig, 3);
+  Check(SameArr(A.Stride, [1, 1, 1]) and SameArr(A.Padding, [0, 0, 0]) and
+    SameArr(A.OutputPadding, [0, 0, 0]) and SameArr(A.Dilation, [1, 1, 1]) and
+    SameArr(A.Stride, B.Stride) and SameArr(A.OutputPadding, B.OutputPadding) and
+    (A.Groups = 1) and A.Bias and SameInit(A.WsInit, B.WsInit) and SameInit(A.BsInit, B.BsInit),
+    'DefaultConvTransposeConfigND(3) = ConvTransposeConfigToND(default, 3)');
+  LCfg := DefaultLayerNormConfig;
+  Check(LCfg.CudnnEnabled and (LCfg.Eps = Double(1e-5)) and LCfg.ElementwiseAffine and
+    SameInit(LCfg.WsInit, TInit.Constant(1)) and SameInit(LCfg.BsInit, TInit.Constant(0)),
+    'DefaultLayerNormConfig: cuDNN, 1e-5, affine, Constant(1), Constant(0)');
+end;
+
 { 10. Handles: optimizer, layers, store freed in that order }
 procedure Scenario;
 var
@@ -1355,6 +1445,7 @@ begin
     TestInit;
     TestApplyGuard;
     TestStore;
+    TestStoreEdges;
     TestFreezeAndSetKind;
     TestLinearRegression;
     TestAdam;
@@ -1365,6 +1456,7 @@ begin
     TestLayers;
     TestSequential;
     TestMilestone3;
+    TestMoreApi;
     TestHandles;
   end;
   Check(TchLiveHandles = 0, 'no live handles at the end');

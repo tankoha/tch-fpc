@@ -4,6 +4,21 @@ program h11_guard;
 uses SysUtils;
 var
   Log: String = '';
+  Failures: Integer = 0;
+
+{ H11 resolved: released at routine exit, at once when discarded, and
+  while unwinding }
+procedure Expect(const Exp: String);
+begin
+  WriteLn(Log);
+  if Log = Exp then
+    WriteLn('  ok')
+  else
+  begin
+    WriteLn('  FAIL: expected ', Exp);
+    Inc(Failures);
+  end;
+end;
 type
   TGuard = class(TInterfacedObject)
     destructor Destroy; override;
@@ -48,16 +63,18 @@ begin
   Log := 'local:';
   WithLocal;
   Log := Log + ' returned';
-  WriteLn(Log);
+  Expect('local: start after-assign inner-block end-of-body [released] returned');
   Log := 'discarded:';
   Discarded;
   Log := Log + ' returned';
-  WriteLn(Log);
+  Expect('discarded: start [released] after-call end-of-body returned');
   Log := 'exception:';
   try
     WithException;
   except
     on E: Exception do Log := Log + ' caught';
   end;
-  WriteLn(Log);
+  Expect('exception: start [released] caught');
+  if Failures > 0 then
+    Halt(1);
 end.

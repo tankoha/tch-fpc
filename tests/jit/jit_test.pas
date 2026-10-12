@@ -496,6 +496,120 @@ begin
   DeleteFile(FileName);
 end;
 
+{ 13. API not covered above (overall review, C17) }
+type
+  TAdder = class
+    Calls: Integer;
+    function Add(const Inputs: TTensorArray): TTensorArray;
+    function Fail(const Inputs: TTensorArray): TTensorArray;
+  end;
+
+function TAdder.Add(const Inputs: TTensorArray): TTensorArray;
+begin
+  Inc(Calls);
+  Result := [Inputs[0] + Inputs[1]];
+end;
+
+function TAdder.Fail(const Inputs: TTensorArray): TTensorArray;
+begin
+  Result := nil;
+  raise ETorchError.Create('method failed');
+end;
+
+procedure TestMoreApi;
+var
+  Adder: TAdder;
+  M: TJitModule;
+  VS: TVarStore;
+  J: TTrainableJitModule;
+  S: TFileStream;
+  X: TTensor;
+  NP: TNamedTensorArray;
+  FileName: String;
+  Raised: Boolean;
+begin
+  WriteLn('more API: tracing a method, streams with a device, TTrainableJitModule, buffers');
+  Adder := TAdder.Create;
+  try
+    M := TJitModule.CreateByTracing('ByMethod', 'Fn', [TTensor.FromArray([1.0]),
+      TTensor.FromArray([2.0])], @Adder.Add);
+    try
+      Check((Adder.Calls = 1) and
+        (Values(M.Method('Fn', [TTensor.FromArray([3.0]), TTensor.FromArray([4.0])])) = '7'),
+        'CreateByTracing with a method: traced once, Fn(3, 4) = 7');
+    finally
+      M.Free;
+    end;
+    Raised := False;
+    try
+      TJitModule.CreateByTracing('Bad', 'Fn', [TTensor.FromArray([1.0])], @Adder.Fail).Free;
+    except
+      on E: ETorchError do Raised := E.Message = 'method failed';
+    end;
+    M := TJitModule.CreateByTracing('Again', 'Fn', [TTensor.FromArray([1.0]),
+      TTensor.FromArray([2.0])], @Adder.Add);
+    try
+      Check(Raised and (Values(M.Method('Fn', [TTensor.FromArray([1.0]),
+        TTensor.FromArray([1.0])])) = '2'), 'a raising method propagates; tracing works afterwards');
+    finally
+      M.Free;
+    end;
+  finally
+    Adder.Free;
+  end;
+
+  FileName := TempFile('more', '.pt');
+  X := TTensor.FromArray([1.0, 2]);
+  M := TJitModule.CreateEmpty('Mode');
+  try
+    M.Define(ModeSource);
+    M.Save(FileName);
+  finally
+    M.Free;
+  end;
+  S := TFileStream.Create(FileName, fmOpenRead);
+  try
+    M := TJitModule.CreateFromStream(S, TDevice.Cpu);
+    try
+      Check(Values(M.Forward([X])) = '2 4', 'CreateFromStream(S, Cpu): forward = 2x');
+    finally
+      M.Free;
+    end;
+  finally
+    S.Free;
+  end;
+
+  VS := TVarStore.Create(TDevice.Cpu);
+  J := nil;
+  S := TFileStream.Create(FileName, fmOpenRead);
+  try
+    J := TTrainableJitModule.CreateFromStream(S, VS.Root / 'm');
+    J.SetEval;
+    Check(Values(J.Inner.Forward([X])) = '1 2', 'TTrainableJitModule.SetEval: Inner.Forward = x');
+    Check((Values(J.Method('forward', [X])) = '1 2') and
+      (Values(J.MethodIV('forward', [X]).AsTensor) = '1 2'), 'Method and MethodIV in eval mode: x');
+    J.SetTrain;
+    Check(Values(J.ForwardIV([X]).AsTensor) = '2 4', 'SetTrain; ForwardIV = 2x');
+  finally
+    J.Free;
+    S.Free;
+    VS.Free;
+  end;
+  DeleteFile(FileName);
+
+  M := TJitModule.CreateEmpty('Buf');
+  try
+    M.RegisterParameter('w', TTensor.ones([2], kFloat, TDevice.Cpu).requires_grad_);
+    M.RegisterParameter('buf', TTensor.ones([2], kFloat, TDevice.Cpu) * 3, True);
+    M.Define('def forward(self, x):'#10'    return x * self.w + self.buf'#10);
+    NP := M.NamedParameters;
+    Check((Length(NP) = 1) and (NP[0].Name = 'w') and (Values(M.Forward([X])) = '4 5'),
+      'RegisterParameter(IsBuffer = True): used by forward, not in NamedParameters');
+  finally
+    M.Free;
+  end;
+end;
+
 { 12. globals (profiling_mode, tensor_expr_fuser) }
 procedure TestGlobals;
 var
@@ -792,6 +906,7 @@ begin
   TestTracing;
   TestScripted;
   TestTrainFlag;
+  TestMoreApi;
   TestGlobals;
   TestErrors;
   TestObjects;

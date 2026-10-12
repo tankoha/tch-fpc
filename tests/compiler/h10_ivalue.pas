@@ -60,4 +60,11 @@ begin
   W.Items[0].I := 99;          // copy-on-write? (dynamic arrays are not COW)
   WriteLn('V = ', V.ToString);
   WriteLn('W = ', W.ToString);
+  { H10 resolved: a copy shares Items, so the write shows through V }
+  if (V.ToString <> '(99, (2, 3), 4)') or (W.ToString <> V.ToString) then
+  begin
+    WriteLn('  FAIL: expected both (99, (2, 3), 4)');
+    Halt(1);
+  end;
+  WriteLn('  ok');
 end.

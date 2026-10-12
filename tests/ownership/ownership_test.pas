@@ -85,18 +85,22 @@ begin
   D := (A + B) * C;
   WriteLn('  after D := (A + B) * C:               live = ',
     TchLiveHandles - Base, '  (4 = temp freed, 5 = temp kept)');
+  Check(TchLiveHandles - Base = 5, 'H1: the temporary A + B is kept until routine exit');
   E := (A + B) * C;
   WriteLn('  after E := (A + B) * C:               live = ',
     TchLiveHandles - Base);
+  Check(TchLiveHandles - Base = 6, 'H1: a second statement keeps its own temporary');
   for I := 1 to 3 do
   begin
     D := (A + B) * C;
     WriteLn('  loop iteration ', I, ', after D := ...:      live = ',
       TchLiveHandles - Base);
+    Check(TchLiveHandles - Base = 6, 'H1: a loop reuses the temporary slot');
   end;
   WriteLn('  (A + B) * C as a call argument, value = ',
     FloatToStr(((A + B) * C).DoubleValue([0, 0])), ', live after = ',
     TchLiveHandles - Base);
+  Check(TchLiveHandles - Base = 7, 'H1: an expression used as a call argument leaves one more live');
 end;
 
 procedure TestH1;

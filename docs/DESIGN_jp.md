@@ -1002,7 +1002,7 @@ type
     constructor Create(const P: TVarPath; InDim, OutDim, KSize: Int64; const Cfg: TConvConfig); overload;
     function Forward(const X: TTensor; Train: Boolean = False): TTensor; override;
   end;
-  TBatchNorm = class(TModule)    // Nd = 1, 2, 3 が batch_norm1d/2d/3d
+  TBatchNorm = class(TModule)    // Nd = 1, 2, 3 が batch_norm1d/2d/3d。それ以外の Nd は登録前に ETorchError
   public
     Weight, Bias, RunningMean, RunningVar: TTensor;
     constructor Create(const P: TVarPath; Nd: Integer; OutDim: Int64); overload;
@@ -1145,7 +1145,8 @@ type
   `Dims[0] * Receptive`。したがって線形層の重み `[Out, In]` の fan-in は `In`、
   畳み込みの重み `[Out, In div Groups, K, K]` の fan-in は `In div Groups * K * K`。
 - **Gain**（`NonLinearity::gain`）：ReLU `sqrt(2)`、Tanh `5/3`、Linear と Sigmoid `1`、
-  SELU `0.75`、ExplicitGain `g`。
+  SELU `0.75`、ExplicitGain `g`。*実測*（全体レビュー）：FPC は `5.0 / 3.0` を Single で畳み込む
+  （1.6666666269）ので、コードは `Double(5) / 3` と書く。`tests/nn` が全ゲインを 1e-12 で確認する。
 - **`Make(Dims, Device, Kind)`** は tch-rs の `f_init` を op 単位でなぞります
   （生成 op の名前は `TchTensorGenerated_intf.inc` のとおり）：
 
@@ -1221,7 +1222,10 @@ type
   （ルートでは `Name` のみ）。すでに存在すれば `<完全名>__<Count>` になります（tch-rs：
   `format!("{}__{}", path, named_variables.len())`）。tch-rs の `save_and_load_var_store`
   テストは `t123` を2回登録して4変数になることを期待しているので、tch-rs が書いた
-  ファイルにはこの名前が含まれうるため、規則をそのまま保ちます。`Trainable` なら
+  ファイルにはこの名前が含まれうるため、規則をそのまま保ちます。`<完全名>__<Count>` も
+  既にあれば（例：`x`、`x__2`、もう一度 `x`）、次の空いている番号を使う。確認はすべて
+  ストアを変える前に行う（全体レビューの後で追加。そこで辞書のエラーによりストアが
+  半端な状態になることが見つかった）。`Trainable` なら
   `T.set_requires_grad(True)`（生成 op。その場で効き、返るハンドルは捨てる）を呼び、
   添字を `FTrainable` に追加します。関数は `T` 自身を返します：レイヤー、ストア、
   呼び出し側がハンドルを共有します（tch-rs の `shallow_clone` は Rust の所有権のためだけに

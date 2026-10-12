@@ -1,8 +1,9 @@
-{ Milestone 3 JIT (DESIGN.md 4.6.8) against the real libtorch: the
+{ Milestone 3 JIT (DESIGN.md 4.6.8, 4.6.9) against the real libtorch: the
   vendored tch-rs models (tests/jit/models, tch-rs 4227b89b
   tests/jit_tests.rs), ivalue round trips, tracing, scripted modules from
-  TorchScript source, TTrainableJitModule, globals, and hypotheses
-  H19-H25. Expected values are worked out by hand in DESIGN.md 4.6.8.
+  TorchScript source, TTrainableJitModule, globals, TorchScript objects,
+  and hypotheses H19-H28. Expected values are worked out by hand in
+  DESIGN.md 4.6.8 and 4.6.9.
 
   Build and run (from the repo root, after building build/libtch):
     fpc -Mobjfpc -Sh -Fusrc -FUbuild/jit -Flbuild/libtch \
@@ -688,8 +689,8 @@ begin
       (W.Item(0).AsObject.Raw <> O.Raw), 'e. object through a GenericList (H26)');
     W := RoundTrip(TIValue.GenericDict(['k', O]));
     Check((W.Tag = ivGenericDict) and (W.Count = 1) and (W.Key(0).AsString = 'k') and
-      (Values(W.Value(0).AsObject.GetAttr('foo').AsTensor) = '1 2 3'),
-      'e. object as a GenericDict value (H26)');
+      (Values(W.Value(0).AsObject.GetAttr('foo').AsTensor) = '1 2 3') and
+      (W.Value(0).AsObject.Raw <> O.Raw), 'e. object as a GenericDict value: fresh IValue (H26)');
 
     A := TIValue.FromObject(O);
     B := A;

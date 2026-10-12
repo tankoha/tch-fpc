@@ -321,6 +321,24 @@ begin
     '4.-7. everything released after the caller returns');
 end;
 
+{ The CUDA fuser flag: False reads back, True raises (nvfuser removed in
+  libtorch 2.13, measured; DESIGN 4.8) }
+procedure TestFuserFlag;
+var
+  Raised: Boolean;
+begin
+  WriteLn('fuser flag');
+  SetJitFuserCudaEnabled(False);
+  Check(not JitFuserCudaEnabled, 'SetJitFuserCudaEnabled(False) reads back False');
+  Raised := False;
+  try
+    SetJitFuserCudaEnabled(True);
+  except
+    on ETorchNativeError do Raised := True;
+  end;
+  Check(Raised and not JitFuserCudaEnabled, 'SetJitFuserCudaEnabled(True) raises, flag stays False');
+end;
+
 procedure TestTrainable;
 var
   VS: TVarStore;
@@ -356,6 +374,7 @@ begin
   TestTracing;
   TestTrainable;
   TestObjects;
+  TestFuserFlag;
   Check(JitGetProfilingMode, 'profiling getter');
   Check(TchLiveHandles = 0, 'no live handles');
   Check(mock_live_tensors = 0, 'mock: no tensors left');

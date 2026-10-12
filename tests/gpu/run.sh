@@ -16,4 +16,4 @@ mkdir -p "$out"
 fpc -Mobjfpc -Sh -Fusrc -FU"$out" -Fl"$lib" -k-rpath="$PWD/$lib" \
   tests/gpu/gpu_test.pas -o"$out/gpu_test" > "$out/build.log" 2>&1 \
   || { grep -E 'Error|Fatal' "$out/build.log"; exit 1; }
-HIP_VISIBLE_DEVICES=0 CUDA_VISIBLE_DEVICES=0 "$out/gpu_test"
+HIP_VISIBLE_DEVICES=0 CUDA_VISIBLE_DEVICES=0 "$out/gpu_test" "$v"

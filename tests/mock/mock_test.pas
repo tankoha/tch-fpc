@@ -247,15 +247,42 @@ begin
   end;
 end;
 
+function RaisesNative(P: TProcedure): Boolean;
+begin
+  Result := False;
+  try
+    P;
+  except
+    on ETorchNativeError do Result := True;
+  end;
+end;
+
+procedure CallSync;
+begin
+  CudaSynchronize;
+end;
+
+procedure CallRuntimeVersion;
+begin
+  GpuRuntimeVersion;
+end;
+
+procedure CallCudnnVersion;
+begin
+  CudnnVersion;
+end;
+
 procedure TestGpuBackend;
 begin
   WriteLn('GPU backend: CPU-only mock');
   Check(GpuBackend = gbNone, 'GpuBackend = gbNone');
   Check(not CudaIsAvailable, 'CudaIsAvailable = False');
   Check(not CudnnIsAvailable, 'CudnnIsAvailable = False');
-  CudaSynchronize;
-  Check(True, 'CudaSynchronize returns without raising');
   Check(CudnnUserEnabled, 'CudnnUserEnabled = True');
+  { these raise on a CPU build of libtorch 2.13 (measured, DESIGN 4.8) }
+  Check(RaisesNative(@CallSync), 'CudaSynchronize raises ETorchNativeError');
+  Check(RaisesNative(@CallRuntimeVersion), 'GpuRuntimeVersion raises ETorchNativeError');
+  Check(RaisesNative(@CallCudnnVersion), 'CudnnVersion raises ETorchNativeError');
 end;
 
 var

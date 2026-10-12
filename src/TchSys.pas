@@ -56,9 +56,9 @@ function atc_cuda_device_count: cint; cdecl; external LibTch;
 function atc_cuda_is_available: cint; cdecl; external LibTch;
 
 { GPU (DESIGN.md 4.8). On a HIP build "cuda" means the AMD GPU. All are
-  PROTECTed; the int getters return -1 on error. On a CPU build only
-  atc_cuda_is_available and atc_cuda_device_count are safe; the others
-  raise. }
+  PROTECTed; the int getters return -1 on error. On a CPU build
+  atc_synchronize and at_context_version_* set the error; the others
+  work (measured). }
 function atc_cudnn_is_available: cint; cdecl; external LibTch;
 procedure atc_manual_seed(seed: QWord); cdecl; external LibTch;
 procedure atc_manual_seed_all(seed: QWord); cdecl; external LibTch;

@@ -1,6 +1,7 @@
 { L3 core: TTensor as a record wrapping a refcounted handle (DESIGN.md 4.1),
-  errors (4.2), the FPU mask (4.2), the small value types (4.3) and the
-  generated op methods (4.4, pulled in from TchTensorGenerated_*.inc). }
+  errors (4.2), the FPU mask (4.2), the small value types (4.3), the
+  generated op methods (4.4, pulled in from TchTensorGenerated_*.inc), grad
+  mode and global settings (4.7) and the GPU functions (4.8). }
 unit Tch;
 
 {$mode objfpc}{$H+}
@@ -31,7 +32,8 @@ type
 
   { c10::ScalarType values of libtorch 2.13 (torch/headeronly/core/ScalarType.h).
     kNone (-1) is "no dtype" for optional dtype parameters only; TTensor.Kind
-    never returns it. Values 0..26 verified against at_scalar_type in step 4. }
+    never returns it. All 46 values are checked against at_scalar_type by
+    tests/api (DESIGN 4.3). }
   TKind = (kNone = -1,
            kUInt8 = 0, kInt8 = 1, kInt16 = 2, kInt = 3, kInt64 = 4,
            kHalf = 5, kFloat = 6, kDouble = 7, kComplexHalf = 8,
@@ -240,8 +242,8 @@ function CudaIsAvailable: Boolean;
 function CudaDeviceCount: Integer;
 
 { GPU (DESIGN.md 4.8, tch-rs Cuda). On a ROCm (HIP) libtorch "Cuda" means
-  the AMD GPU. Only CudaIsAvailable and CudaDeviceCount are safe on a CPU
-  build; the others raise ETorchNativeError there. }
+  the AMD GPU. On a CPU build CudaSynchronize, GpuRuntimeVersion and
+  CudnnVersion raise ETorchNativeError; the others work (measured). }
 type
   TGpuBackend = (gbNone, gbCuda, gbRocm);
 
@@ -998,7 +1000,7 @@ begin
   Result := B.reciprocal.mul_scalar(A);
 end;
 
-{ Global settings (DESIGN.md 4.7) }
+{ Element sizes (DESIGN.md 4.3) }
 
 function KindElementSize(AKind: TKind): Integer;
 begin
@@ -1020,6 +1022,8 @@ begin
     raise ETorchError.CreateFmt('no element size for kind %d', [Ord(AKind)]);
   end;
 end;
+
+{ Global settings (DESIGN.md 4.7) }
 
 function SetGradEnabled(Enabled: Boolean): Boolean;
 var

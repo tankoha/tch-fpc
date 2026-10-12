@@ -4,7 +4,45 @@ Japanese version: [HANDOFF_jp.md](HANDOFF_jp.md)
 
 Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 
-## Local session 8 (2026-10-12): GPU (4.8) implemented, runs on the RX 9070 — resume here
+## Overall review (2026-10-12, after local session 8) — resume here
+
+Three independent Opus reviewers (code vs design, en/jp documents, test
+coverage; read-only, no context from the sessions) reviewed the whole
+repository. Every finding was checked against the code before acting.
+Fixed and committed:
+- DESIGN 4.8 body and the section 6 status brought in line with the
+  measured "Results" (GpuBackend rule, `at_context_has_cudart` in the L2
+  list, which calls raise on a CPU build, GPU test items 1b/2/6/7/8, the
+  mock bullet, the fuser flag); 4.6.10's flatten bullet points to 4.8;
+  4.6.9's mock counts annotated; a status paragraph for the milestone 3
+  layers; the real ROCm archive name; the autocast patch marked compiled.
+- HANDOFF: forward pointers on stale older passages (H32 amended, design
+  sessions via Fable settled, open questions done, ROCm done), design
+  session headings 6–8 point to their local sessions; "(below)" → "(above)".
+- UML status table and TchSys box; `CLAUDE.md` workflow; source comments
+  in `Tch.pas`, `TchSys.pas`, `tests/jit`, `tests/gpu`.
+- Tests: Embedding `PaddingIdx` checked through the gradient (the old check
+  could not fail); `GpuBackend`, H33, H34 asserted in the GPU test (variant
+  passed by `run.sh`); `DoubleValue` on a GPU scalar must return 6; the
+  CPU-build GPU API asserted in `tests/api`; H26's dict case checks a fresh
+  `Raw`; mock GPU stubs now fail where real libtorch does, plus a fuser
+  flag test in `jit_mock_test`.
+
+**Open from the review (not fixed; ask the user):**
+- Code: `TVarStore.AddEntry` can leave the store half-updated when the
+  renamed `name__N` already exists; a layer constructor that raises leaves
+  its variables in the store (measured: `TConv2D` with `Groups = 0`);
+  `TBatchNorm` does not check `Nd`. The rollback-vs-precheck choice for the
+  second is a design decision.
+- DESIGN 3 wants distinct pointer types (`type Pointer`) and
+  `{$packrecords c}`; the code uses plain `Pointer` and no packrecords.
+  Decide which side to change.
+- Tests: compiler hypotheses (H1, H3, H4, H5, H10, part of H11) are printed,
+  not asserted; untested public API (method-callback `CreateByTracing`,
+  `TTrainableJitModule`'s other methods, `BackwardStepClipNorm`, ...); the
+  GPU test copies setup from `nn_test` instead of sharing it.
+
+## Local session 8 (2026-10-12): GPU (4.8) implemented, runs on the RX 9070
 
 **Where things stand.** 4.8 is implemented and committed; the working
 tree is clean. Steps 1–10 of design session 8's local list are done. Every
@@ -167,6 +205,8 @@ is half-done; the working tree is clean.
   - **(H32) resolved:** `ldd libtorch_hip.so` finds everything;
     `libamdhip64`, `libMIOpen`, `librocblas`, `libhipblaslt`, `librccl`,
     `libhsa-runtime64` are bundled in `lib/`. No AMD ROCm packages needed.
+    **Amended in local session 8:** the zip carries no symlinks; eight must
+    be added before anything loads (DESIGN 4.8 "Results").
   - **Trap:** `LD_LIBRARY_PATH=libtorch-rocm/lib` makes system tools load
     the bundled `libtinfo.so.6` (bash warns "no version information
     available"). Use the per-build rpath of DESIGN 4.8, never a global
@@ -184,7 +224,7 @@ if they do not say):**
   only, local lists in design sessions 6 and 7 below.
 - Keep DESIGN/HANDOFF/UML (en + jp) current at the end, as usual.
 
-## Design session 8 (2026-10-11): CUDA/ROCm designed
+## Design session 8 (2026-10-11): CUDA/ROCm designed — implemented in local session 8 above
 
 Answers item 3 of "Handing back (end of local session 4)" below — the last
 open one. Design only: nothing committed, nothing downloaded or installed;
@@ -315,10 +355,11 @@ only):
    and here); then `LD_LIBRARY_PATH=build/libtch-rocm` in front of the
    CPU-linked `tests/nn` and `tests/jit` binaries — everything still passes
    on CPU tensors with the GPU libtorch loaded (same ABI).
-10. Add a "Local session 7" section here (en + jp); mark H31–H36 resolved
+10. Add a "Local session 7" section here (it became local session 8) (en +
+    jp); mark H31–H36 resolved
     or amended; update DESIGN 4.8 numbers if any differ.
 
-## Design session 7 (2026-10-11): milestone 3 layers designed
+## Design session 7 (2026-10-11): milestone 3 layers designed — implemented in local session 7 above
 
 Answers item 2 of "Handing back (end of local session 4)" below; item 3
 (CUDA/ROCm) stays open. Design only: nothing committed, no code outside the
@@ -393,10 +434,11 @@ Rust); **H30** the cuDNN flatten call on a CUDA/ROCm store (item 3).
    bidirectional) over the shape-only stubs.
 8. Regression: `tests/nn`, `tests/api`, `tests/mock/run.sh`, `tests/jit`.
 9. Record results next to H29/H30 only if they become testable; add a
-   "Local session 6" section here (en + jp). Item 3 of "Handing back (end
+   "Local session 6" section here (it became local session 7) (en + jp).
+   Item 3 of "Handing back (end
    of local session 4)" remains the open design work.
 
-## Design session 6 (2026-10-11): TorchScript objects designed
+## Design session 6 (2026-10-11): TorchScript objects designed — implemented in local session 6 above
 
 Answers item 1 of "Handing back (end of local session 4)" below; items 2
 (milestone 3 layers) and 3 (CUDA/ROCm) stay open. Design only: nothing
@@ -564,7 +606,8 @@ optional next milestones. Mark what needs real libtorch as H26, ...
 
 **How the next design session runs is still open:** the cloud service
 credits are used up, and the user will decide later how to send the
-design work to Fable. Until then, nothing here waits on it.
+design work to Fable. Until then, nothing here waits on it. (Settled in local session
+5: Fable 5.1 sub-agents run from the local session, one design at a time.)
 
 ## Cloud session 5 (2026-10-10): JIT designed, `FromArray` revised, local session 3 reviewed — implemented in local session 4 above
 
@@ -1345,7 +1388,7 @@ build commands in each test's header and in "Local progress".
   Element sizes resolved in local session 2: `FromBytes`/`CopyData`
   accept every kind, sizes checked against libtorch (DESIGN.md 4.3).
 - **libtorch warnings: decided** (cloud session 3). Fork patch of the two
-  autocast functions only (not yet compiled locally); c10's warning
+  autocast functions only (compiled and tested in local session 2); c10's warning
   handler is thread-local, so a Pascal callback is deferred until needed
   (DESIGN.md 4.2).
 - **Parameter names vs `TTensor` members: decided, then revised**
@@ -1370,7 +1413,8 @@ build commands in each test's header and in "Local progress".
   parameters for the 97 ops whose results are the tensors passed in
   (cloud session 3, DESIGN.md 4.4). Still open: whether a few hand-written
   result records (`max_dim`, `sort`, `topk`, `lstm`) are worth adding
-  after writing real code, and `var` instead of `out` if (H8) bites.
+  after writing real code, and `var` instead of `out` if (H8) bites (H8
+  resolved since: `out` kept, DESIGN.md 4.4).
 - **Default arguments: decided** (cloud session 3, DESIGN.md 4.4): 479 ops
   get defaults; ops with out parameters none (107 would have had some).
   Local session 2: `zeros`, `ones`, `empty`, `rand`, `randn` overloads
@@ -1382,8 +1426,8 @@ build commands in each test's header and in "Local progress".
   a real literal is `Single` only when exactly representable, so `[0.9, …]`
   was ambiguous and `[1.0, 0.1]` rounded to `Single`. The `Single` overload
   is dropped, the others take `AKind` with the natural default (`kFloat`
-  for `Double`), and `FromSingleArray` covers `Single` buffers. To be
-  implemented in local session 4 (step 1 above).
+  for `Double`), and `FromSingleArray` covers `Single` buffers. Implemented
+  in local session 4.
 - **Equality and containers: decided** (cloud session 4). `=` stays
   un-overloaded for `TTensor`. `TchNN` needs only an append-only
   `array of TVarEntry`, a `TDictionary<String, Integer>` name index and
@@ -1403,7 +1447,8 @@ build commands in each test's header and in "Local progress".
 - **Windows / macOS.** Not designed yet beyond `cdecl` and `tchf_free`.
   Windows additionally needs symbol export from `tch.dll`
   (`--export-all-symbols` or a `.def` file).
-- **ROCm (deferred; CPU first).** Steps 2-7 use the CPU libtorch. The local
+- **ROCm (deferred; CPU first) — done in local session 8** (DESIGN.md 4.8
+  "Results"; the notes below are the original plan). Steps 2-7 use the CPU libtorch. The local
   GPU is an RX 9070 (Navi 48, gfx1201) plus a Raphael iGPU; no system ROCm.
   libtorch 2.13.0 for ROCm exists only as `+rocm7.1` (~5.8 GB, checked
   2026-10-10). Expected, unmeasured: the ROCm build presents HIP as CUDA
@@ -1418,5 +1463,5 @@ build commands in each test's header and in "Local progress".
   builds without OCaml. Open: whether releases also attach prebuilt
   `libtch.so`/`tch.dll` per libtorch version and platform, or users always
   build it with CMake. libtorch itself is never bundled.
-- **Going public.** The license is decided (below); the repo stays private
-  until the user decides to publish it.
+- **Going public.** The license is decided (above, "State" section); the
+  repo stays private until the user decides to publish it.

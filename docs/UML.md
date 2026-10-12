@@ -31,7 +31,7 @@ flowchart TB
     LTCH["libtch.so<br/>torch_api.cpp (fork of tch-rs 4227b89b)<br/>torch_api_generated.cpp (gen.ml)<br/>+ tchf_free, atm_create / atm_register_parameter / atm_define"]
   end
   subgraph L2["Pascal L2 (raw)"]
-    SYS["TchSys<br/>hand-written externals:<br/>at_*, ats_*, ato_*, atm_*, ati_*"]
+    SYS["TchSys<br/>hand-written externals:<br/>at_*, atc_*, ats_*, ato_*, atm_*, ati_*"]
     SYSG["TchSysGenerated<br/>2,657 atg_* externals (generated)"]
   end
   subgraph L3["Pascal L3 (object layer)"]
@@ -554,6 +554,6 @@ flowchart LR
 | `TTensor`, data in/out, operators, autograd, `FromArray` revision | 4.1–4.4, 4.7 | implemented (milestone 1, local session 4) |
 | `TInit`, `TVarStore`, save/load, optimizers, milestone 2 layers | 4.6.1–4.6.7 | implemented (milestone 2) |
 | JIT: `TIValue`, `TJitModule`, `TTrainableJitModule` | 4.6.8 | implemented (milestone 3), H19–H25 hold |
-| TorchScript objects (`IJitObject`) | 4.6.9 | implemented (local session 6, 2026-10-12) |
-| Conv1D/3D, ConvTranspose, GroupNorm, LSTM/GRU, Identity | 4.6.10 | implemented (local session 7, 2026-10-12) |
-| GPU: ROCm / CUDA builds and API | 4.8 | implemented (local session 8, 2026-10-12); ROCm runs on the RX 9070, H31 and H33 hold, H34 false, H35 answered; CUDA unmeasured |
+| TorchScript objects (`IJitObject`) | 4.6.9 | implemented (local session 6, 2026-10-12), H26–H28 hold |
+| Conv1D/3D, ConvTranspose, GroupNorm, LSTM/GRU, Identity | 4.6.10 | implemented (local session 7, 2026-10-12); H29 (`.ot` interchange with tch-rs) open, needs Rust |
+| GPU: ROCm / CUDA builds and API | 4.8 | implemented (local session 8, 2026-10-12); ROCm runs on the RX 9070, H31 and H33 hold, H32 amended (8 symlinks after unpacking), H34 false, H35 answered; CUDA unmeasured |

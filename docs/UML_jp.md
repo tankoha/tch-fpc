@@ -30,7 +30,7 @@ flowchart TB
     LTCH["libtch.so<br/>torch_api.cpp (fork of tch-rs 4227b89b)<br/>torch_api_generated.cpp (gen.ml)<br/>+ tchf_free, atm_create / atm_register_parameter / atm_define"]
   end
   subgraph L2["Pascal L2 (raw)"]
-    SYS["TchSys<br/>hand-written externals:<br/>at_*, ats_*, ato_*, atm_*, ati_*"]
+    SYS["TchSys<br/>hand-written externals:<br/>at_*, atc_*, ats_*, ato_*, atm_*, ati_*"]
     SYSG["TchSysGenerated<br/>2,657 atg_* externals (generated)"]
   end
   subgraph L3["Pascal L3 (object layer)"]
@@ -549,6 +549,6 @@ flowchart LR
 | `TTensor`、データの入出力、演算子、自動微分、`FromArray` の改訂 | 4.1〜4.4、4.7 | 実装済み（マイルストーン1、ローカルセッション4） |
 | `TInit`、`TVarStore`、保存と読み込み、オプティマイザ、マイルストーン2のレイヤー | 4.6.1〜4.6.7 | 実装済み（マイルストーン2） |
 | JIT：`TIValue`、`TJitModule`、`TTrainableJitModule` | 4.6.8 | 実装済み（マイルストーン3）、H19〜H25 成立 |
-| TorchScript のオブジェクト（`IJitObject`） | 4.6.9 | 実装済み（ローカルセッション6、2026-10-12） |
-| Conv1D/3D、ConvTranspose、GroupNorm、LSTM/GRU、Identity | 4.6.10 | 実装済み（ローカルセッション7、2026-10-12） |
-| GPU：ROCm / CUDA のビルドと API | 4.8 | 実装済み（ローカルセッション8、2026-10-12）。ROCm は RX 9070 で動作、H31・H33 成立、H34 不成立、H35 判明。CUDA は未実測 |
+| TorchScript のオブジェクト（`IJitObject`） | 4.6.9 | 実装済み（ローカルセッション6、2026-10-12）、H26〜H28 成立 |
+| Conv1D/3D、ConvTranspose、GroupNorm、LSTM/GRU、Identity | 4.6.10 | 実装済み（ローカルセッション7、2026-10-12）。H29（tch-rs との `.ot` の相互運用）は未解決、Rust が要る |
+| GPU：ROCm / CUDA のビルドと API | 4.8 | 実装済み（ローカルセッション8、2026-10-12）。ROCm は RX 9070 で動作、H31・H33 成立、H32 修正（展開後にシンボリックリンク8つ）、H34 不成立、H35 判明。CUDA は未実測 |

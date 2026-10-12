@@ -284,6 +284,31 @@ begin
   TTensor.zeros([2]).ZeroGrad;               // no grad: no-op, no error
 end;
 
+function RaisesNative(P: TProcedure): Boolean;
+begin
+  Result := False;
+  try
+    P;
+  except
+    on ETorchNativeError do Result := True;
+  end;
+end;
+
+procedure CallSync;
+begin
+  CudaSynchronize;
+end;
+
+procedure CallRuntimeVersion;
+begin
+  GpuRuntimeVersion;
+end;
+
+procedure CallCudnnVersion;
+begin
+  CudnnVersion;
+end;
+
 procedure TestSettings;
 var
   N0: Integer;
@@ -297,6 +322,15 @@ begin
   Check(not CudaIsAvailable, 'CudaIsAvailable = False (CPU build)');
   Check(CudaDeviceCount = 0, 'CudaDeviceCount = 0');
   Check(TDevice.CudaIfAvailable.DeviceType = dtCpu, 'CudaIfAvailable = CPU');
+  { DESIGN 4.8: on a CPU build these work, the next three raise }
+  Check(GpuBackend = gbNone, 'GpuBackend = gbNone (CPU build)');
+  Check(not CudnnIsAvailable and CudnnUserEnabled, 'CudnnIsAvailable False, CudnnUserEnabled True');
+  CudaManualSeed(1);
+  SetCudnnBenchmark(False);
+  Check(True, 'CudaManualSeed, SetCudnnBenchmark raise nothing');
+  Check(RaisesNative(@CallSync), 'CudaSynchronize raises ETorchNativeError');
+  Check(RaisesNative(@CallRuntimeVersion), 'GpuRuntimeVersion raises ETorchNativeError');
+  Check(RaisesNative(@CallCudnnVersion), 'CudnnVersion raises ETorchNativeError');
 end;
 
 procedure TestElementSizes;

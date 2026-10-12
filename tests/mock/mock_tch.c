@@ -349,7 +349,8 @@ int atc_cuda_is_available(void) { return 0; }
 void atc_manual_seed(uint64_t seed) { (void)seed; }
 int atc_cudnn_is_available(void) { return 0; }
 void atc_manual_seed_all(uint64_t seed) { (void)seed; }
-void atc_synchronize(int64_t device_index) { (void)device_index; }
+/* as a CPU build of libtorch 2.13 (measured, DESIGN 4.8) */
+void atc_synchronize(int64_t device_index) { (void)device_index; set_err("No CUDA GPUs are available"); }
 int atc_user_enabled_cudnn(void) { return 1; }
 void atc_set_user_enabled_cudnn(int b) { (void)b; }
 void atc_set_benchmark_cudnn(int b) { (void)b; }
@@ -357,8 +358,8 @@ bool at_context_has_cuda(void) { return 0; }
 bool at_context_has_cudart(void) { return 0; }
 bool at_context_has_hip(void) { return 0; }
 bool at_context_has_cudnn(void) { return 0; }
-int64_t at_context_version_cudart(void) { return 0; }
-int64_t at_context_version_cudnn(void) { return 0; }
+int64_t at_context_version_cudart(void) { set_err("Cannot query CUDART version without ATen_cuda library"); return 0; }
+int64_t at_context_version_cudnn(void) { set_err("Cannot query cuDNN version without ATen_cuda library"); return 0; }
 
 /* --- nn support (tests/mock/nn_mock_test.pas, DESIGN.md 4.6.7) ---
    In-place ops modify self and hand back a fresh copy (libtorch returns a
@@ -834,7 +835,11 @@ void atm_set_profiling_mode(int b) { profiling_mode = b; }
 void atm_set_tensor_expr_fuser_enabled(int b) { fuser_enabled = b; }
 bool atm_get_tensor_expr_fuser_enabled(void) { return fuser_enabled != 0; }
 static int fuser_cuda_enabled = 0;
-void atm_fuser_cuda_set_enabled(bool b) { fuser_cuda_enabled = b != 0; }
+/* libtorch 2.13 removed nvfuser: enabling fails on every build (DESIGN 4.8) */
+void atm_fuser_cuda_set_enabled(bool b) {
+  if (b) { set_err("nvfuser support in torchscript is removed and cannot be enabled!"); return; }
+  fuser_cuda_enabled = 0;
+}
 bool atm_fuser_cuda_is_enabled(void) { return fuser_cuda_enabled != 0; }
 void at_set_graph_executor_optimize(bool b) { (void)b; }
 /* weight [2, 3] requires grad, sub.bias [2] does not */

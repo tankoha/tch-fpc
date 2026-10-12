@@ -4,8 +4,9 @@
   GPU kernels, the mixed-device error. Numbers are the CPU ones of earlier
   groups. On a CPU build it prints one SKIP line and exits 0.
 
-  Build and run (from the repo root): tests/gpu/run.sh [rocm|cuda|cpu]
-  (builds build/libtch-<variant> first, see DESIGN.md 4.8). }
+  Build and run (from the repo root, after building build/libtch-<variant>
+  as in DESIGN.md 4.8): tests/gpu/run.sh [rocm|cuda|cpu]. run.sh passes the
+  variant as the program's argument. }
 program gpu_test;
 
 uses
@@ -89,6 +90,23 @@ begin
   WriteLn('  CudnnVersion        ', S);
 end;
 
+{ 1b. The backend detection (H35) and the device facts of the variant
+  named by run.sh's first argument }
+procedure TestBackend(const Variant: String);
+begin
+  WriteLn('backend: variant ', Variant);
+  Check(CudaDeviceCount = 1, '1b. CudaDeviceCount = 1 with only the discrete GPU visible (H33)');
+  if Variant = 'rocm' then
+  begin
+    Check(GpuBackend = gbRocm, '1b. GpuBackend = gbRocm: CUDA without CUDART (H35)');
+    Check(not CudnnIsAvailable, '1b. CudnnIsAvailable False on ROCm (H34 false)');
+  end
+  else if Variant = 'cuda' then
+    Check(GpuBackend = gbCuda, '1b. GpuBackend = gbCuda')
+  else
+    Check(False, '1b. unknown variant ''' + Variant + '''');
+end;
+
 { 2.-4. Tensors, synchronize, seeds, autograd }
 procedure TestTensors;
 var
@@ -102,7 +120,7 @@ begin
     '2. FromArray(...).to_device(Cuda(0)) is on cuda:0');
   Check(Values(T * 2 + 1) = '3 5 7', '2. (T * 2 + 1) read back: 3 5 7');
   Check(Values(T.sum) = '6', '2. T.sum read back: 6');
-  { DESIGN 4.8 expected a refusal; record what happens without crashing }
+  { DESIGN 4.8 expected a refusal; measured: libtorch copies to the host }
   Raised := False;
   V := 0;
   try
@@ -116,7 +134,7 @@ begin
   end;
   if not Raised then
     WriteLn('  note  DoubleValue on a GPU scalar returns ', V:0:1);
-  Check(Raised or (V = 6), '2. DoubleValue on a GPU scalar: 6 or ETorchNativeError, no crash');
+  Check(not Raised and (V = 6), '2. DoubleValue on a GPU scalar returns 6 (copied to the host)');
 
   A := TTensor.ones([64, 64], kFloat, Gpu);
   B := A.matmul(A);
@@ -363,6 +381,7 @@ begin
   end;
   Gpu := TDevice.Cuda(0);
   PrintCapabilities;
+  TestBackend(ParamStr(1));
   TestTensors;
   TestH13;
   TestLoad;

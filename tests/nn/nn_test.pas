@@ -789,6 +789,11 @@ begin
     Check(ShapeIs(Emb.Forward(Idx), [5, 7, 4]), 'Embedding(10, 4) on [5, 7] gives [5, 7, 4]');
     Y := Emb.Forward(TTensor.FromArray([Int64(3)]));
     Check(MaxAbsDiff(Y.view([4]), Emb.Weight.select(0, 3)) = 0, 'PaddingIdx row equals Weight''s row');
+    { padding_idx acts in the backward pass only: its row gets no gradient }
+    Emb.Forward(TTensor.FromArray([Int64(3), 5])).sum.Backward;
+    Check((Values(Emb.Weight.grad.select(0, 3)) = '0 0 0 0') and
+      (Values(Emb.Weight.grad.select(0, 5)) = '1 1 1 1'),
+      'PaddingIdx 3: its row gets no gradient, row 5 gets ones');
   finally
     Emb.Free;
     VS.Free;

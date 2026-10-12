@@ -2,10 +2,10 @@
 
 Japanese version: [UML_jp.md](UML_jp.md)
 
-Diagrams of what is implemented (milestones 1–3) and what is designed but
-not implemented yet (DESIGN 4.8 GPU devices).
-Planned elements carry the `planned` stereotype or the dashed style.
-State: 2026-10-12, after local session 7. DESIGN.md stays the source of
+Diagrams of what is implemented (milestones 1–3, TorchScript objects, the
+milestone 3 layers, GPU devices on ROCm). Only the CUDA build is still
+planned (dashed); it needs an NVIDIA machine.
+State: 2026-10-12, after local session 8. DESIGN.md stays the source of
 truth; this file only draws it.
 
 Contents:
@@ -16,7 +16,7 @@ Contents:
 5. [TchJit: values and modules](#5-tchjit-values-and-modules)
 6. [Sequence: ForwardIV and ivalue ownership](#6-sequence-forwardiv-and-ivalue-ownership)
 7. [Sequence: fine-tuning a TorchScript module](#7-sequence-fine-tuning-a-torchscript-module)
-8. [Deployment: CPU, ROCm and CUDA builds (planned)](#8-deployment-cpu-rocm-and-cuda-builds-planned)
+8. [Deployment: CPU, ROCm and CUDA builds](#8-deployment-cpu-rocm-and-cuda-builds)
 9. [Status](#9-status)
 
 ## 1. Layers and units
@@ -27,7 +27,7 @@ declarations, L3 the object layer (DESIGN 0, 3, 4.5).
 ```mermaid
 flowchart TB
   subgraph Native["C++ / C"]
-    LT["libtorch 2.13.0<br/>(CPU build; ROCm / CUDA planned, 4.8)"]
+    LT["libtorch 2.13.0<br/>(CPU and ROCm builds; CUDA planned, 4.8)"]
     LTCH["libtch.so<br/>torch_api.cpp (fork of tch-rs 4227b89b)<br/>torch_api_generated.cpp (gen.ml)<br/>+ tchf_free, atm_create / atm_register_parameter / atm_define"]
   end
   subgraph L2["Pascal L2 (raw)"]
@@ -142,11 +142,12 @@ classDiagram
   TGradModeGuard ..|> IInterface
 ```
 
-Planned in 4.8 (same unit, free functions): `CudnnIsAvailable`,
+GPU functions of 4.8 (same unit, free functions): `CudnnIsAvailable`,
 `CudaManualSeed(All)`, `CudaSynchronize`, `CudnnUserEnabled` /
 `SetCudnnUserEnabled`, `SetCudnnBenchmark`, `GpuBackend: TGpuBackend
 (gbNone, gbCuda, gbRocm)`, `GpuRuntimeVersion`, `CudnnVersion`,
-`TDevice.ToString`.
+`TDevice.ToString`. `GpuBackend` is `gbRocm` for "HIP, or CUDA without
+CUDART": a ROCm build reports hasHIP False (measured, H35).
 
 ## 3. TchNN: store, modules, optimizer
 
@@ -355,8 +356,8 @@ classDiagram
   TRNN ..> TRNNConfig
 ```
 
-On a GPU store, `TRNN`'s constructor also calls
-`_cudnn_rnn_flatten_weight` (4.8, H30).
+On a GPU store with cuDNN, `TRNN`'s constructor also calls
+`_cudnn_rnn_flatten_weight` (4.8, H30); ROCm has no cuDNN, so not there.
 
 ## 5. TchJit: values and modules
 
@@ -446,8 +447,9 @@ classDiagram
 
 Globals: `JitGetProfilingMode` / `JitSetProfilingMode`,
 `JitGetTensorExprFuserEnabled` / `JitSetTensorExprFuserEnabled`,
-`JitSetGraphExecutorOptimize`, `JitLiveObjects`; planned:
-`JitFuserCudaEnabled` / `SetJitFuserCudaEnabled` (4.8).
+`JitSetGraphExecutorOptimize`, `JitLiveObjects`,
+`JitFuserCudaEnabled` / `SetJitFuserCudaEnabled` (4.8; enabling raises,
+nvfuser is removed in libtorch 2.13).
 
 ## 6. Sequence: ForwardIV and ivalue ownership
 
@@ -511,7 +513,7 @@ sequenceDiagram
   U->>J: Save('trained.pt')
 ```
 
-## 8. Deployment: CPU, ROCm and CUDA builds (planned)
+## 8. Deployment: CPU, ROCm and CUDA builds
 
 DESIGN 4.8: one unpacked libtorch and one libtch build directory per
 variant; the Pascal units, the C wrapper and the ABI do not change. A ROCm
@@ -521,7 +523,7 @@ libtorch reports the AMD GPU as CUDA, so `TDevice.Cuda(0)` selects it.
 flowchart LR
   subgraph Archives["unpacked libtorch (repo root, git-ignored)"]
     CPU["libtorch/<br/>2.13.0 CPU (in use)"]
-    ROCM["libtorch-rocm/<br/>2.13.0+rocm7.x (planned, H31-H35)"]
+    ROCM["libtorch-rocm/<br/>2.13.0+rocm7.1 (in use;<br/>8 symlinks added after unpacking)"]
     CUDA["libtorch-cuda/<br/>2.13.0+cuXYZ (planned)"]
   end
   subgraph Builds["libtch builds"]
@@ -541,7 +543,7 @@ flowchart LR
   P --> T
   B2 -.-> HW
   classDef planned stroke-dasharray: 5 5
-  class ROCM,CUDA,B2,B3,T,HW planned
+  class CUDA,B3 planned
 ```
 
 ## 9. Status
@@ -554,4 +556,4 @@ flowchart LR
 | JIT: `TIValue`, `TJitModule`, `TTrainableJitModule` | 4.6.8 | implemented (milestone 3), H19–H25 hold |
 | TorchScript objects (`IJitObject`) | 4.6.9 | implemented (local session 6, 2026-10-12) |
 | Conv1D/3D, ConvTranspose, GroupNorm, LSTM/GRU, Identity | 4.6.10 | implemented (local session 7, 2026-10-12) |
-| GPU: ROCm / CUDA builds and API | 4.8 | designed (session 8), H31–H35 open; needs a ROCm libtorch |
+| GPU: ROCm / CUDA builds and API | 4.8 | implemented (local session 8, 2026-10-12); ROCm runs on the RX 9070, H31 and H33 hold, H34 false, H35 answered; CUDA unmeasured |

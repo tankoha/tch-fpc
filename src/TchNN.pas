@@ -1703,7 +1703,7 @@ constructor TRNN.Create(const P: TVarPath; InDim, AHiddenDim, GateMul: Int64;
   const Cfg: TRNNConfig);
 var
   L, D, K: Integer;
-  GateDim, InL: Int64;
+  GateDim, InL, Mode: Int64;
   Sfx: String;
 begin
   inherited Create;
@@ -1738,6 +1738,22 @@ begin
         Inc(K, 2);
       end;
     end;
+  { tch-rs flattens for cuDNN; a performance hint, so a refusal is ignored.
+    Weight stride 2 without biases follows PyTorch (tch-rs passes 4). }
+  if P.Device.IsCuda and CudnnIsAvailable then
+  begin
+    if GateMul = 4 then
+      Mode := 2                   // cudnnRNNMode_t: LSTM
+    else
+      Mode := 3;                  // GRU
+    try
+      TTensor._cudnn_rnn_flatten_weight(FFlatWeights, 2 + 2 * Ord(Cfg.HasBiases),
+        InDim, Mode, AHiddenDim, 0, Cfg.NumLayers, Cfg.BatchFirst,
+        Cfg.Bidirectional);
+    except
+      on ETorchNativeError do ;
+    end;
+  end;
 end;
 
 function TRNN.BatchDimIndex: Integer;

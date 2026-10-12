@@ -55,6 +55,25 @@ procedure at_set_num_threads(n_threads: cint); cdecl; external LibTch;
 function atc_cuda_device_count: cint; cdecl; external LibTch;
 function atc_cuda_is_available: cint; cdecl; external LibTch;
 
+{ GPU (DESIGN.md 4.8). On a HIP build "cuda" means the AMD GPU. All are
+  PROTECTed; the int getters return -1 on error. On a CPU build only
+  atc_cuda_is_available and atc_cuda_device_count are safe; the others
+  raise. }
+function atc_cudnn_is_available: cint; cdecl; external LibTch;
+procedure atc_manual_seed(seed: QWord); cdecl; external LibTch;
+procedure atc_manual_seed_all(seed: QWord); cdecl; external LibTch;
+procedure atc_synchronize(device_index: Int64); cdecl; external LibTch;
+function atc_user_enabled_cudnn: cint; cdecl; external LibTch;
+procedure atc_set_user_enabled_cudnn(b: cint); cdecl; external LibTch;
+procedure atc_set_benchmark_cudnn(b: cint); cdecl; external LibTch;
+{ C bool = 1 byte }
+function at_context_has_cuda: Boolean; cdecl; external LibTch;
+function at_context_has_hip: Boolean; cdecl; external LibTch;
+function at_context_has_cudart: Boolean; cdecl; external LibTch;
+function at_context_has_cudnn: Boolean; cdecl; external LibTch;
+function at_context_version_cudart: Int64; cdecl; external LibTch;
+function at_context_version_cudnn: Int64; cdecl; external LibTch;
+
 function ats_int(v: Int64): PTorchScalar; cdecl; external LibTch;
 function ats_float(v: Double): PTorchScalar; cdecl; external LibTch;
 procedure ats_free(s: PTorchScalar); cdecl; external LibTch;
@@ -107,7 +126,7 @@ procedure ato_free(opt: PTorchOptimizer); cdecl; external LibTch;
   except atm_free, ati_free and at_set_graph_executor_optimize; the
   constructors return nil on error. atm_named_parameters calls back with
   the load callback's signature. ati_to_string returns a strdup'd string
-  (tchf_free). Not declared: atm_fuser_cuda_*. }
+  (tchf_free). atm_fuser_cuda_* are PROTECTed flag accessors (DESIGN 4.8). }
 type
   PTorchModule = Pointer;
   PTorchIValue = Pointer;
@@ -140,6 +159,8 @@ function atm_get_profiling_mode: cint; cdecl; external LibTch;
 procedure atm_set_profiling_mode(b: cint); cdecl; external LibTch;
 procedure atm_set_tensor_expr_fuser_enabled(b: cint); cdecl; external LibTch;
 function atm_get_tensor_expr_fuser_enabled: Boolean; cdecl; external LibTch;
+procedure atm_fuser_cuda_set_enabled(b: Boolean); cdecl; external LibTch;
+function atm_fuser_cuda_is_enabled: Boolean; cdecl; external LibTch;
 procedure at_set_graph_executor_optimize(b: Boolean); cdecl; external LibTch;
 procedure atm_named_parameters(m: PTorchModule; data: Pointer;
   f: TTorchLoadCallback); cdecl; external LibTch;

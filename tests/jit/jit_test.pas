@@ -497,6 +497,8 @@ end;
 
 { 12. globals (profiling_mode, tensor_expr_fuser) }
 procedure TestGlobals;
+var
+  Raised: Boolean;
 begin
   WriteLn('globals (H25)');
   Check(InitialProfiling, 'profiling mode on in a fresh process (H25)');
@@ -510,6 +512,16 @@ begin
   Check(not JitGetTensorExprFuserEnabled, 'tensor expr fuser off');
   JitSetGraphExecutorOptimize(True);
   Check(True, 'SetGraphExecutorOptimize(True) raises nothing');
+  { libtorch 2.13 removed nvfuser: enabling raises (DESIGN 4.8, measured) }
+  SetJitFuserCudaEnabled(False);
+  Check(not JitFuserCudaEnabled, 'CUDA fuser flag off');
+  Raised := False;
+  try
+    SetJitFuserCudaEnabled(True);
+  except
+    on E: ETorchNativeError do Raised := Pos('nvfuser support in torchscript is removed', E.Message) > 0;
+  end;
+  Check(Raised and not JitFuserCudaEnabled, 'SetJitFuserCudaEnabled(True) raises: nvfuser removed');
 end;
 
 { 13. errors and handles }

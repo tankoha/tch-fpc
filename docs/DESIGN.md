@@ -3096,6 +3096,60 @@ CPU ones of earlier groups, so they are hand-checkable:
 Expected CPU-only run: the single `SKIP` line. `tests/mock` is unaffected
 (the GPU test is never linked against the mock).
 
+#### Results (local session 8, 2026-10-12, RX 9070, `2.13.0+rocm7.1`)
+
+Implemented as above; `tests/gpu/run.sh rocm` passes every item, `run.sh
+cpu` prints the single `SKIP`. Measured, against the hypotheses and the
+design:
+
+- **(H31) holds.** The manual-link libtch builds against `libtorch-rocm/`
+  with no extra define (same four `-Wc++20-extensions` warnings from the
+  libtorch headers as the CPU build) and works.
+- **(H32) amended.** `ldd libtorch_hip.so` was clean, but the archive (a
+  zip) has no symlinks: seven libraries exist only under their unversioned
+  file name while their SONAMEs and dependents use the versioned one, and
+  `libtorch_rocshmem.so`'s initialiser `dlopen`s an unversioned
+  `libnuma.so` and exits the process when it is missing. Fix after
+  unpacking (git-ignored directory, reversible):
+  `cd libtorch-rocm/lib && for f in libamd_comgr.so libamdhip64.so
+  libhipblas.so libhipsparse.so libhsa-runtime64.so librocblas.so
+  libroctx64.so; do ln -s $f $(readelf -d $f | sed -n
+  's/.*SONAME.*\[\(.*\)\]/\1/p'); done && ln -s libnuma.so.1 libnuma.so`.
+  Its other `dlopen`s (`libibverbs.so`, `libmlx5.so`, `libbnxt_re.so`,
+  `libionic.so`, RDMA) fail harmlessly but print `(null): No such file or
+  directory` on stderr at start-up, four times.
+- **(H33)** confirmed at run time: `CudaDeviceCount = 1` with
+  `HIP_VISIBLE_DEVICES=0`, every kernel used runs on gfx1201.
+- **(H34) false.** `CudnnIsAvailable` is False and `at_context_has_cudnn`
+  False on ROCm; MIOpen does not stand in through these hooks.
+  `CudnnVersion` raises "Cannot query CuDNN version if ATen_cuda is not
+  built with CuDNN". So the `TRNN` flatten guard is False on ROCm and the
+  call is never made (H30: nothing to refuse); GRU `0.380797` and LSTM
+  `0.380797 / 0.181700` are reproduced on the GPU.
+- **(H35) answered, design changed.** On ROCm `at_context_has_hip` is
+  **False** and `at_context_has_cuda` True, so "ROCm when has_hip" would
+  report CUDA. `at_context_has_cudart` is False there, and
+  `at_context_version_cudart` raises "Cannot query CUDART version because
+  CUDART is not available". `GpuBackend` therefore is `gbRocm` when HIP is
+  reported or CUDA without CUDART, `gbCuda` when CUDA with CUDART
+  (`at_context_has_cudart` added to the L2 list); the CUDA side is not
+  measurable here. `GpuRuntimeVersion` raises on ROCm and CPU builds.
+- **nvfuser.** `atm_fuser_cuda_set_enabled(true)` raises on every build of
+  libtorch 2.13, CPU included ("nvfuser support in torchscript is removed
+  and cannot be enabled!"), and both accessors print a deprecation
+  warning. `SetJitFuserCudaEnabled` is kept for parity: False is a no-op,
+  True raises; the CPU jit test and GPU item 7 check exactly that.
+- **CMake.** `option()` takes only booleans, so `TCH_LIBTORCH_DIR` is a
+  `CACHE PATH` variable. The default path is unchanged (the CPU
+  `libtch.so` is bit-identical after reconfiguring).
+- Item 2: `DoubleValue` on a GPU scalar returns the value (6), it does not
+  raise; libtorch copies to the host. H13 on the GPU: no new handles, SGD
+  gives `[0.9, 0.8]`, values intact after moving back. BatchNorm2d in
+  training mode differs from the CPU by 2.4e-7. The CPU-linked `tests/nn`
+  and `tests/jit` pass with `LD_LIBRARY_PATH=build/libtch-rocm`;
+  `tests/api` fails its three CPU-build assertions there, as it should.
+- HIP start-up costs about 4 s of system time per process.
+
 ## 5. Code generation (decision)
 
 Implemented in cloud session 3; everything below is what the code does
@@ -3243,7 +3297,7 @@ the mock's `TestObjects`. Most of it is measured against libtorch 2.13.0;
 H26–H28 hold (results in 4.6.9). Still open after it: the milestone 3
 layers (implemented since, local session 7) and CUDA/ROCm.
 
-**CUDA/ROCm (designed in design session 8, 2026-10-11):** 4.8 — one
+**CUDA/ROCm (designed in design session 8, 2026-10-11; implemented and run on the RX 9070 in local session 8, 2026-10-12, results at the end of 4.8):** 4.8 — one
 libtorch directory and one `build/libtch-<variant>` per variant, a
 `TCH_LIBTORCH_DIR` manual-link mode in the fork's CMakeLists (measured to
 build against the CPU archive; avoids needing the ROCm SDK's cmake files),

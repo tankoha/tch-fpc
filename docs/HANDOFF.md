@@ -4,7 +4,57 @@ Japanese version: [HANDOFF_jp.md](HANDOFF_jp.md)
 
 Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 
-## Local session 7 (2026-10-12): milestone 3 layers (4.6.10) implemented — resume here
+## Local session 8 (2026-10-12): GPU (4.8) implemented, runs on the RX 9070 — resume here
+
+**Where things stand.** 4.8 is implemented and committed; the working
+tree is clean. Steps 1–10 of design session 8's local list are done. Every
+design item handed back at the end of local session 4 is now implemented.
+
+- `csrc/libtch/CMakeLists.txt`: `-DTCH_LIBTORCH_DIR=<dir>` manual-link
+  mode (a `CACHE PATH`, not `option()`); default path bit-identical.
+  Builds: `build/libtch` (CPU, unchanged), `build/libtch-rocm`
+  (`cmake -S csrc/libtch -B build/libtch-rocm
+  -DTCH_LIBTORCH_DIR=$PWD/libtorch-rocm -DCMAKE_BUILD_TYPE=Release &&
+  cmake --build build/libtch-rocm -j 12`, about a minute),
+  `build/libtch-manual` (manual mode on the CPU archive, a check only).
+- `TchSys`: the `atc_*`, `at_context_*` (plus `at_context_has_cudart`),
+  `atm_fuser_cuda_*` externals. `Tch`: `CudnnIsAvailable`,
+  `CudaManualSeed(All)`, `CudaSynchronize`, `CudnnUserEnabled`/`Set…`,
+  `SetCudnnBenchmark`, `TGpuBackend`/`GpuBackend`, `GpuRuntimeVersion`,
+  `CudnnVersion`, `TDevice.ToString`. `TchJit`:
+  `JitFuserCudaEnabled`/`SetJitFuserCudaEnabled`. `TchNN`: the guarded
+  cuDNN flatten call in `TRNN`.
+- `tests/gpu/gpu_test.pas` + `run.sh [rocm|cuda|cpu]`: all items OK on the
+  RX 9070; `cpu` prints `SKIP`. Mock: CPU-build stubs and
+  `TestGpuBackend`. CPU jit test: the fuser flag. Regression on CPU (abi,
+  api, nn, jit, mock): all OK.
+- `libtorch-rocm/lib` needed **eight symlinks** the zip does not carry
+  (seven SONAME links and `libnuma.so`); without them the process does not
+  start. The command is in DESIGN 4.8 "Results". Redo it after
+  re-unpacking.
+
+**Measured, different from the design** (all in DESIGN 4.8 "Results"):
+- H34 false: no cuDNN on ROCm (`CudnnIsAvailable` False), so the RNN
+  flatten is never called there (H30 moot); RNN numbers reproduced.
+- H35: `has_hip` False, `has_cuda` True, `has_cudart` False on ROCm.
+  `GpuBackend` uses "HIP, or CUDA without CUDART" for ROCm.
+  `GpuRuntimeVersion` raises on ROCm.
+- nvfuser is removed in libtorch 2.13: `SetJitFuserCudaEnabled(True)`
+  raises on every build.
+- `libtorch_rocshmem.so` prints `(null): No such file or directory` four
+  times on stderr at start-up (RDMA `dlopen`s); harmless.
+- Haiku ran the mock stubs and both regressions; this time its work and
+  reports were correct (diffs reviewed).
+
+**Open / next (nothing designed is left to implement):**
+- The CUDA path is unmeasured (no NVIDIA GPU here): the `gbCuda` branch,
+  the cuDNN flatten call, `GpuRuntimeVersion`/`CudnnVersion` values.
+- H29 (`.ot` interchange with tch-rs-written files) still needs a Rust
+  toolchain.
+- The next milestone has no design yet: pick a topic with the user and run
+  a design session (Fable sub-agent, as sessions 6–8).
+
+## Local session 7 (2026-10-12): milestone 3 layers (4.6.10) implemented
 
 **Where things stand.** 4.6.10 is implemented and committed; the working
 tree is clean. Steps 1–6, 8 and 9 of design session 7's local list are

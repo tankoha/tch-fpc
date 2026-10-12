@@ -197,6 +197,10 @@ procedure JitSetProfilingMode(B: Boolean);
 function JitGetTensorExprFuserEnabled: Boolean;
 procedure JitSetTensorExprFuserEnabled(B: Boolean);
 procedure JitSetGraphExecutorOptimize(B: Boolean);
+{ the CUDA fuser flag (tch-rs parity). libtorch 2.13 removed nvfuser:
+  SetJitFuserCudaEnabled(True) raises ETorchNativeError, False is a no-op. }
+function JitFuserCudaEnabled: Boolean;
+procedure SetJitFuserCudaEnabled(B: Boolean);
 { live TorchScript object handles, as TchLiveHandles }
 function JitLiveObjects: Integer;
 
@@ -1272,6 +1276,18 @@ end;
 procedure JitSetGraphExecutorOptimize(B: Boolean);
 begin
   at_set_graph_executor_optimize(B);
+end;
+
+function JitFuserCudaEnabled: Boolean;
+begin
+  Result := atm_fuser_cuda_is_enabled;
+  TchCheck;
+end;
+
+procedure SetJitFuserCudaEnabled(B: Boolean);
+begin
+  atm_fuser_cuda_set_enabled(B);
+  TchCheck;
 end;
 
 function JitLiveObjects: Integer;

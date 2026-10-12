@@ -247,6 +247,17 @@ begin
   end;
 end;
 
+procedure TestGpuBackend;
+begin
+  WriteLn('GPU backend: CPU-only mock');
+  Check(GpuBackend = gbNone, 'GpuBackend = gbNone');
+  Check(not CudaIsAvailable, 'CudaIsAvailable = False');
+  Check(not CudnnIsAvailable, 'CudnnIsAvailable = False');
+  CudaSynchronize;
+  Check(True, 'CudaSynchronize returns without raising');
+  Check(CudnnUserEnabled, 'CudnnUserEnabled = True');
+end;
+
 var
   Base: Integer;
 begin
@@ -261,6 +272,7 @@ begin
   TestIntListOption;
   TestStringAndDoubleOption;
   TestErrors;
+  TestGpuBackend;
   WriteLn('leaks');
   Check(TchLiveHandles = Base, 'all handles released');
   Check(mock_live_tensors = 0, 'mock: no C tensors left');

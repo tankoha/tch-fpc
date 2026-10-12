@@ -2,9 +2,9 @@
 
 （[UML.md](UML.md) の日本語訳です。内容が食い違う場合は英語版が正です。）
 
-実装済みのもの（マイルストーン1〜3）と、設計済みでまだ実装していないもの（DESIGN 4.8
-GPU デバイス）の図です。予定の要素には `planned` の
-ステレオタイプか破線を付けています。時点：2026-10-12、ローカルセッション7の後。正は
+実装済みのもの（マイルストーン1〜3、TorchScript のオブジェクト、マイルストーン3の
+レイヤー、ROCm での GPU デバイス）の図です。まだ予定なのは CUDA ビルドだけで（破線）、
+NVIDIA の機械が要ります。時点：2026-10-12、ローカルセッション8の後。正は
 DESIGN.md で、このファイルはそれを図にしただけです。
 
 目次：
@@ -15,7 +15,7 @@ DESIGN.md で、このファイルはそれを図にしただけです。
 5. [TchJit：値とモジュール](#5-tchjit値とモジュール)
 6. [シーケンス：ForwardIV と ivalue の所有権](#6-シーケンスforwardiv-と-ivalue-の所有権)
 7. [シーケンス：TorchScript モジュールのファインチューニング](#7-シーケンスtorchscript-モジュールのファインチューニング)
-8. [配置：CPU、ROCm、CUDA のビルド（予定）](#8-配置cpurocmcuda-のビルド予定)
+8. [配置：CPU、ROCm、CUDA のビルド](#8-配置cpurocmcuda-のビルド)
 9. [状況](#9-状況)
 
 ## 1. 層とユニット
@@ -26,7 +26,7 @@ C ラッパーは tch-rs の libtch のフォーク。L2 は生の `external` �
 ```mermaid
 flowchart TB
   subgraph Native["C++ / C"]
-    LT["libtorch 2.13.0<br/>(CPU build; ROCm / CUDA planned, 4.8)"]
+    LT["libtorch 2.13.0<br/>(CPU and ROCm builds; CUDA planned, 4.8)"]
     LTCH["libtch.so<br/>torch_api.cpp (fork of tch-rs 4227b89b)<br/>torch_api_generated.cpp (gen.ml)<br/>+ tchf_free, atm_create / atm_register_parameter / atm_define"]
   end
   subgraph L2["Pascal L2 (raw)"]
@@ -141,10 +141,11 @@ classDiagram
   TGradModeGuard ..|> IInterface
 ```
 
-4.8 で予定（同じユニットの関数）：`CudnnIsAvailable`、`CudaManualSeed(All)`、
+4.8 の GPU 関数（同じユニットの関数）：`CudnnIsAvailable`、`CudaManualSeed(All)`、
 `CudaSynchronize`、`CudnnUserEnabled` / `SetCudnnUserEnabled`、`SetCudnnBenchmark`、
 `GpuBackend: TGpuBackend (gbNone, gbCuda, gbRocm)`、`GpuRuntimeVersion`、`CudnnVersion`、
-`TDevice.ToString`。
+`TDevice.ToString`。`GpuBackend` は「HIP、または CUDART なしの CUDA」で `gbRocm`：ROCm
+ビルドは hasHIP False を報告する（実測、H35）。
 
 ## 3. TchNN：ストア、モジュール、オプティマイザ
 
@@ -351,8 +352,8 @@ classDiagram
   TRNN ..> TRNNConfig
 ```
 
-GPU 上のストアでは、`TRNN` のコンストラクタが `_cudnn_rnn_flatten_weight` も呼ぶ
-（4.8、H30）。
+cuDNN のある GPU 上のストアでは、`TRNN` のコンストラクタが
+`_cudnn_rnn_flatten_weight` も呼ぶ（4.8、H30）。ROCm には cuDNN がないので呼ばない。
 
 ## 5. TchJit：値とモジュール
 
@@ -442,8 +443,9 @@ classDiagram
 
 グローバル：`JitGetProfilingMode` / `JitSetProfilingMode`、
 `JitGetTensorExprFuserEnabled` / `JitSetTensorExprFuserEnabled`、
-`JitSetGraphExecutorOptimize`、`JitLiveObjects`。予定：
-`JitFuserCudaEnabled` / `SetJitFuserCudaEnabled`（4.8）。
+`JitSetGraphExecutorOptimize`、`JitLiveObjects`、
+`JitFuserCudaEnabled` / `SetJitFuserCudaEnabled`（4.8。有効化は例外：libtorch 2.13 で
+nvfuser は削除済み）。
 
 ## 6. シーケンス：ForwardIV と ivalue の所有権
 
@@ -506,7 +508,7 @@ sequenceDiagram
   U->>J: Save('trained.pt')
 ```
 
-## 8. 配置：CPU、ROCm、CUDA のビルド（予定）
+## 8. 配置：CPU、ROCm、CUDA のビルド
 
 DESIGN 4.8：変種ごとに展開した libtorch と libtch のビルドディレクトリを1つずつ持つ。
 Pascal のユニット、C ラッパー、ABI は変わらない。ROCm 版 libtorch は AMD GPU を CUDA として
@@ -516,7 +518,7 @@ Pascal のユニット、C ラッパー、ABI は変わらない。ROCm 版 libt
 flowchart LR
   subgraph Archives["unpacked libtorch (repo root, git-ignored)"]
     CPU["libtorch/<br/>2.13.0 CPU (in use)"]
-    ROCM["libtorch-rocm/<br/>2.13.0+rocm7.x (planned, H31-H35)"]
+    ROCM["libtorch-rocm/<br/>2.13.0+rocm7.1 (in use;<br/>8 symlinks added after unpacking)"]
     CUDA["libtorch-cuda/<br/>2.13.0+cuXYZ (planned)"]
   end
   subgraph Builds["libtch builds"]
@@ -536,7 +538,7 @@ flowchart LR
   P --> T
   B2 -.-> HW
   classDef planned stroke-dasharray: 5 5
-  class ROCM,CUDA,B2,B3,T,HW planned
+  class CUDA,B3 planned
 ```
 
 ## 9. 状況
@@ -549,4 +551,4 @@ flowchart LR
 | JIT：`TIValue`、`TJitModule`、`TTrainableJitModule` | 4.6.8 | 実装済み（マイルストーン3）、H19〜H25 成立 |
 | TorchScript のオブジェクト（`IJitObject`） | 4.6.9 | 実装済み（ローカルセッション6、2026-10-12） |
 | Conv1D/3D、ConvTranspose、GroupNorm、LSTM/GRU、Identity | 4.6.10 | 実装済み（ローカルセッション7、2026-10-12） |
-| GPU：ROCm / CUDA のビルドと API | 4.8 | 設計済み（セッション8）、H31〜H35 未検証。ROCm 版 libtorch が必要 |
+| GPU：ROCm / CUDA のビルドと API | 4.8 | 実装済み（ローカルセッション8、2026-10-12）。ROCm は RX 9070 で動作、H31・H33 成立、H34 不成立、H35 判明。CUDA は未実測 |

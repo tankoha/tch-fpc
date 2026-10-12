@@ -63,6 +63,8 @@ type
     class function Cuda(AIndex: Integer = 0): TDevice; static;
     class function CudaIfAvailable: TDevice; static;
     function IsCuda: Boolean;
+    { 'cpu', 'cuda:0', 'mps', 'vulkan' }
+    function ToString: String;
   end;
 
   TInt64Array  = array of Int64;
@@ -236,6 +238,30 @@ procedure SetNumThreads(N: Integer);
 function GetNumThreads: Integer;
 function CudaIsAvailable: Boolean;
 function CudaDeviceCount: Integer;
+
+{ GPU (DESIGN.md 4.8, tch-rs Cuda). On a ROCm (HIP) libtorch "Cuda" means
+  the AMD GPU. Only CudaIsAvailable and CudaDeviceCount are safe on a CPU
+  build; the others raise ETorchNativeError there. }
+type
+  TGpuBackend = (gbNone, gbCuda, gbRocm);
+
+{ False on ROCm 2.13.0: MIOpen does not stand in (measured, H34) }
+function CudnnIsAvailable: Boolean;
+procedure CudaManualSeed(Seed: QWord);
+procedure CudaManualSeedAll(Seed: QWord);
+{ -1 = the current device }
+procedure CudaSynchronize(DeviceIndex: Int64 = -1);
+function CudnnUserEnabled: Boolean;
+procedure SetCudnnUserEnabled(B: Boolean);
+procedure SetCudnnBenchmark(B: Boolean);
+{ gbRocm when HIP is reported, or CUDA without CUDART (a ROCm build
+  reports hasHIP False, hasCUDA True, hasCUDART False; measured); gbCuda
+  when CUDA and CUDART are reported. }
+function GpuBackend: TGpuBackend;
+{ CUDA runtime version; raises on ROCm and CPU builds (no CUDART) }
+function GpuRuntimeVersion: Int64;
+{ raises when libtorch has no cuDNN (CPU, ROCm) }
+function CudnnVersion: Int64;
 
 { Reads and clears libtch's error slot; raises ETorchNativeError if set. }
 procedure TchCheck; inline;
@@ -471,6 +497,17 @@ end;
 function TDevice.IsCuda: Boolean;
 begin
   Result := DeviceType = dtCuda;
+end;
+
+function TDevice.ToString: String;
+begin
+  case DeviceType of
+    dtCpu: Result := 'cpu';
+    dtCuda: Result := 'cuda:' + IntToStr(Index);
+    dtMps: Result := 'mps';
+  else
+    Result := 'vulkan';
+  end;
 end;
 
 { TScalar, TOpt* }
@@ -1050,6 +1087,84 @@ end;
 function CudaDeviceCount: Integer;
 begin
   Result := atc_cuda_device_count;
+  TchCheck;
+end;
+
+function CudnnIsAvailable: Boolean;
+var
+  R: cint;
+begin
+  R := atc_cudnn_is_available;
+  TchCheck;
+  Result := R > 0;
+end;
+
+procedure CudaManualSeed(Seed: QWord);
+begin
+  atc_manual_seed(Seed);
+  TchCheck;
+end;
+
+procedure CudaManualSeedAll(Seed: QWord);
+begin
+  atc_manual_seed_all(Seed);
+  TchCheck;
+end;
+
+procedure CudaSynchronize(DeviceIndex: Int64);
+begin
+  atc_synchronize(DeviceIndex);
+  TchCheck;
+end;
+
+function CudnnUserEnabled: Boolean;
+var
+  R: cint;
+begin
+  R := atc_user_enabled_cudnn;
+  TchCheck;
+  Result := R > 0;
+end;
+
+procedure SetCudnnUserEnabled(B: Boolean);
+begin
+  atc_set_user_enabled_cudnn(Ord(B));
+  TchCheck;
+end;
+
+procedure SetCudnnBenchmark(B: Boolean);
+begin
+  atc_set_benchmark_cudnn(Ord(B));
+  TchCheck;
+end;
+
+function GpuBackend: TGpuBackend;
+var
+  Hip, Cuda, Cudart: Boolean;
+begin
+  Hip := at_context_has_hip;
+  TchCheck;
+  Cuda := at_context_has_cuda;
+  TchCheck;
+  Cudart := at_context_has_cudart;
+  TchCheck;
+  if Hip or (Cuda and not Cudart) then
+    Result := gbRocm
+  else if Cuda then
+    Result := gbCuda
+  else
+    Result := gbNone;
+end;
+
+function GpuRuntimeVersion: Int64;
+begin
+  Result := at_context_version_cudart;
+  TchCheck;
+end;
+
+function CudnnVersion: Int64;
+begin
+  Result := at_context_version_cudnn;
   TchCheck;
 end;
 

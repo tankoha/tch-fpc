@@ -4,7 +4,50 @@
 
 再開するときは最初にこれを読んでください。決定事項と理由は [DESIGN_jp.md](DESIGN_jp.md) にあります。
 
-## ローカルセッション7（2026-10-12）：マイルストーン3のレイヤー（4.6.10）を実装 — ここから再開
+## ローカルセッション8（2026-10-12）：GPU（4.8）を実装し、RX 9070 で動作 — ここから再開
+
+**現状。** 4.8 は実装・コミット済み。作業ツリーはクリーン。設計セッション8のローカル手順
+1〜10 は完了。ローカルセッション4の終了時に戻した設計項目はすべて実装済みになった。
+
+- `csrc/libtch/CMakeLists.txt`：`-DTCH_LIBTORCH_DIR=<dir>` の手動リンクモード
+  （`option()` ではなく `CACHE PATH`）。既定の経路はビット単位で同一。ビルド：
+  `build/libtch`（CPU、不変）、`build/libtch-rocm`（`cmake -S csrc/libtch -B
+  build/libtch-rocm -DTCH_LIBTORCH_DIR=$PWD/libtorch-rocm -DCMAKE_BUILD_TYPE=Release
+  && cmake --build build/libtch-rocm -j 12`、約1分）、`build/libtch-manual`（CPU
+  アーカイブでの手動モード、確認用のみ）。
+- `TchSys`：`atc_*`、`at_context_*`（`at_context_has_cudart` を追加）、
+  `atm_fuser_cuda_*` の external。`Tch`：`CudnnIsAvailable`、`CudaManualSeed(All)`、
+  `CudaSynchronize`、`CudnnUserEnabled`/`Set…`、`SetCudnnBenchmark`、
+  `TGpuBackend`/`GpuBackend`、`GpuRuntimeVersion`、`CudnnVersion`、
+  `TDevice.ToString`。`TchJit`：`JitFuserCudaEnabled`/`SetJitFuserCudaEnabled`。
+  `TchNN`：`TRNN` の条件付き cuDNN 平坦化呼び出し。
+- `tests/gpu/gpu_test.pas` ＋ `run.sh [rocm|cuda|cpu]`：RX 9070 で全項目 OK。`cpu` は
+  `SKIP` を出す。モック：CPU ビルド相当のスタブと `TestGpuBackend`。CPU の jit テスト：
+  fuser フラグ。CPU での回帰（abi、api、nn、jit、モック）：すべて OK。
+- `libtorch-rocm/lib` には zip に含まれない **シンボリックリンクが8つ** 必要だった
+  （SONAME のリンク7つと `libnuma.so`）。ないとプロセスが起動しない。コマンドは
+  DESIGN 4.8「結果」にある。展開し直したらやり直すこと。
+
+**実測で設計と違ったこと**（すべて DESIGN 4.8「結果」）：
+- H34 不成立：ROCm に cuDNN はない（`CudnnIsAvailable` は False）ので、そこでは RNN の
+  平坦化は呼ばれない（H30 は対象外）。RNN の数値は再現。
+- H35：ROCm では `has_hip` False、`has_cuda` True、`has_cudart` False。`GpuBackend` は
+  「HIP、または CUDART なしの CUDA」を ROCm とする。`GpuRuntimeVersion` は ROCm で例外。
+- libtorch 2.13 では nvfuser が削除済み：`SetJitFuserCudaEnabled(True)` はどのビルド
+  でも例外。
+- `libtorch_rocshmem.so` は起動時に stderr へ `(null): No such file or directory` を
+  4回出す（RDMA 用の `dlopen`）。害はない。
+- Haiku がモックのスタブと2回の回帰を担当した。今回は作業も報告も正確だった（差分は
+  レビュー済み）。
+
+**未解決 / 次（設計済みで未実装のものは残っていない）：**
+- CUDA の経路は未実測（ここに NVIDIA の GPU はない）：`gbCuda` の分岐、cuDNN の
+  平坦化呼び出し、`GpuRuntimeVersion`/`CudnnVersion` の値。
+- H29（tch-rs が書いた `.ot` との相互運用）は依然 Rust ツールチェーンが要る。
+- 次のマイルストーンはまだ設計がない：ユーザーとテーマを決めて設計セッションを行う
+  （セッション6〜8と同じく Fable サブエージェントで）。
+
+## ローカルセッション7（2026-10-12）：マイルストーン3のレイヤー（4.6.10）を実装
 
 **現状。** 4.6.10 は実装・コミット済み。作業ツリーはクリーン。設計セッション7のローカル
 手順 1〜6、8、9 は完了。手順7（任意のモック確認）は省いた：名前と順序は libtorch に対して

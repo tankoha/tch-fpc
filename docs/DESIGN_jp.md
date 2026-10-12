@@ -2831,6 +2831,55 @@ Halt(0); end;` — 同じプログラムが `build/libtch`（CPU）の下では 
 CPU のみでの実行の期待結果：`SKIP` の 1 行だけ。`tests/mock` は影響なし（GPU テストは
 モックにリンクしない）。
 
+#### 結果（ローカルセッション8、2026-10-12、RX 9070、`2.13.0+rocm7.1`）
+
+上のとおり実装。`tests/gpu/run.sh rocm` は全項目を通り、`run.sh cpu` は `SKIP` の1行
+だけを出す。仮説と設計に対する実測：
+
+- **(H31) 成立。** 手動リンクの libtch は追加の define なしで `libtorch-rocm/` に対して
+  ビルドでき（警告は CPU ビルドと同じく libtorch ヘッダ由来の `-Wc++20-extensions` 4件）、
+  動作する。
+- **(H32) 修正。** `ldd libtorch_hip.so` は問題なかったが、アーカイブ（zip）には
+  シンボリックリンクがない：7つのライブラリはバージョンなしのファイル名でしか存在せず、
+  SONAME と依存側はバージョン付きの名前を使う。また `libtorch_rocshmem.so` の初期化
+  処理はバージョンなしの `libnuma.so` を `dlopen` し、見つからないとプロセスを終了
+  させる。展開後の対処（git 管理外のディレクトリ、元に戻せる）：
+  `cd libtorch-rocm/lib && for f in libamd_comgr.so libamdhip64.so
+  libhipblas.so libhipsparse.so libhsa-runtime64.so librocblas.so
+  libroctx64.so; do ln -s $f $(readelf -d $f | sed -n
+  's/.*SONAME.*\[\(.*\)\]/\1/p'); done && ln -s libnuma.so.1 libnuma.so`。
+  それ以外の `dlopen`（`libibverbs.so`、`libmlx5.so`、`libbnxt_re.so`、
+  `libionic.so`、RDMA 用）は失敗しても害はないが、起動時に stderr へ
+  `(null): No such file or directory` を4回出す。
+- **(H33)** 実行時にも確認：`HIP_VISIBLE_DEVICES=0` で `CudaDeviceCount = 1`、使った
+  カーネルはすべて gfx1201 で動く。
+- **(H34) 不成立。** ROCm では `CudnnIsAvailable` も `at_context_has_cudnn` も False。
+  これらのフック経由では MIOpen は cuDNN の代わりにならない。`CudnnVersion` は
+  "Cannot query CuDNN version if ATen_cuda is not built with CuDNN" を出す。よって
+  `TRNN` の平坦化の条件は ROCm では False で、呼び出しは行われない（H30：拒否される
+  ものがない）。GRU `0.380797`、LSTM `0.380797 / 0.181700` は GPU で再現する。
+- **(H35) 判明、設計を変更。** ROCm では `at_context_has_hip` は **False**、
+  `at_context_has_cuda` は True なので、「has_hip なら ROCm」では CUDA と報告してしまう。
+  そこでは `at_context_has_cudart` は False で、`at_context_version_cudart` は
+  "Cannot query CUDART version because CUDART is not available" を出す。したがって
+  `GpuBackend` は、HIP が報告されるか CUDART なしで CUDA が報告されるとき `gbRocm`、
+  CUDART ありの CUDA で `gbCuda`（L2 に `at_context_has_cudart` を追加）。CUDA 側は
+  ここでは測れない。`GpuRuntimeVersion` は ROCm と CPU のビルドでは例外になる。
+- **nvfuser。** libtorch 2.13 では CPU を含むどのビルドでも
+  `atm_fuser_cuda_set_enabled(true)` が例外になり（"nvfuser support in torchscript is
+  removed and cannot be enabled!"）、両アクセサとも非推奨の警告を出す。
+  `SetJitFuserCudaEnabled` は互換のため残す：False は何もせず、True は例外。CPU の jit
+  テストと GPU の項目 7 がちょうどそれを確認する。
+- **CMake。** `option()` は真偽値しか取らないので、`TCH_LIBTORCH_DIR` は `CACHE PATH`
+  変数にした。既定の経路は不変（再構成後も CPU の `libtch.so` はビット単位で同一）。
+- 項目 2：GPU 上のスカラーへの `DoubleValue` は値（6）を返し、例外にはならない
+  （libtorch がホストへコピーする）。GPU 上の H13：新しいハンドルはできず、SGD で
+  `[0.9, 0.8]`、CPU へ戻しても値はそのまま。訓練モードの BatchNorm2d は CPU との差が
+  2.4e-7。CPU 向けにリンクした `tests/nn` と `tests/jit` は
+  `LD_LIBRARY_PATH=build/libtch-rocm` でも通る。`tests/api` はそこでは CPU ビルド用の
+  3つの確認が当然ながら失敗する。
+- HIP の起動にはプロセスごとにシステム時間で約4秒かかる。
+
 ## 5. コード生成（決定）
 
 クラウドセッション3で実装済み。以下はコード（`gen/gen.ml`、`gen/tchgen.pas`）が
@@ -2965,7 +3014,7 @@ JIT を除く 4.6 を実装。`tests/nn/nn_test.pas`（本物の libtorch）は 
 libtorch 2.13.0 に対して実測済み。H26〜H28 は成立（結果は 4.6.9）。その後も
 残るもの：マイルストーン3のレイヤー（その後ローカルセッション7で実装）と CUDA/ROCm。
 
-**CUDA/ROCm（設計セッション8、2026-10-11 で設計）：** 4.8 — 変種ごとに libtorch ディレクトリ
+**CUDA/ROCm（設計セッション8、2026-10-11 で設計。ローカルセッション8、2026-10-12 で実装し RX 9070 で実行。結果は 4.8 の末尾）：** 4.8 — 変種ごとに libtorch ディレクトリ
 1つと `build/libtch-<変種>` 1つ、フォークの CMakeLists に `TCH_LIBTORCH_DIR` の手動リンク
 モード（CPU アーカイブに対してビルドできることを実測。ROCm SDK の cmake ファイルを不要に
 する）、C と ABI の変更なし（HIP は CUDA を装う。ローカルのヘッダで確認）、残っていた

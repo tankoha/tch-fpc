@@ -166,10 +166,26 @@ generator needs gen.ml's richer type information (section 5).
 
 - Units `TchSys` (hand-written part of `torch_api.h`) and `TchSysGenerated`
   (all `atg_*`). Pure `external` declarations, no logic.
-- Types: `type PTorchTensor = type Pointer;` etc. (distinct pointer types so
-  a scalar handle cannot be passed where a tensor handle is expected).
+- Types: each handle is a pointer to its own empty record
+  (`PTorchTensor = ^TTorchTensorOpaque;` with `TTorchTensorOpaque = record
+  end;`, likewise `PTorchScalar`, `PTorchOptimizer`, `PTorchModule`,
+  `PTorchIValue`), so a scalar handle cannot be passed where a tensor handle
+  is expected: a mix-up is a compile error. `nil`, an untyped `Pointer` and
+  explicit casts still convert.
+  *(changed after the overall review, 2026-10-13.)* The first draft said
+  `type PTorchTensor = type Pointer;`. *Measured* on FPC 3.2.2: `type
+  Pointer` aliases are not distinguished (a `PIValue` is accepted where a
+  `PTensor` is expected, as value parameter, `var` parameter and
+  assignment), so that form protects nothing; pointers to distinct empty
+  records give "Incompatible type" in all three cases. The whole code base,
+  including `TchSysGenerated` (about 4,700 uses of `PTorchTensor`),
+  recompiled without error, so no mix-up was hidden. The C side and the ABI
+  are unchanged (all handles are `void*` in `torch_api.h`).
 - Convention: `cdecl` on every declaration (no-op on x86-64 Linux/Windows,
-  correct on i386), `{$packrecords c}`, `ctypes` for `cint` etc.
+  correct on i386), `ctypes` for `cint` etc. No `{$packrecords c}`: it is not
+  needed, because `torch_api.h` has no struct and no record crosses the C
+  boundary (only pointers, integers, doubles and arrays). Add it when a
+  function that passes a record is declared.
 - Library name in one constant: `const LibTch = 'tch';` and
   `external LibTch name 'atg_add'`. Static `external` (link-time) binding,
   not `LoadLibrary` + 2,657 function pointers.
@@ -182,14 +198,16 @@ Sketch:
 
 ```pascal
 unit TchSys;
-{$mode objfpc}{$H+}{$packrecords c}
+{$mode objfpc}{$H+}
 interface
 uses ctypes;
 const
   LibTch = 'tch';
 type
-  PTorchTensor = type Pointer;  PPTorchTensor = ^PTorchTensor;
-  PTorchScalar = type Pointer;
+  TTorchTensorOpaque = record end;
+  PTorchTensor = ^TTorchTensorOpaque;  PPTorchTensor = ^PTorchTensor;
+  TTorchScalarOpaque = record end;
+  PTorchScalar = ^TTorchScalarOpaque;
   TTorchLoadCallback = procedure(data: Pointer; name: PChar; t: PTorchTensor); cdecl;
 
 function  get_and_reset_last_err: PChar; cdecl; external LibTch;
@@ -1424,8 +1442,9 @@ Decisions and rationale (overall shape):
 
 #### 4.6.4 Optimizers, from `nn/optimizer.rs`, `wrappers/optimizer.rs` and `torch_api.cpp`
 
-- **L2:** `PTorchOptimizer = Pointer;` in `TchSys` (same style as the
-  existing `PTorchTensor`) and the externals exactly as `torch_api.h`
+- **L2:** `PTorchOptimizer = ^TTorchOptimizerOpaque;` in `TchSys` (same
+  style as the existing `PTorchTensor`, section 3) and the externals exactly
+  as `torch_api.h`
   declares them:
 
   ```pascal
@@ -1725,12 +1744,13 @@ fine-tuning use case needs them — **designed since in 4.6.9** (design
 session 6); and `atm_fuser_cuda_*` (with CUDA) — **designed since in 4.8**
 (design session 8) as `JitFuserCudaEnabled`/`SetJitFuserCudaEnabled`.
 
-**L2 (`TchSys.pas`).** `PTorchModule = Pointer` (`torch::jit::script::
-Module*`), `PTorchIValue = Pointer` (`torch::jit::IValue*`),
-`PPTorchIValue = ^PTorchIValue`. Externals exactly as `torch_api.h`, with
-section 2's types (`cint` for `int`, `Boolean` for C++ `bool`, `csize_t`,
-`PChar`, `PPChar`, `PInt64`, `PDouble`); `atm_named_parameters` has the
-load callback's signature and reuses `TTorchLoadCallback`:
+**L2 (`TchSys.pas`).** `PTorchModule` (`torch::jit::script::Module*`) and
+`PTorchIValue` (`torch::jit::IValue*`), each a pointer to its own empty
+record (section 3), `PPTorchIValue = ^PTorchIValue`. Externals exactly as
+`torch_api.h`, with section 2's types (`cint` for `int`, `Boolean` for C++
+`bool`, `csize_t`, `PChar`, `PPChar`, `PInt64`, `PDouble`);
+`atm_named_parameters` has the load callback's signature and reuses
+`TTorchLoadCallback`:
 
 ```pascal
 function  atm_load(filename: PChar): PTorchModule; cdecl; external LibTch;

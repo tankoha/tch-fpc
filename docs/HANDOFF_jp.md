@@ -44,11 +44,22 @@
 - `tests/common/layers.inc`：`tests/nn` と `tests/gpu` が共有する、畳み込みの
   パディングと RNN の手計算の準備。
 
+**B7、2026-10-13：ハンドル型を決めて実装。** DESIGN 3 は
+`type PTorchTensor = type Pointer;`（区別されたポインタ型）としていたが、コードは
+素の `Pointer` だった。*実測*（FPC 3.2.2）：`type Pointer` の別名は区別されず
+（値引数・`var` 引数・代入のすべてでコンパイルが通る）、別々の空レコードへの
+ポインタなら区別される（"Incompatible type"。`nil`、型なしの `Pointer`、
+キャストは従来どおり通る）。`TchSys.pas` は `PTorchTensor`、`PTorchScalar`、
+`PTorchOptimizer`、`PTorchModule`、`PTorchIValue` をその形で宣言するようにした。
+`TchSysGenerated`（使用約 4,700 か所）を含むコード全体がエラーなく再コンパイル
+でき、隠れた取り違えはなかった。わざと `at_free(<PTorchIValue>)` と書くと
+コンパイルエラーになる。C 側と ABI は変更なし。`{$packrecords c}` は不要なので
+付けていない（`torch_api.h` に struct はなく、レコードは C の境界を越えない）。
+レコードを渡す最初の関数を宣言するときに足す。DESIGN 3 を更新。
+
 **レビューで出てまだ残るもの（ユーザーに聞く）：**
 - 例外を出したレイヤーのコンストラクタは変数をストアに残す（実測：`Groups = 0` の
   `TConv2D`）。ストアを巻き戻すか、事前条件を先に確かめて残りを文書にするか：設計判断。
-- DESIGN 3 は区別されたポインタ型（`type Pointer`）と `{$packrecords c}` を求めるが、
-  コードは素の `Pointer` で packrecords もない。どちらに合わせるか決める。
 
 ## ローカルセッション8（2026-10-12）：GPU（4.8）を実装し、RX 9070 で動作
 

@@ -50,13 +50,24 @@ Fixed and committed:
 - `tests/common/layers.inc`: the conv padding and RNN hand setups shared by
   `tests/nn` and `tests/gpu`.
 
+**B7, 2026-10-13: handle types decided and implemented.** DESIGN 3 said
+`type PTorchTensor = type Pointer;` (distinct pointer types); the code had
+plain `Pointer`. *Measured* (FPC 3.2.2): `type Pointer` aliases are not
+distinguished (value parameter, `var` parameter and assignment all compile),
+but pointers to distinct empty records are ("Incompatible type"; `nil`, an
+untyped `Pointer` and casts still compile). `TchSys.pas` now declares
+`PTorchTensor`, `PTorchScalar`, `PTorchOptimizer`, `PTorchModule` and
+`PTorchIValue` that way; the whole code base including `TchSysGenerated`
+(about 4,700 uses) recompiled without error, so no mix-up was hidden, and a
+deliberate `at_free(<a PTorchIValue>)` now fails to compile. C side and ABI
+unchanged. `{$packrecords c}` is not needed and not added (no struct in
+`torch_api.h`, no record crosses the C boundary); add it with the first
+function that passes a record. DESIGN 3 updated.
+
 **Still open from the review (ask the user):**
 - A layer constructor that raises leaves its variables in the store
   (measured: `TConv2D` with `Groups = 0`). Roll the store back, or check
   preconditions first and document the rest: a design decision.
-- DESIGN 3 wants distinct pointer types (`type Pointer`) and
-  `{$packrecords c}`; the code uses plain `Pointer` and no packrecords.
-  Decide which side to change.
 
 ## Local session 8 (2026-10-12): GPU (4.8) implemented, runs on the RX 9070
 

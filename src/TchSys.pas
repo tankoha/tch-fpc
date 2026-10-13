@@ -15,9 +15,15 @@ const
   LibTch = 'tch';
 
 type
-  PTorchTensor = Pointer;
+  { C handles are void* in torch_api.h. Each is a pointer to its own empty
+    record so that passing one kind where another is expected does not
+    compile; `type Pointer` aliases are not distinguished by FPC 3.2.2
+    (measured, DESIGN.md 3). nil and an untyped Pointer still convert. }
+  TTorchTensorOpaque = record end;
+  PTorchTensor = ^TTorchTensorOpaque;
   PPTorchTensor = ^PTorchTensor;
-  PTorchScalar = Pointer;
+  TTorchScalarOpaque = record end;
+  PTorchScalar = ^TTorchScalarOpaque;
 
 function get_and_reset_last_err: PChar; cdecl; external LibTch;
 procedure tchf_free(p: Pointer); cdecl; external LibTch;
@@ -94,7 +100,8 @@ procedure at_loadz_callback_with_device(filename: PChar; data: Pointer;
 
 { Optimizers (DESIGN.md 4.6.4). The constructors return nil on error. }
 type
-  PTorchOptimizer = Pointer;
+  TTorchOptimizerOpaque = record end;
+  PTorchOptimizer = ^TTorchOptimizerOpaque;
 
 function ato_sgd(learning_rate, momentum, dampening, weight_decay: Double;
   nesterov: cint): PTorchOptimizer; cdecl; external LibTch;
@@ -128,8 +135,10 @@ procedure ato_free(opt: PTorchOptimizer); cdecl; external LibTch;
   the load callback's signature. ati_to_string returns a strdup'd string
   (tchf_free). atm_fuser_cuda_* are PROTECTed flag accessors (DESIGN 4.8). }
 type
-  PTorchModule = Pointer;
-  PTorchIValue = Pointer;
+  TTorchModuleOpaque = record end;
+  PTorchModule = ^TTorchModuleOpaque;
+  TTorchIValueOpaque = record end;
+  PTorchIValue = ^TTorchIValueOpaque;
   PPTorchIValue = ^PTorchIValue;
 
 function atm_load(filename: PChar): PTorchModule; cdecl; external LibTch;

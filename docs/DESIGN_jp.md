@@ -168,10 +168,25 @@ tch-rs を読んで得た内容です（CLAUDE.md に従い、**ビルドして�
 
 - ユニット `TchSys`（`torch_api.h` の手書き部分）と `TchSysGenerated`
   （すべての `atg_*`）。中身は `external` 宣言だけで、ロジックは持ちません。
-- 型：`type PTorchTensor = type Pointer;` など（別個のポインタ型にして、
-  テンソルのハンドルが要る場所にスカラーのハンドルを渡せないようにする）。
+- 型：ハンドルはそれぞれ専用の空レコードへのポインタ
+  （`TTorchTensorOpaque = record end;` に対して `PTorchTensor =
+  ^TTorchTensorOpaque;`。`PTorchScalar`、`PTorchOptimizer`、`PTorchModule`、
+  `PTorchIValue` も同様）にして、テンソルのハンドルが要る場所にスカラーの
+  ハンドルを渡すとコンパイルエラーになるようにする。`nil`、型なしの
+  `Pointer`、明示的なキャストは従来どおり変換できます。
+  *（全体レビューの後に変更、2026-10-13。）* 最初の案は
+  `type PTorchTensor = type Pointer;` でした。FPC 3.2.2 での*実測*：`type
+  Pointer` の別名は区別されず（`PIValue` を `PTensor` が要る場所に渡しても、
+  値引数・`var` 引数・代入のいずれでも通る）、この形は何も守りません。別々の
+  空レコードへのポインタなら、3つとも "Incompatible type" になります。
+  `TchSysGenerated`（`PTorchTensor` の使用が約 4,700 か所）を含むコード全体を
+  再コンパイルしてエラーはなく、隠れた取り違えはありませんでした。C 側と ABI は
+  変わりません（`torch_api.h` ではハンドルはすべて `void*`）。
 - 規約：すべての宣言に `cdecl`（x86-64 の Linux/Windows では意味を持たず、
-  i386 で正しくなる）、`{$packrecords c}`、`cint` などは `ctypes` から。
+  i386 で正しくなる）、`cint` などは `ctypes` から。`{$packrecords c}` は
+  付けません。`torch_api.h` には struct がなく、レコードが C の境界を越える
+  ことがない（越えるのはポインタ、整数、double、配列だけ）ので不要だからです。
+  レコードを渡す関数を宣言するときに足します。
 - ライブラリ名は定数1つにまとめます：`const LibTch = 'tch';` と
   `external LibTch name 'atg_add'`。リンク時の静的な `external` 束縛にし、
   `LoadLibrary` で 2,657 個の関数ポインタを取る方式は使いません。
@@ -183,14 +198,16 @@ tch-rs を読んで得た内容です（CLAUDE.md に従い、**ビルドして�
 
 ```pascal
 unit TchSys;
-{$mode objfpc}{$H+}{$packrecords c}
+{$mode objfpc}{$H+}
 interface
 uses ctypes;
 const
   LibTch = 'tch';
 type
-  PTorchTensor = type Pointer;  PPTorchTensor = ^PTorchTensor;
-  PTorchScalar = type Pointer;
+  TTorchTensorOpaque = record end;
+  PTorchTensor = ^TTorchTensorOpaque;  PPTorchTensor = ^PTorchTensor;
+  TTorchScalarOpaque = record end;
+  PTorchScalar = ^TTorchScalarOpaque;
   TTorchLoadCallback = procedure(data: Pointer; name: PChar; t: PTorchTensor); cdecl;
 
 function  get_and_reset_last_err: PChar; cdecl; external LibTch;
@@ -1351,7 +1368,8 @@ type
 
 #### 4.6.4 オプティマイザ、`nn/optimizer.rs`、`wrappers/optimizer.rs`、`torch_api.cpp` より
 
-- **L2：** `TchSys` に `PTorchOptimizer = Pointer;`（既存の `PTorchTensor` と同じ流儀）と、
+- **L2：** `TchSys` に `PTorchOptimizer = ^TTorchOptimizerOpaque;`（既存の `PTorchTensor` と
+  同じ流儀、3章）と、
   `torch_api.h` の宣言どおりの external：
 
   ```pascal
@@ -1607,8 +1625,9 @@ C の `IValue` を生かし続けるので `TTensorHandle` のような参照カ
 それと `atm_fuser_cuda_*`（CUDA と一緒に）— **その後 4.8 で設計済み**（設計セッション8、
 `JitFuserCudaEnabled`/`SetJitFuserCudaEnabled`）。
 
-**L2（`TchSys.pas`）。** `PTorchModule = Pointer`（`torch::jit::script::Module*`）、
-`PTorchIValue = Pointer`（`torch::jit::IValue*`）、`PPTorchIValue = ^PTorchIValue`。
+**L2（`TchSys.pas`）。** `PTorchModule`（`torch::jit::script::Module*`）と
+`PTorchIValue`（`torch::jit::IValue*`）はそれぞれ専用の空レコードへのポインタ（3章）、
+`PPTorchIValue = ^PTorchIValue`。
 external は `torch_api.h` のとおりで、型は2章のもの（`int` に `cint`、C++ の `bool` に
 `Boolean`、`csize_t`、`PChar`、`PPChar`、`PInt64`、`PDouble`）。`atm_named_parameters` は
 load コールバックと同じシグネチャなので `TTorchLoadCallback` を再利用します：

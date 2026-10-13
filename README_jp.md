@@ -3,12 +3,20 @@
 PyTorch の C++ API (libtorch) に対する Free Pascal バインディング。
 [tch-rs](https://github.com/LaurentMazare/tch-rs) に触発されたプロジェクト。
 
-**状態:** 実装の初期段階、CPU のみ（Linux x86-64、libtorch 2.13.0、FPC 3.2.2）。
-生成した 2,657 個の op と手書きの基本 API を持つテンソル、自動微分、`TchNN`（初期化、
-save/load 付きの var store、SGD/Adam/AdamW/RmsProp、Linear、Conv2D、BatchNorm、
-LayerNorm、Embedding、Sequential）、`TchJit`（TorchScript モジュールの読み込み、実行、
-トレース、ファインチューニング）が本物の libtorch で動く。TorchScript のオブジェクトと
-CUDA/ROCm はまだ。API は今後も変わりうる。
+**状態:** 実装の初期段階（Linux x86-64、FPC 3.2.2、libtorch 2.13.0）。
+CPU で動き、libtorch の ROCm ビルドを通じて GPU でも動く（AMD RX 9070 と
+`2.13.0+rocm7.1` で確認）。CUDA 向けのビルド経路はあるが、NVIDIA のハードウェアが
+ないため未確認。生成した 2,657 個の op と手書きの基本 API を持つテンソル、自動微分、
+`TchNN`（初期化、save/load 付きの var store、SGD/Adam/AdamW/RmsProp、Linear、
+Conv1D/2D/3D、ConvTranspose1D/2D/3D、BatchNorm、LayerNorm、GroupNorm、Embedding、
+LSTM/GRU、Identity、Sequential）、`TchJit`（TorchScript モジュールの読み込み、実行、
+トレース、ファインチューニング、TorchScript のオブジェクト）が本物の libtorch で動く。
+API は今後も変わりうる。
+
+ROCm または CUDA 版の libtorch については [docs/DESIGN.md](docs/DESIGN.md) の 4.8 節を
+参照。libtorch のディレクトリは手動でリンクし（`-DTCH_LIBTORCH_DIR=...`）、バリアント
+ごとに `build/libtch-<variant>` を 1 つ作る。ROCm 版の libtorch の zip にはシンボリック
+リンクが含まれず、展開後に 8 つ追加する必要がある。一覧は 4.8 の "Results" にある。
 
 ## 名前の付け方と tch-rs との違い
 

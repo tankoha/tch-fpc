@@ -3,13 +3,22 @@
 Free Pascal bindings for the C++ API of PyTorch (libtorch), inspired by
 [tch-rs](https://github.com/LaurentMazare/tch-rs).
 
-**Status:** early implementation, CPU only (Linux x86-64, libtorch 2.13.0,
-FPC 3.2.2). Tensors with the 2,657 generated ops and a hand-written core
-API, autograd, and `TchNN` (initialisation, var store with save/load,
-SGD/Adam/AdamW/RmsProp, Linear, Conv2D, BatchNorm, LayerNorm, Embedding,
-Sequential) and `TchJit` (loading, running, tracing and fine-tuning
-TorchScript modules) work against the real libtorch. TorchScript objects
-and CUDA/ROCm are not there yet; the API may still change.
+**Status:** early implementation (Linux x86-64, FPC 3.2.2, libtorch 2.13.0).
+Runs on the CPU, and on the GPU through a ROCm build of libtorch (tested on
+an AMD RX 9070 with `2.13.0+rocm7.1`); the CUDA build path exists but is
+untested, as there is no NVIDIA hardware here. Tensors with the 2,657
+generated ops and a hand-written core API, autograd, `TchNN` (initialisation,
+var store with save/load, SGD/Adam/AdamW/RmsProp, Linear, Conv1D/2D/3D,
+ConvTranspose1D/2D/3D, BatchNorm, LayerNorm, GroupNorm, Embedding, LSTM/GRU,
+Identity, Sequential) and `TchJit` (loading, running, tracing and fine-tuning
+TorchScript modules, TorchScript objects) work against the real libtorch. The
+API may still change.
+
+For a ROCm or CUDA libtorch, see section 4.8 of
+[docs/DESIGN.md](docs/DESIGN.md): the libtorch directory is linked manually
+(`-DTCH_LIBTORCH_DIR=...`), with one `build/libtch-<variant>` per variant.
+The ROCm libtorch zip carries no symlinks and needs eight after unpacking;
+they are listed under "Results" in 4.8.
 
 ## Naming, and how it differs from tch-rs
 

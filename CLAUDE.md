@@ -12,7 +12,7 @@ Free Pascal bindings for libtorch, modeled after tch-rs.
 
 ## License
 Dual-licensed MIT OR Apache-2.0 (`LICENSE-MIT`, `LICENSE-APACHE`), same as
-tch-rs. The repo is still private; making it public is a separate decision.
+tch-rs. The repository is public (made public 2026-10-13).
 When porting code or generated declarations from tch-rs, note the source file
 in the commit message, and keep tch-rs's license files next to vendored code.
 

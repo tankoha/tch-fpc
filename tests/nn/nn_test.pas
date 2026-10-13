@@ -260,6 +260,164 @@ begin
   end;
 end;
 
+{ TVarStore.RollbackTo and the layer constructors that call it on failure }
+procedure TestRollback;
+var
+  VS: TVarStore;
+  T: TTensor;
+  NT: TNamedTensorArray;
+  Raised: Boolean;
+  Msg: String;
+  Cnt, TrCnt: Integer;
+  Conv: TConv2D;
+  Lin: TLinear;
+  G: TGRU;
+  CCfg: TConvConfig;
+  LCfg: TLinearConfig;
+  RCfg: TRNNConfig;
+  Opt: TOptimizer;
+  W: TTensor;
+begin
+  WriteLn('rollback: RollbackTo and failing layer constructors');
+  VS := TVarStore.Create(TDevice.Cpu);
+  try
+    VS.Root.Zeros('a', [1]);
+    VS.Root.ZerosNoTrain('b', [1]);
+    VS.Root.Ones('c', [1]);
+    VS.RollbackTo(1);
+    NT := VS.Variables;
+    Check((VS.Count = 1) and not VS.TryGet('b', T) and not VS.TryGet('c', T) and
+      (Length(VS.TrainableVariables) = 1) and (NT[0].Name = 'a'),
+      '1. RollbackTo(1) keeps only a, drops b and c from the index and trainable list');
+    VS.Root.Zeros('b', [1]);
+    NT := VS.Variables;
+    Check((VS.Count = 2) and (NT[1].Name = 'b'), '1. b is registered again as plain b, not b__1');
+    VS.RollbackTo(1);
+    VS.RollbackTo(99);
+    Check((VS.Count = 1) and (Length(VS.TrainableVariables) = 1), '1. RollbackTo(99) changes nothing');
+    VS.RollbackTo(-1);
+    Check((VS.Count = 0) and (Length(VS.TrainableVariables) = 0), '1. RollbackTo(-1) empties the store');
+  finally
+    VS.Free;
+  end;
+
+  VS := TVarStore.Create(TDevice.Cpu);
+  Conv := nil;
+  try
+    VS.Root.Zeros('pre', [1]);
+    Cnt := VS.Count;
+    TrCnt := Length(VS.TrainableVariables);
+    CCfg := DefaultConvConfig;
+    CCfg.Groups := 0;
+    Raised := False;
+    Msg := '';
+    try
+      TConv2D.Create(VS.Root / 'cv', 1, 2, 3, CCfg).Free;
+    except
+      on E: Exception do
+      begin
+        Raised := True;
+        Msg := E.ClassName;
+      end;
+    end;
+    Check(Raised and (VS.Count = Cnt) and (Length(VS.TrainableVariables) = TrCnt),
+      '2. TConv2D with Groups = 0 raises (' + Msg + '), store unchanged');
+    CCfg.Groups := 1;
+    Conv := TConv2D.Create(VS.Root / 'cv', 1, 2, 3, CCfg);
+    NT := VS.Variables;
+    Check((VS.Count = Cnt + 2) and (NT[Cnt].Name = 'cv.bias') and (NT[Cnt + 1].Name = 'cv.weight'),
+      '2. a valid TConv2D at the same path registers cv.bias and cv.weight, no suffix');
+  finally
+    Conv.Free;
+    VS.Free;
+  end;
+
+  VS := TVarStore.Create(TDevice.Cpu);
+  try
+    VS.Root.Zeros('pre', [1]);
+    Cnt := VS.Count;
+    TrCnt := Length(VS.TrainableVariables);
+    LCfg := DefaultLinearConfig;
+    LCfg.HasBsInit := True;
+    LCfg.BsInit := TInit.Orthogonal;
+    Raised := False;
+    Msg := '';
+    try
+      TLinear.Create(VS.Root / 'l', 3, 2, LCfg).Free;
+    except
+      on E: Exception do
+      begin
+        Raised := True;
+        Msg := E.ClassName;
+      end;
+    end;
+    Check(Raised and (VS.Count = Cnt) and (Length(VS.TrainableVariables) = TrCnt) and
+      not VS.TryGet('l.weight', T) and not VS.TryGet('l.bias', T),
+      '3. TLinear with Orthogonal bias raises (' + Msg + ') after the weight, store rolled back');
+  finally
+    VS.Free;
+  end;
+
+  VS := TVarStore.Create(TDevice.Cpu);
+  try
+    VS.Root.Zeros('pre', [1]);
+    Cnt := VS.Count;
+    TrCnt := Length(VS.TrainableVariables);
+    RCfg := DefaultRNNConfig;
+    RCfg.BIhInit := TInit.Orthogonal;
+    Raised := False;
+    Msg := '';
+    try
+      TGRU.Create(VS.Root / 'g', 2, 4, RCfg).Free;
+    except
+      on E: Exception do
+      begin
+        Raised := True;
+        Msg := E.ClassName;
+      end;
+    end;
+    Check(Raised and (VS.Count = Cnt) and (Length(VS.TrainableVariables) = TrCnt) and
+      not VS.TryGet('g.weight_ih_l0', T) and not VS.TryGet('g.weight_hh_l0', T) and
+      not VS.TryGet('g.bias_ih_l0', T),
+      '4. TGRU with Orthogonal BIhInit raises (' + Msg + ') after the weights, store rolled back');
+  finally
+    VS.Free;
+  end;
+
+  VS := TVarStore.Create(TDevice.Cpu);
+  Opt := nil;
+  try
+    W := VS.Root.Zeros('w', [2]);
+    Opt := TOptimizer.Sgd(VS, 0.1);
+    LCfg := DefaultLinearConfig;
+    LCfg.HasBsInit := True;
+    LCfg.BsInit := TInit.Orthogonal;
+    Raised := False;
+    try
+      Lin := TLinear.Create(VS.Root / 'l', 3, 2, LCfg);
+      Lin.Free;
+    except
+      on E: Exception do Raised := True;
+    end;
+    Opt.BackwardStep((W * TTensor.FromArray([1.0, 2.0])).sum);
+    Check(Raised and (Values(W) = '-0.1 -0.2') and (Length(Opt.TrainableVariables) = 1) and
+      (VS.Count = 1), '5. an earlier optimizer keeps working after a failed layer');
+  finally
+    Opt.Free;
+    VS.Free;
+  end;
+end;
+
+procedure TestRollbackHandles;
+var
+  Before: Integer;
+begin
+  Before := TchLiveHandles;
+  TestRollback;
+  Check(TchLiveHandles = Before, Format('6. live handles %d -> %d after the rollback tests',
+    [Before, TchLiveHandles]));
+end;
+
 { H18 + H13: Freeze; Step and set_data with an earlier optimizer }
 procedure TestFreezeAndSetKind;
 var
@@ -1446,6 +1604,7 @@ begin
     TestApplyGuard;
     TestStore;
     TestStoreEdges;
+    TestRollbackHandles;
     TestFreezeAndSetKind;
     TestLinearRegression;
     TestAdam;

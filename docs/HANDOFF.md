@@ -64,10 +64,13 @@ unchanged. `{$packrecords c}` is not needed and not added (no struct in
 `torch_api.h`, no record crosses the C boundary); add it with the first
 function that passes a record. DESIGN 3 updated.
 
-**Still open from the review (ask the user):**
-- A layer constructor that raises leaves its variables in the store
-  (measured: `TConv2D` with `Groups = 0`). Roll the store back, or check
-  preconditions first and document the rest: a design decision.
+**A2, 2026-10-13: store rollback.** The user chose a rollback over
+pre-checks. `TVarStore.RollbackTo(ACount)` removes the variables registered
+after the store held `ACount` of them; every constructor that registers
+variables (and `TTrainableJitModule.RegisterInto`) calls it on any exception
+and re-raises. Test: `TestRollback`. DESIGN 4.6.2 and 4.6.5 updated.
+
+Nothing from the review is open any more.
 
 ## Local session 8 (2026-10-12): GPU (4.8) implemented, runs on the RX 9070
 

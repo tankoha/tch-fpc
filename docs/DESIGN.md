@@ -1012,6 +1012,7 @@ type
     function TrainableVariables: TTensorArray;
     function Variables: TNamedTensorArray;                    // insertion order
     function TryGet(const FullName: String; out T: TTensor): Boolean;
+    procedure RollbackTo(ACount: Integer);                    // undo the newest Adds
     procedure Save(const FileName: String);
     procedure Load(const FileName: String);
     function LoadPartial(const FileName: String): TStringArray;   // missing names
@@ -1326,6 +1327,14 @@ Decisions and rationale (overall shape):
   tensor by full name whatever `Dims` and `Init` say (tch-rs test
   `var_store_entry`: a second `or_zeros(&[1, 5, 9])` returns the `[3, 1, 4]`
   tensor), otherwise adds a trainable variable.
+- **`RollbackTo(ACount)`** (no tch-rs counterpart; added after the overall
+  review, 2026-10-13): removes the variables registered after the store held
+  `ACount` of them, newest first, from the entries, the name index and
+  `FTrainable`. `ACount < 0` means 0; `ACount >= Count` does nothing; it
+  never raises. Only variables appended after the mark go, so one that
+  existed before (e.g. returned by `GetOrAdd`) stays. A layer constructor
+  takes `Mark := Count` and calls it on failure (4.6.5); a custom module can
+  use the same pattern.
 - **`Freeze` / `Unfreeze`:** `set_requires_grad(False / True)` on every
   `FTrainable` entry; the entries stay trainable and stay in the optimizer
   (libtorch's optimizers skip a parameter whose `grad` is undefined,
@@ -1556,6 +1565,21 @@ tch-rs file named:
 Every config has a `Default*Config` function and each layer two
 constructors (with and without the config). Variable names are tch-rs's,
 so `.ot` files interchange.
+
+**Failed construction** (added after the overall review, 2026-10-13). A
+constructor that raises after registering variables used to leave them in
+the store (*measured*: `TConv2D` with `Groups = 0` left `c.bias` as a
+trainable variable, which a later optimizer would take and `Save` would
+write). Every constructor that registers variables (milestones 2 and 3
+layers, and `TTrainableJitModule.RegisterInto`) now records `Mark :=
+P.Store.Count` after `inherited Create` and, on any exception, calls
+`P.Store.RollbackTo(Mark)` and re-raises; FPC then runs the destructor of
+the half-built object as usual. The user chose rollback over pre-checking
+preconditions; it also covers failures no pre-check foresees (an init that
+raises after the weight was registered, `TestRollback` item 3). Variables that
+existed before the call are never removed, and an optimizer created earlier
+is unaffected (it takes variables in only at `ZeroGrad`/`Step`). Test:
+`TestRollback` in `tests/nn/nn_test.pas`.
 
 #### 4.6.6 `TSequential` and `TFuncModule`, from `sequential.rs` and `func.rs`
 

@@ -135,6 +135,11 @@ type
     function TrainableVariables: TTensorArray;
     function Variables: TNamedTensorArray;     // insertion order
     function TryGet(const AFullName: String; out T: TTensor): Boolean;
+    { Removes the variables registered after the store held ACount of them,
+      newest first. Layer constructors call it when they fail, so a
+      half-built layer leaves nothing behind; a custom module can do the
+      same. Never raises. }
+    procedure RollbackTo(ACount: Integer);
     { '.ot' and any other extension: libtorch archive with '|' separators,
       the tch-rs format. Load also reads '.pt'/'.bin' (TorchScript pickle
       zip); '.safetensors' raises. }
@@ -994,6 +999,21 @@ begin
     T := FVars[I].Tensor;
 end;
 
+procedure TVarStore.RollbackTo(ACount: Integer);
+var
+  I: Integer;
+begin
+  if ACount < 0 then
+    ACount := 0;
+  for I := High(FVars) downto ACount do
+    FIndex.Remove(FVars[I].Name);
+  if ACount < Length(FVars) then
+    SetLength(FVars, ACount);
+  { FTrainable holds indices in insertion order }
+  while (Length(FTrainable) > 0) and (FTrainable[High(FTrainable)] >= ACount) do
+    SetLength(FTrainable, Length(FTrainable) - 1);
+end;
+
 procedure TVarStore.Freeze;
 var
   I: Integer;
@@ -1375,17 +1395,24 @@ end;
 constructor TLinear.Create(const P: TVarPath; InDim, OutDim: Int64;
   const Cfg: TLinearConfig);
 var
+  Mark: Integer;
   BsInit: TInit;
 begin
   inherited Create;
-  Weight := P.Variable('weight', [OutDim, InDim], Cfg.WsInit);
-  if Cfg.Bias then
-  begin
-    if Cfg.HasBsInit then
-      BsInit := Cfg.BsInit
-    else
-      BsInit := TInit.Uniform(-1 / Sqrt(InDim), 1 / Sqrt(InDim));
-    Bias := P.Variable('bias', [OutDim], BsInit);
+  Mark := P.Store.Count;
+  try
+    Weight := P.Variable('weight', [OutDim, InDim], Cfg.WsInit);
+    if Cfg.Bias then
+    begin
+      if Cfg.HasBsInit then
+        BsInit := Cfg.BsInit
+      else
+        BsInit := TInit.Uniform(-1 / Sqrt(InDim), 1 / Sqrt(InDim));
+      Bias := P.Variable('bias', [OutDim], BsInit);
+    end;
+  except
+    P.Store.RollbackTo(Mark);
+    raise;
   end;
 end;
 
@@ -1429,26 +1456,33 @@ end;
 constructor TConvND.Create(const P: TVarPath; InDim, OutDim: Int64;
   const KSizes: array of Int64; const Cfg: TConvConfigND);
 var
+  Mark: Integer;
   I: Integer;
 begin
   inherited Create;
-  FNd := CheckNd('conv', KSizes, [Cfg.Stride, Cfg.Padding, Cfg.Dilation]);
-  FCfg := Cfg;
-  FCfg.Stride := Copy(Cfg.Stride);
-  FCfg.Padding := Copy(Cfg.Padding);
-  FCfg.Dilation := Copy(Cfg.Dilation);
-  { PyTorch's order: last dimension's left/right first (DESIGN 4.6.10) }
-  SetLength(FPadTwice, 2 * FNd);
-  for I := 0 to FNd - 1 do
-  begin
-    FPadTwice[2 * I] := FCfg.Padding[FNd - 1 - I];
-    FPadTwice[2 * I + 1] := FCfg.Padding[FNd - 1 - I];
+  Mark := P.Store.Count;
+  try
+    FNd := CheckNd('conv', KSizes, [Cfg.Stride, Cfg.Padding, Cfg.Dilation]);
+    FCfg := Cfg;
+    FCfg.Stride := Copy(Cfg.Stride);
+    FCfg.Padding := Copy(Cfg.Padding);
+    FCfg.Dilation := Copy(Cfg.Dilation);
+    { PyTorch's order: last dimension's left/right first (DESIGN 4.6.10) }
+    SetLength(FPadTwice, 2 * FNd);
+    for I := 0 to FNd - 1 do
+    begin
+      FPadTwice[2 * I] := FCfg.Padding[FNd - 1 - I];
+      FPadTwice[2 * I + 1] := FCfg.Padding[FNd - 1 - I];
+    end;
+    FZeroPad := Repeated(0, FNd);
+    if Cfg.Bias then
+      Bias := P.Variable('bias', [OutDim], Cfg.BsInit);
+    Weight := P.Variable('weight',
+      KernelDims(OutDim, InDim div Cfg.Groups, KSizes), Cfg.WsInit);
+  except
+    P.Store.RollbackTo(Mark);
+    raise;
   end;
-  FZeroPad := Repeated(0, FNd);
-  if Cfg.Bias then
-    Bias := P.Variable('bias', [OutDim], Cfg.BsInit);
-  Weight := P.Variable('weight', KernelDims(OutDim, InDim div Cfg.Groups, KSizes),
-    Cfg.WsInit);
 end;
 
 function TConvND.Forward(const X: TTensor; Train: Boolean): TTensor;
@@ -1511,19 +1545,27 @@ end;
 
 constructor TConvTransposeND.Create(const P: TVarPath; InDim, OutDim: Int64;
   const KSizes: array of Int64; const Cfg: TConvTransposeConfigND);
+var
+  Mark: Integer;
 begin
   inherited Create;
-  FNd := CheckNd('conv_transpose', KSizes, [Cfg.Stride, Cfg.Padding,
-    Cfg.OutputPadding, Cfg.Dilation]);
-  FCfg := Cfg;
-  FCfg.Stride := Copy(Cfg.Stride);
-  FCfg.Padding := Copy(Cfg.Padding);
-  FCfg.OutputPadding := Copy(Cfg.OutputPadding);
-  FCfg.Dilation := Copy(Cfg.Dilation);
-  if Cfg.Bias then
-    Bias := P.Variable('bias', [OutDim], Cfg.BsInit);
-  Weight := P.Variable('weight', KernelDims(InDim, OutDim div Cfg.Groups, KSizes),
-    Cfg.WsInit);
+  Mark := P.Store.Count;
+  try
+    FNd := CheckNd('conv_transpose', KSizes, [Cfg.Stride, Cfg.Padding,
+      Cfg.OutputPadding, Cfg.Dilation]);
+    FCfg := Cfg;
+    FCfg.Stride := Copy(Cfg.Stride);
+    FCfg.Padding := Copy(Cfg.Padding);
+    FCfg.OutputPadding := Copy(Cfg.OutputPadding);
+    FCfg.Dilation := Copy(Cfg.Dilation);
+    if Cfg.Bias then
+      Bias := P.Variable('bias', [OutDim], Cfg.BsInit);
+    Weight := P.Variable('weight',
+      KernelDims(InDim, OutDim div Cfg.Groups, KSizes), Cfg.WsInit);
+  except
+    P.Store.RollbackTo(Mark);
+    raise;
+  end;
 end;
 
 { the generated argument order puts groups before dilation }
@@ -1583,19 +1625,27 @@ end;
 
 constructor TBatchNorm.Create(const P: TVarPath; Nd: Integer; OutDim: Int64;
   const Cfg: TBatchNormConfig);
+var
+  Mark: Integer;
 begin
   inherited Create;
-  if (Nd < 1) or (Nd > 3) then
-    raise ETorchError.CreateFmt('batch norm: Nd = %d, expected 1..3', [Nd]);
-  FNd := Nd;
-  FCfg := Cfg;
-  if Cfg.Affine then
-  begin
-    Weight := P.Variable('weight', [OutDim], Cfg.WsInit);
-    Bias := P.Variable('bias', [OutDim], Cfg.BsInit);
+  Mark := P.Store.Count;
+  try
+    if (Nd < 1) or (Nd > 3) then
+      raise ETorchError.CreateFmt('batch norm: Nd = %d, expected 1..3', [Nd]);
+    FNd := Nd;
+    FCfg := Cfg;
+    if Cfg.Affine then
+    begin
+      Weight := P.Variable('weight', [OutDim], Cfg.WsInit);
+      Bias := P.Variable('bias', [OutDim], Cfg.BsInit);
+    end;
+    RunningMean := P.ZerosNoTrain('running_mean', [OutDim]);
+    RunningVar := P.OnesNoTrain('running_var', [OutDim]);
+  except
+    P.Store.RollbackTo(Mark);
+    raise;
   end;
-  RunningMean := P.ZerosNoTrain('running_mean', [OutDim]);
-  RunningVar := P.OnesNoTrain('running_var', [OutDim]);
 end;
 
 function ShapeText(const S: TInt64Array): String;
@@ -1640,17 +1690,24 @@ end;
 constructor TLayerNorm.Create(const P: TVarPath;
   const NormalizedShape: array of Int64; const Cfg: TLayerNormConfig);
 var
+  Mark: Integer;
   I: Integer;
 begin
   inherited Create;
-  FCfg := Cfg;
-  SetLength(FShape, Length(NormalizedShape));
-  for I := 0 to High(NormalizedShape) do
-    FShape[I] := NormalizedShape[I];
-  if Cfg.ElementwiseAffine then
-  begin
-    Weight := P.Variable('weight', FShape, Cfg.WsInit);
-    Bias := P.Variable('bias', FShape, Cfg.BsInit);
+  Mark := P.Store.Count;
+  try
+    FCfg := Cfg;
+    SetLength(FShape, Length(NormalizedShape));
+    for I := 0 to High(NormalizedShape) do
+      FShape[I] := NormalizedShape[I];
+    if Cfg.ElementwiseAffine then
+    begin
+      Weight := P.Variable('weight', FShape, Cfg.WsInit);
+      Bias := P.Variable('bias', FShape, Cfg.BsInit);
+    end;
+  except
+    P.Store.RollbackTo(Mark);
+    raise;
   end;
 end;
 
@@ -1669,10 +1726,18 @@ end;
 
 constructor TEmbedding.Create(const P: TVarPath;
   NumEmbeddings, EmbeddingDim: Int64; const Cfg: TEmbeddingConfig);
+var
+  Mark: Integer;
 begin
   inherited Create;
-  FCfg := Cfg;
-  Weight := P.Variable('weight', [NumEmbeddings, EmbeddingDim], Cfg.WsInit);
+  Mark := P.Store.Count;
+  try
+    FCfg := Cfg;
+    Weight := P.Variable('weight', [NumEmbeddings, EmbeddingDim], Cfg.WsInit);
+  except
+    P.Store.RollbackTo(Mark);
+    raise;
+  end;
 end;
 
 function TEmbedding.Forward(const X: TTensor; Train: Boolean): TTensor;
@@ -1690,15 +1755,23 @@ end;
 
 constructor TGroupNorm.Create(const P: TVarPath; NumGroups, NumChannels: Int64;
   const Cfg: TGroupNormConfig);
+var
+  Mark: Integer;
 begin
   inherited Create;
-  FCfg := Cfg;
-  FNumGroups := NumGroups;
-  FNumChannels := NumChannels;
-  if Cfg.Affine then
-  begin
-    Weight := P.Variable('weight', [NumChannels], Cfg.WsInit);
-    Bias := P.Variable('bias', [NumChannels], Cfg.BsInit);
+  Mark := P.Store.Count;
+  try
+    FCfg := Cfg;
+    FNumGroups := NumGroups;
+    FNumChannels := NumChannels;
+    if Cfg.Affine then
+    begin
+      Weight := P.Variable('weight', [NumChannels], Cfg.WsInit);
+      Bias := P.Variable('bias', [NumChannels], Cfg.BsInit);
+    end;
+  except
+    P.Store.RollbackTo(Mark);
+    raise;
   end;
 end;
 
@@ -1712,57 +1785,67 @@ end;
 constructor TRNN.Create(const P: TVarPath; InDim, AHiddenDim, GateMul: Int64;
   const Cfg: TRNNConfig);
 var
+  Mark: Integer;
   L, D, K: Integer;
   GateDim, InL, Mode: Int64;
   Sfx: String;
 begin
   inherited Create;
-  FHiddenDim := AHiddenDim;
-  FCfg := Cfg;
-  GateDim := GateMul * AHiddenDim;
-  FFlatWeights := nil;
-  K := 0;
-  if Cfg.HasBiases then
-    SetLength(FFlatWeights, 4 * Cfg.NumLayers * NumDirections)
-  else
-    SetLength(FFlatWeights, 2 * Cfg.NumLayers * NumDirections);
-  for L := 0 to Cfg.NumLayers - 1 do
-    for D := 0 to NumDirections - 1 do
-    begin
-      if L = 0 then
-        InL := InDim
-      else
-        InL := AHiddenDim * NumDirections;
-      if D = 1 then
-        Sfx := IntToStr(L) + '_reverse'
-      else
-        Sfx := IntToStr(L);
-      FFlatWeights[K] := P.Variable('weight_ih_l' + Sfx, [GateDim, InL], Cfg.WIhInit);
-      FFlatWeights[K + 1] := P.Variable('weight_hh_l' + Sfx, [GateDim, AHiddenDim],
-        Cfg.WHhInit);
-      Inc(K, 2);
-      if Cfg.HasBiases then
+  Mark := P.Store.Count;
+  try
+    FHiddenDim := AHiddenDim;
+    FCfg := Cfg;
+    GateDim := GateMul * AHiddenDim;
+    FFlatWeights := nil;
+    K := 0;
+    if Cfg.HasBiases then
+      SetLength(FFlatWeights, 4 * Cfg.NumLayers * NumDirections)
+    else
+      SetLength(FFlatWeights, 2 * Cfg.NumLayers * NumDirections);
+    for L := 0 to Cfg.NumLayers - 1 do
+      for D := 0 to NumDirections - 1 do
       begin
-        FFlatWeights[K] := P.Variable('bias_ih_l' + Sfx, [GateDim], Cfg.BIhInit);
-        FFlatWeights[K + 1] := P.Variable('bias_hh_l' + Sfx, [GateDim], Cfg.BHhInit);
+        if L = 0 then
+          InL := InDim
+        else
+          InL := AHiddenDim * NumDirections;
+        if D = 1 then
+          Sfx := IntToStr(L) + '_reverse'
+        else
+          Sfx := IntToStr(L);
+        FFlatWeights[K] := P.Variable('weight_ih_l' + Sfx, [GateDim, InL],
+          Cfg.WIhInit);
+        FFlatWeights[K + 1] := P.Variable('weight_hh_l' + Sfx,
+          [GateDim, AHiddenDim], Cfg.WHhInit);
         Inc(K, 2);
+        if Cfg.HasBiases then
+        begin
+          FFlatWeights[K] := P.Variable('bias_ih_l' + Sfx, [GateDim],
+            Cfg.BIhInit);
+          FFlatWeights[K + 1] := P.Variable('bias_hh_l' + Sfx, [GateDim],
+            Cfg.BHhInit);
+          Inc(K, 2);
+        end;
+      end;
+    { tch-rs flattens for cuDNN; a performance hint, so a refusal is ignored.
+      Weight stride 2 without biases follows PyTorch (tch-rs passes 4). }
+    if P.Device.IsCuda and CudnnIsAvailable then
+    begin
+      if GateMul = 4 then
+        Mode := 2                   // cudnnRNNMode_t: LSTM
+      else
+        Mode := 3;                  // GRU
+      try
+        TTensor._cudnn_rnn_flatten_weight(FFlatWeights,
+          2 + 2 * Ord(Cfg.HasBiases), InDim, Mode, AHiddenDim, 0,
+          Cfg.NumLayers, Cfg.BatchFirst, Cfg.Bidirectional);
+      except
+        on ETorchNativeError do ;
       end;
     end;
-  { tch-rs flattens for cuDNN; a performance hint, so a refusal is ignored.
-    Weight stride 2 without biases follows PyTorch (tch-rs passes 4). }
-  if P.Device.IsCuda and CudnnIsAvailable then
-  begin
-    if GateMul = 4 then
-      Mode := 2                   // cudnnRNNMode_t: LSTM
-    else
-      Mode := 3;                  // GRU
-    try
-      TTensor._cudnn_rnn_flatten_weight(FFlatWeights, 2 + 2 * Ord(Cfg.HasBiases),
-        InDim, Mode, AHiddenDim, 0, Cfg.NumLayers, Cfg.BatchFirst,
-        Cfg.Bidirectional);
-    except
-      on ETorchNativeError do ;
-    end;
+  except
+    P.Store.RollbackTo(Mark);
+    raise;
   end;
 end;
 

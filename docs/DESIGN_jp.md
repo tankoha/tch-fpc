@@ -972,6 +972,7 @@ type
     function TrainableVariables: TTensorArray;
     function Variables: TNamedTensorArray;                    // 登録順
     function TryGet(const FullName: String; out T: TTensor): Boolean;
+    procedure RollbackTo(ACount: Integer);                    // 新しい Add を取り消す
     procedure Save(const FileName: String);
     procedure Load(const FileName: String);
     function LoadPartial(const FileName: String): TStringArray;   // 欠けていた名前
@@ -1262,6 +1263,13 @@ type
   `Dims` と `Init` が何であれそれを返します（tch-rs のテスト `var_store_entry`：2回目の
   `or_zeros(&[1, 5, 9])` は `[3, 1, 4]` のテンソルを返す）。なければ学習対象の変数を
   追加します。
+- **`RollbackTo(ACount)`**（tch-rs に対応物なし。全体レビューの後、2026-10-13 に追加）：
+  ストアの変数が `ACount` 個だった時点より後に登録された変数を、新しいものから順に、
+  エントリ、名前の索引、`FTrainable` から取り除きます。`ACount < 0` は 0 とみなし、
+  `ACount >= Count` なら何もせず、例外は出しません。印より後に追加された変数だけが
+  消えるので、それ以前からあった変数（例：`GetOrAdd` が返したもの）は残ります。
+  レイヤーのコンストラクタは `Mark := Count` を記録し、失敗したときにこれを呼びます
+  （4.6.5）。自作のモジュールも同じ型で使えます。
 - **`Freeze` / `Unfreeze`：** `FTrainable` の全要素に `set_requires_grad(False / True)`。
   要素は学習対象のままで、オプティマイザにも残ります（libtorch のオプティマイザは `grad`
   が未定義のパラメータを飛ばす。**(H18)**：`Freeze; Step` は値を変えず、例外も出ない）。
@@ -1468,6 +1476,19 @@ type
 
 各設定には `Default*Config` 関数があり、各レイヤーにはコンストラクタが2つ（設定あり・
 なし）あります。変数名は tch-rs のものなので、`.ot` ファイルは相互に使えます。
+
+**構築の失敗**（全体レビューの後、2026-10-13 に追加）。変数を登録したあとで例外を出す
+コンストラクタは、以前は変数をストアに残していました（*実測*：`Groups = 0` の
+`TConv2D` は `c.bias` を学習対象の変数として残し、後から作るオプティマイザがそれを拾い、
+`Save` がそれを書き出す）。変数を登録するすべてのコンストラクタ（マイルストーン2・3の
+レイヤーと `TTrainableJitModule.RegisterInto`）は、`inherited Create` の後で
+`Mark := P.Store.Count` を記録し、例外が出たら `P.Store.RollbackTo(Mark)` を呼んで
+再送出するようになりました。そのあと FPC が、作りかけのオブジェクトのデストラクタを
+いつもどおり実行します。事前条件を先に確かめる方式ではなく巻き戻しを選んだのはユーザーの
+判断で、事前の検査では予見できない失敗（重みの登録後に初期化が例外を出す場合、
+`TestRollback` の項目3）も拾えます。以前からあった変数は決して取り除かれず、先に作った
+オプティマイザにも影響しません（変数を取り込むのは `ZeroGrad`/`Step` のときだけ）。
+テスト：`tests/nn/nn_test.pas` の `TestRollback`。
 
 #### 4.6.6 `TSequential` と `TFuncModule`、`sequential.rs` と `func.rs` より
 

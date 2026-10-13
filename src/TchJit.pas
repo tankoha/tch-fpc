@@ -1192,15 +1192,22 @@ end;
 
 { tch-rs TrainableCModule::load: the store entry is the module's parameter
   (shared handle); trainable = the loaded requires_grad. }
+{ A failure part-way removes the parameters already added (RollbackTo). }
 procedure TTrainableJitModule.RegisterInto(const P: TVarPath);
 var
   Params: TNamedTensorArray;
-  K: Integer;
+  K, Mark: Integer;
 begin
-  Params := FInner.NamedParameters;
-  for K := 0 to High(Params) do
-    P.Add(StringReplace(Params[K].Name, '.', '_', [rfReplaceAll]),
-      Params[K].Tensor, Params[K].Tensor.RequiresGrad);
+  Mark := P.Store.Count;
+  try
+    Params := FInner.NamedParameters;
+    for K := 0 to High(Params) do
+      P.Add(StringReplace(Params[K].Name, '.', '_', [rfReplaceAll]),
+        Params[K].Tensor, Params[K].Tensor.RequiresGrad);
+  except
+    P.Store.RollbackTo(Mark);
+    raise;
+  end;
 end;
 
 function TTrainableJitModule.Forward(const X: TTensor; Train: Boolean): TTensor;

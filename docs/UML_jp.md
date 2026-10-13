@@ -176,6 +176,7 @@ classDiagram
     +Root() TVarPath
     +Variables() TNamedTensorArray
     +TrainableVariables() TTensorArray
+    +RollbackTo(ACount)
     +Save(FileName)
     +Load(FileName)
     +LoadPartial(FileName) TStringArray

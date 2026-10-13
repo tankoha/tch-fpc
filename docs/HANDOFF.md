@@ -4,7 +4,16 @@ Japanese version: [HANDOFF_jp.md](HANDOFF_jp.md)
 
 Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 
-## Overall review (2026-10-12, after local session 8) — resume here
+## Release v0.1.0 (2026-10-14) — resume here
+
+The repository was made public on 2026-10-13 (secrets, personal paths,
+history and license placement checked first; README status updated). The
+first release, **v0.1.0**, is a GitHub pre-release on tag `v0.1.0`
+(commit b7933d8): https://github.com/tankoha/tch-fpc/releases/tag/v0.1.0.
+Next: choose the theme of the next milestone with the user, then a design
+session (Fable sub-agent).
+
+## Overall review (2026-10-12, after local session 8)
 
 Three independent Opus reviewers (code vs design, en/jp documents, test
 coverage; read-only, no context from the sessions) reviewed the whole

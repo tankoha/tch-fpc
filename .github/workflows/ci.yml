@@ -1,0 +1,104 @@
+name: CI
+
+# libtorch が要らない検査（モックとコンパイラ試験）と、CPU 版 libtorch に
+# 対する本番の検査を分けて走らせる。GPU（ROCm / CUDA）の検査は GitHub の
+# ランナーに GPU が無いので走らせない（tests/gpu は手元で実行する）。
+on:
+  push:
+  pull_request:
+
+env:
+  LIBTORCH_VERSION: 2.13.0
+  FPC_FLAGS: -Mobjfpc -Sh
+
+jobs:
+  no-libtorch:
+    name: mock and compiler tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install FPC and gcc
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y fpc gcc
+
+      - name: Mock libtch tests
+        run: bash tests/mock/run.sh
+
+      - name: Compiler acceptance tests
+        run: bash tests/compiler/run.sh
+
+  libtorch-cpu:
+    name: libtorch (CPU)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install FPC, g++ and CMake
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y fpc g++ cmake
+
+      # zip は 126 MB なのでキャッシュする。展開先は libtorch/（.gitignore 済み）。
+      - name: Cache libtorch
+        id: cache-libtorch
+        uses: actions/cache@v4
+        with:
+          path: libtorch
+          key: libtorch-cpu-${{ env.LIBTORCH_VERSION }}
+
+      - name: Download libtorch (CPU)
+        if: steps.cache-libtorch.outputs.cache-hit != 'true'
+        run: |
+          curl -fsSL -o libtorch.zip \
+            "https://download.pytorch.org/libtorch/cpu/libtorch-shared-with-deps-${LIBTORCH_VERSION}%2Bcpu.zip"
+          unzip -q libtorch.zip
+          rm libtorch.zip
+          cat libtorch/build-version
+
+      - name: Build libtch
+        run: |
+          cmake -S csrc/libtch -B build/libtch \
+            -DCMAKE_PREFIX_PATH="$PWD/libtorch" -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/libtch -j "$(nproc)"
+
+      - name: C smoke test
+        run: |
+          gcc -std=c11 -Wall -Wextra tests/c/smoke.c -Icsrc/libtch \
+            -Lbuild/libtch -ltch -Wl,-rpath,"$PWD/build/libtch" -o build/smoke
+          build/smoke
+
+      # それぞれのテストの先頭コメントにあるビルド行と同じ。
+      - name: Build Pascal tests
+        run: |
+          set -eu
+          for t in abi api nn jit generated ownership; do
+            mkdir -p "build/$t"
+            fpc $FPC_FLAGS -Fusrc -FU"build/$t" -Flbuild/libtch \
+              -k-rpath="$PWD/build/libtch" "tests/$t/${t}_test.pas" -o"build/${t}_test" \
+              > "build/$t/build.log" 2>&1 \
+              || { cat "build/$t/build.log"; exit 1; }
+          done
+          mkdir -p build/fpu
+          fpc $FPC_FLAGS -Fusrc -FUbuild/fpu -Flbuild/libtch \
+            -k-rpath="$PWD/build/libtch" tests/fpu/fpu_test.pas -obuild/fpu_test \
+            > build/fpu/build.log 2>&1 || { cat build/fpu/build.log; exit 1; }
+
+      - name: Run Pascal tests
+        run: |
+          set -eu
+          for t in abi api nn jit generated ownership; do
+            echo "=== $t"
+            "build/${t}_test"
+          done
+
+      - name: FPU exception mask tests
+        run: bash tests/fpu/run.sh build/fpu_test
+
+      # CPU 版では SKIP を出して成功する。GPU 用のコードがコンパイルできる
+      # ことの確認だけを担う。
+      - name: GPU test (compile only, SKIP on CPU)
+        run: bash tests/gpu/run.sh cpu

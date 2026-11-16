@@ -32,14 +32,14 @@ Done in this session:
   labwc and the desktop session restarted.
 
 Next, in order:
-1. **User:** move both monitors to the iGPU outputs and set the BIOS
-   primary display to the integrated GPU (so `boot_vga` and the
-   compositor's render device move off the RX 9070s). Then check that
-   `boot_vga` is on 10:00.0 and the XT's VRAM use is near 0 with the
-   desktop up.
-2. Re-run H42 with a re-balanced split (e.g. 36/28, the 9070 holds the
-   head) at T = 1024, then T = 2048 with the saved block inputs in host
-   memory. Unload Ollama first (`ollama stop`).
+1. ~~**User:** move both monitors to the iGPU~~ **done 2026-11-17**:
+   `boot_vga` on 10:00.0, both RX 9070 idle at 0.08 GiB. Only the DP
+   monitor (`card2-DP-7`) was detected as connected at the time; check
+   the HDMI one.
+2. ~~Re-run H42 with a re-balanced split~~ **done 2026-11-17** (DESIGN 8.8
+   "Gate re-run"): 36/28 gives 167 tokens/s at T = 1024 (13.06 / 13.88
+   GiB) and, with saved inputs in host memory, 172 tokens/s at T = 2048
+   (14.03 / 14.74 GiB); no ring timeouts. The gate is passed.
 3. **User:** C1 (deployment path) and C3 (blob read access, GGUF base,
    Mistral output terms, Oxygene excluded) below; then the next design
    session continues DESIGN 8 (milestones, module structure, LoRA layer,

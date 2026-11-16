@@ -3965,3 +3965,22 @@ passes for T = 1024 with three new conditions:
    fewer blocks (e.g. 36/28); the XT is also about 20 % faster (H40).
 3. Keep T ≤ 1024 for training samples, or move the saved block inputs to
    host memory and re-measure T = 2048 after 1 and 2.
+
+#### Gate re-run (2026-11-17, display on the iGPU)
+
+Both monitors moved to the Raphael iGPU and the BIOS primary display set to
+it: `boot_vga` is now on 10:00.0, both RX 9070 cards idle at 0.08 GiB, and
+the DRM card numbers changed (XT = `card0`, 9070 = `card1`, iGPU =
+`card2`; HIP order unchanged). `h42` takes the split and the host offload
+as arguments (`h42 step <T> <blocks on GPU 0> <blocks on GPU 1> [host]`).
+
+| T | split | saved inputs | step (2nd) | tokens/s | peak, whole card, XT / 9070 (of 15.92 GiB) |
+|---|---|---|---|---|---|
+| 1024 | 36/28 | GPU | 6.12 s | **167** | 13.06 / 13.88 |
+| 2048 | 36/28 | host | 11.90 s | **172** | 14.03 / 14.74 |
+
+No GPU ring timeouts in the kernel log. **H42 now holds for T = 2048 as
+well**, with the 36/28 split and the saved block inputs in host memory
+(0.67 GiB per GPU moved out; copies cost little next to the step). The
+margin is about 1.2 GiB on the 9070, which holds the head. Conditions 1–3
+of the gate are met; the remaining Theme B conditions are C1, C3 and C4.

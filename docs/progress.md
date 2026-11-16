@@ -7,8 +7,8 @@ The detailed log and the next steps are in [HANDOFF.md](HANDOFF.md);
 decisions and numbers in [DESIGN.md](DESIGN.md). Update this page at the
 end of every session, together with HANDOFF.
 
-Last updated: 2026-11-16, end of local session 9. Nothing of this work is
-committed yet.
+Last updated: 2026-11-17, local session 9 (gate re-run after moving the
+display to the iGPU).
 
 ## Goals
 
@@ -29,9 +29,9 @@ committed yet.
 | Theme A implementation | not started | HANDOFF "Local list for Theme A" |
 | Theme B feasibility analysis | done: GO with conditions | DESIGN 8.1–8.8 |
 | ROCm libtorch on this host | restored, `build/libtch-rocm` built, CI tests pass on the CPU | HANDOFF local session 9 |
-| GPU gate (C2: H40–H42) | passed for T = 1024; T = 2048 out of memory; desktop hang seen | DESIGN 8.8 "Gate results" |
-| Display moved to the iGPU | waiting for the user | HANDOFF local session 9, step 1 |
-| H42 re-run (re-balanced split, T = 2048 with host offload) | not started | same, step 2 |
+| GPU gate (C2: H40–H42) | **passed**: T = 1024 and T = 2048 fit with the 36/28 split (T = 2048 with saved inputs in host memory) | DESIGN 8.8 "Gate results", "Gate re-run" |
+| Display moved to the iGPU | done 2026-11-17 (HDMI monitor not detected at the time) | HANDOFF local session 9, step 1 |
+| H42 re-run (re-balanced split, T = 2048 with host offload) | done 2026-11-17 | same, step 2 |
 | C1 deployment path (D2 / D3 / D4) | waiting for the user | HANDOFF C1 |
 | C3 inputs (blob access, GGUF base, Mistral terms, Oxygene) | waiting for the user | HANDOFF C3 |
 | Theme B detailed design (milestones, modules, LoRA, data spec, evaluation) | not started; next design session after C1 and C3 | — |
@@ -46,7 +46,7 @@ committed yet.
 | H39 | the skill raises the local Qwen's pass rate on ten tasks | open (Theme A step 7, = C4) |
 | H40 | bf16 / fp16 products work and are fast on gfx1201 | **holds**: 100 / 81 TFLOP/s bf16 (XT / 9070); fp32 only 1.6 / 1.3 |
 | H41 | Q4_K / Q6_K dequantisation in tensor ops is correct and fast | **holds**: exact; 3.2 / 4.7 ms per 89 M weights |
-| H42 | one training step fits and runs from one process on two GPUs | **holds for T = 1024** (166 tokens/s, peak 12.8 / 14.9 GiB); **not for T = 2048** at 32/32 |
+| H42 | one training step fits and runs from one process on two GPUs | **holds**: 36/28 split, 167 tokens/s at T = 1024 (13.1 / 13.9 GiB), 172 at T = 2048 with host offload (14.0 / 14.7 GiB) |
 | H43 | the Pascal forward matches the running model's log-probabilities | open |
 | H44 | the bundled `llama-server --lora` applies an adapter to `qwen35` | open (C1) |
 | H45 | Ollama imports and runs a merged GGUF with Q8_0 tensors | open (C1) |
@@ -54,8 +54,9 @@ committed yet.
 
 ## Measured numbers to keep in mind
 
-- Training speed on the synthetic stack: 166 tokens/s at T = 1024
-  (planning value in DESIGN 8.6 was 100).
-- The RX 9070 holding the head peaks at 14.9 of 15.9 GiB at T = 1024.
-- Running the gate on the card that drives the display hung its gfx ring
-  and restarted the desktop session.
+- Training speed on the synthetic stack: 167–172 tokens/s (planning value
+  in DESIGN 8.6 was 100).
+- Split 36/28 (the 9070 holds the head): peak 14.7 of 15.9 GiB at
+  T = 2048 with saved inputs in host memory.
+- Never train on a card that drives the display: it hung the gfx ring and
+  restarted the desktop session. The display is on the iGPU now.

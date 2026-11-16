@@ -3,9 +3,10 @@
 Japanese version: [UML_jp.md](UML_jp.md)
 
 Diagrams of what is implemented (milestones 1–3, TorchScript objects, the
-milestone 3 layers, GPU devices on ROCm). Only the CUDA build is still
-planned (dashed); it needs an NVIDIA machine.
-State: 2026-10-12, after local session 8. DESIGN.md stays the source of
+milestone 3 layers, GPU devices on ROCm) and of what is planned (dashed):
+the CUDA build, which needs an NVIDIA machine, and the knowledge package
+of DESIGN 7.
+State: 2026-11-16, after design session 9. DESIGN.md stays the source of
 truth; this file only draws it.
 
 Contents:
@@ -17,7 +18,8 @@ Contents:
 6. [Sequence: ForwardIV and ivalue ownership](#6-sequence-forwardiv-and-ivalue-ownership)
 7. [Sequence: fine-tuning a TorchScript module](#7-sequence-fine-tuning-a-torchscript-module)
 8. [Deployment: CPU, ROCm and CUDA builds](#8-deployment-cpu-rocm-and-cuda-builds)
-9. [Status](#9-status)
+9. [Knowledge package (planned)](#9-knowledge-package-planned)
+10. [Status](#10-status)
 
 ## 1. Layers and units
 
@@ -547,7 +549,53 @@ flowchart LR
   class CUDA,B3 planned
 ```
 
-## 9. Status
+## 9. Knowledge package (planned)
+
+DESIGN 7: a plugin with one skill, loaded by Claude Code through the
+repository's marketplace file and by Hermes through
+`skills.external_dirs`. No Pascal types are added. The fine-tuning sample
+of DESIGN 8 has no types yet: its design stopped at the feasibility gate.
+
+```mermaid
+flowchart LR
+  subgraph Repo["tch-fpc repository"]
+    MP[".claude-plugin/marketplace.json<br/>source: ./plugin"]
+    subgraph Plugin["plugin/"]
+      PJ[".claude-plugin/plugin.json"]
+      subgraph Skill["skills/tch-fpc/"]
+        SK["SKILL.md<br/>rules, tables, doc index"]
+        REF["reference/*.md"]
+        EX["examples/ (.pas + .expected)"]
+        PIT["pitfalls/ (must not compile)"]
+        TR["traps/ (.pas + .expected)"]
+        BE["scripts/build-example.sh"]
+      end
+    end
+    DOCS["docs/, src/ (indexed, not copied)"]
+    CHK["tests/skill/check-examples.sh<br/>tests/skill/check-index.sh"]
+    TASKS["tests/skill/tasks/<br/>ten tasks with checkers (H39)"]
+  end
+  CC["Claude Code<br/>/plugin install tch-fpc"]
+  HE["Hermes Agent<br/>skills.external_dirs"]
+  CI["CI: libtorch (CPU) job"]
+  MP --> Plugin
+  CC --> MP
+  HE --> Skill
+  SK --> REF
+  SK --> EX
+  SK --> PIT
+  SK --> TR
+  SK -. "path + pinned URL" .-> DOCS
+  CHK --> BE
+  CHK --> EX
+  CHK --> PIT
+  CHK --> TR
+  CI --> CHK
+  classDef planned stroke-dasharray: 5 5
+  class MP,PJ,SK,REF,EX,PIT,TR,BE,CHK,TASKS planned
+```
+
+## 10. Status
 
 | Area | DESIGN | State |
 |---|---|---|
@@ -558,3 +606,5 @@ flowchart LR
 | TorchScript objects (`IJitObject`) | 4.6.9 | implemented (local session 6, 2026-10-12), H26–H28 hold |
 | Conv1D/3D, ConvTranspose, GroupNorm, LSTM/GRU, Identity | 4.6.10 | implemented (local session 7, 2026-10-12); H29 (`.ot` interchange with tch-rs) open, needs Rust |
 | GPU: ROCm / CUDA builds and API | 4.8 | implemented (local session 8, 2026-10-12); ROCm runs on the RX 9070, H31 and H33 hold, H32 amended (8 symlinks after unpacking), H34 false, H35 answered; CUDA unmeasured |
+| Knowledge package: plugin, skill, verified examples | 7 | designed (design session 9, 2026-11-16); not implemented; H37–H39 open |
+| Fine-tuning Qwen3.8 27B as a tch-fpc sample | 8 | feasibility only: GO with conditions C1–C4 (HANDOFF); no types designed; H40–H46 open |

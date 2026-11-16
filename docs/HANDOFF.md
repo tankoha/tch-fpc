@@ -3,15 +3,192 @@
 Japanese version: [HANDOFF_jp.md](HANDOFF_jp.md)
 
 Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
+Status at a glance of the knowledge-package and fine-tuning work:
+[progress.md](progress.md).
 
-## Release v0.1.0 (2026-10-14) — resume here
+## Local session 9 (2026-11-16): ROCm libtorch restored, GPU gate run — resume here
+
+**Where things stand.** Nothing is committed: the working tree has the
+design session 9 documents (DESIGN 7 and 8, UML 9, this file, the `_jp`
+translations) plus the gate results below. Nothing of Theme A or B is
+implemented.
+
+Done in this session:
+- ROCm libtorch back as `libtorch-rocm/` (`build-version`
+  2.13.0+rocm7.1; zip kept in `~/Downloads`), the eight symlinks of
+  DESIGN 4.8, `build/libtch-rocm` built (same four warnings). No CPU
+  libtorch on this host: CI downloads its own; the ROCm build also runs
+  on the CPU.
+- The six CI tests (abi, api, nn, jit, generated, ownership) built against
+  `build/libtch-rocm` pass on the CPU with
+  `HIP_VISIBLE_DEVICES=-1 ROCR_VISIBLE_DEVICES=-1`.
+- `rocm-smi` and `libdrm-dev` installed (by the user). The two cards are
+  an RX 9070 XT (PCI 03:00.0, HIP device 0, drives both monitors) and an
+  RX 9070 (PCI 09:00.0, HIP device 1); the Raphael iGPU (10:00.0) is
+  enabled and has a DP and an HDMI output.
+- **GPU gate (C2) run: passed for T = 1024 with new conditions.** Numbers
+  in DESIGN 8.8 "Gate results"; programs in `build/gate-2026-11-16/`
+  (git-ignored). The second T = 2048 run hung the XT's gfx ring under
+  labwc and the desktop session restarted.
+
+Next, in order:
+1. **User:** move both monitors to the iGPU outputs and set the BIOS
+   primary display to the integrated GPU (so `boot_vga` and the
+   compositor's render device move off the RX 9070s). Then check that
+   `boot_vga` is on 10:00.0 and the XT's VRAM use is near 0 with the
+   desktop up.
+2. Re-run H42 with a re-balanced split (e.g. 36/28, the 9070 holds the
+   head) at T = 1024, then T = 2048 with the saved block inputs in host
+   memory. Unload Ollama first (`ollama stop`).
+3. **User:** C1 (deployment path) and C3 (blob read access, GGUF base,
+   Mistral output terms, Oxygene excluded) below; then the next design
+   session continues DESIGN 8 (milestones, module structure, LoRA layer,
+   data specification, evaluation, hand-off to the Hermes process).
+4. In parallel: Theme A, local list below (C4).
+
+## Design session 9 (2026-11-16): knowledge package designed; 27B fine-tuning stopped at the feasibility gate
+
+Run as a Fable sub-agent from a local session. Two themes; decisions and
+numbers are in DESIGN 7 and 8. Nothing is implemented and nothing was
+committed by the design session.
+
+**Theme A — LLM-facing knowledge package (DESIGN 7): designed, ready to
+implement locally.** A plugin under `plugin/` with one skill
+`plugin/skills/tch-fpc/` (`SKILL.md`, `reference/`, `examples/`,
+`pitfalls/`, `traps/`, `scripts/build-example.sh`), a root
+`.claude-plugin/marketplace.json`, verification in `tests/skill/`, one
+more CI step. English only; licence as the repository.
+
+Local list for Theme A:
+1. `plugin/.claude-plugin/plugin.json`, root `.claude-plugin/marketplace.json`.
+2. `scripts/build-example.sh` and `tests/skill/check-examples.sh`; make
+   one example pass before writing the rest.
+3. The twelve examples, six pitfalls, six traps of DESIGN 7.4, each with
+   its expected output or `expect-error:` text. **(H38)**: record the
+   compiler message of each pitfall; drop or reword one whose message is
+   not stable.
+4. `SKILL.md` (at most 160 lines) and `reference/*.md` from DESIGN; the
+   doc index; `tests/skill/check-index.sh`.
+5. CI: `check-examples.sh` in `libtorch-cpu`, `check-index.sh` in
+   `no-libtorch`.
+6. **(H37)**: install through the marketplace in Claude Code and through
+   `skills.external_dirs` in Hermes; note what had to change.
+7. **(H39)**: ten tasks with checkers in `tests/skill/tasks/`; run them
+   through Hermes with the local Qwen, with and without the skill; record
+   both pass rates here. This is also condition C4 below.
+8. README / README_jp: a short install section. Bump the plugin version
+   with the release.
+
+**Theme B — fine-tuning Qwen3.8 27B as a tch-fpc sample (DESIGN 8):
+verdict GO with conditions; the design stops here on purpose.** No module
+structure, LoRA classes, data specification or milestones exist yet.
+
+What the verdict rests on:
+- *Computed from the measured tensor list:* packed weights 8.10 GB and
+  8.43 GB on the two GPUs; peak about 13.4–14.2 GB of 16 GB at 2048 tokens
+  with block-wise recomputation and a chunked loss (activation and runtime
+  parts are estimates).
+- *Measured (Ollama log):* this model does 740–1000 tokens/s of prompt
+  processing on these GPUs. *Estimate:* training at 60–250 tokens/s, so
+  about 12–49 h for three epochs of 3.5 M tokens.
+- *Measured (grep):* every tensor op the model needs exists in the
+  generated API; the gaps are small.
+- *Measured (installed Ollama 0.40.13):* new LoRA adapters cannot be
+  created through a Modelfile any more; the bundled `llama-server` still
+  has `--lora`, and `llama-quantize` is bundled.
+- *Not measured:* anything about libtorch on the GPUs (no libtorch is
+  installed; the GPUs were not touched). **Since measured** in local
+  session 9 (above): DESIGN 8.8 "Gate results".
+
+**Conditions — the user decides or enables each (trade-offs in DESIGN
+8.3, 8.4, 8.8):**
+
+- **C1, deployment path.**
+  - D2: a GGUF LoRA adapter served by `llama-server --lora` outside
+    Ollama. Least code, exactly the trained configuration; Hermes needs a
+    second endpoint and the server has to be started by something. (H44)
+  - D3: a merged GGUF with the adapted tensors as Q8_0, imported with
+    `ollama create`. Stays in Ollama; about +3.3 GB of VRAM; more code
+    (GGUF writer, merge). (H45)
+  - D4: merge into the original bf16 weights and requantise with
+    upstream tools. 54 GB download and a Python conversion script.
+  - The design session leans to D3 with D2 as the first experiment (D2's
+    writer is a subset of D3's).
+- **C2, GPU gate.** Restore the ROCm libtorch
+  (`libtorch-shared-with-deps-2.13.0+rocm7.1.zip` from
+  `https://download.pytorch.org/libtorch/rocm7.1/`, 12 GB unpacked as
+  `libtorch-rocm/`, the eight symlinks of DESIGN 4.8, then
+  `build/libtch-rocm`), unload the Ollama model, and run three throwaway
+  measurements: H40 (bf16 and fp16 `matmul` at model size, forward and
+  backward), H41 (Q4_K/Q6_K dequantisation rate), H42 (peak VRAM of one
+  synthetic block at 1024 and 2048 tokens, two devices from one process).
+  About an hour. Abort criteria: no working half-precision product, under
+  30 tokens/s projected, or a peak above 15 GB at 1024 tokens.
+  **Done since (2026-11-16, same day):** the ROCm libtorch is back
+  (`build-version` 2.13.0+rocm7.1, eight symlinks), `build/libtch-rocm`
+  builds (the same four warnings), and the six CI tests (abi, api, nn,
+  jit, generated, ownership) built against it pass on the CPU with
+  `HIP_VISIBLE_DEVICES=-1 ROCR_VISIBLE_DEVICES=-1` (no GPU visible, so
+  `tests/api`'s CPU-build assertions hold too). `rocm-smi` is installed.
+  **New fact for H40/H42:** the two cards differ: GPU 0 is an RX 9070 XT,
+  GPU 1 an RX 9070 (both gfx1201, 16 GB). The 32/32 block split of
+  DESIGN 8.2 assumes equal speed; measure both cards in H40 and size the
+  split by speed as well as memory.
+  **Gate run (2026-11-16): passed for T = 1024, with new conditions** —
+  details in DESIGN 8.8 "Gate results". H40 and H41 hold (bf16 100 / 81
+  TFLOP/s; dequantisation exact, about 1 s per model forward); the
+  synthetic 64-block step runs at 166 tokens/s at T = 1024 with peaks of
+  12.79 / 14.89 GiB; T = 2048 runs out of memory on the 9070 (head phase).
+  The second T = 2048 run hung the desktop's GPU ring (labwc, XT) and the
+  session restarted. Before any further GPU run: move the display to the
+  iGPU (or train without a session), re-balance the split (e.g. 36/28),
+  keep T ≤ 1024 or offload saved inputs to host memory.
+- **C3, inputs.** Read access to the model blob under
+  `/usr/share/ollama/.ollama/models/blobs/` (16.8 GB; a copy or a
+  group/ACL change, needs root); confirm GGUF as the base rather than the
+  54 GB original; **check Mistral's terms on using its outputs as training
+  data**; decide whether Oxygene is excluded (leaning: yes, retrieval
+  only) and whether the FPC approximation of Delphi is accepted as a
+  separately reported class.
+- **C4, readiness.** Theme A implemented and H39 run. If the local Qwen
+  cannot write small tch-fpc programs with the skill, it will not write
+  this sample.
+
+If C2 fails, the alternatives to discuss: (a) train a smaller model of the
+same family locally (the code is the same, the rehearsal becomes the
+product); (b) rent one large GPU for the training run only and keep
+everything else local; (c) drop fine-tuning and invest in the skills.
+
+Also for the user to know:
+- Training and the local LLM exclude each other on the GPUs. While a 27B
+  run is on, the Qwen sub-agent is down, for a day or two per run.
+- After any adapter the MTP draft head no longer matches; generation is
+  expected to get slower (draft acceptance today 0.42–0.89), not wrong.
+- The architecture details in DESIGN 8.1 come from a tool-made summary of
+  upstream `qwen35.cpp`; the delta-rule kernel, RoPE and the chat template
+  were not read. The next design session must read them in the source.
+
+**Next design session, once C1–C3 are answered** (C4 may run in parallel):
+staged milestones (CPU rehearsal on a small `qwen35` model, then 27B),
+module and unit structure of the sample, the LoRA layer in `TchNN` terms,
+the block-wise backward as a reusable routine, data pipeline and data
+specification, evaluation (per-dialect compile/run pass rate on a
+held-out task set, before and after), and the boundary of what Mistral's
+external design must cover. Hypotheses H43 (log-probability parity with
+the running model) and H46 (tokenizer parity) belong to its first
+milestone.
+
+Open hypotheses from this session: H37–H39 (Theme A), H40–H46 (Theme B);
+each is defined where it is first marked in DESIGN 7 and 8.
+
+## Release v0.1.0 (2026-10-14)
 
 The repository was made public on 2026-10-13 (secrets, personal paths,
 history and license placement checked first; README status updated). The
 first release, **v0.1.0**, is a GitHub pre-release on tag `v0.1.0`
 (commit b7933d8): https://github.com/tankoha/tch-fpc/releases/tag/v0.1.0.
 Next: choose the theme of the next milestone with the user, then a design
-session (Fable sub-agent).
+session (Fable sub-agent). (Done: design session 9, above.)
 
 ## Overall review (2026-10-12, after local session 8)
 

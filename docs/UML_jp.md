@@ -3,9 +3,9 @@
 （[UML.md](UML.md) の日本語訳です。内容が食い違う場合は英語版が正です。）
 
 実装済みのもの（マイルストーン1〜3、TorchScript のオブジェクト、マイルストーン3の
-レイヤー、ROCm での GPU デバイス）の図です。まだ予定なのは CUDA ビルドだけで（破線）、
-NVIDIA の機械が要ります。時点：2026-10-12、ローカルセッション8の後。正は
-DESIGN.md で、このファイルはそれを図にしただけです。
+レイヤー、ROCm での GPU デバイス）と、予定のもの（破線）の図です。予定は、NVIDIA の
+機械が要る CUDA ビルドと、DESIGN 7 の知識パッケージです。時点：2026-11-16、設計
+セッション9の後。正は DESIGN.md で、このファイルはそれを図にしただけです。
 
 目次：
 1. [層とユニット](#1-層とユニット)
@@ -16,7 +16,8 @@ DESIGN.md で、このファイルはそれを図にしただけです。
 6. [シーケンス：ForwardIV と ivalue の所有権](#6-シーケンスforwardiv-と-ivalue-の所有権)
 7. [シーケンス：TorchScript モジュールのファインチューニング](#7-シーケンスtorchscript-モジュールのファインチューニング)
 8. [配置：CPU、ROCm、CUDA のビルド](#8-配置cpurocmcuda-のビルド)
-9. [状況](#9-状況)
+9. [知識パッケージ（予定）](#9-知識パッケージ予定)
+10. [状況](#10-状況)
 
 ## 1. 層とユニット
 
@@ -542,7 +543,53 @@ flowchart LR
   class CUDA,B3 planned
 ```
 
-## 9. 状況
+## 9. 知識パッケージ（予定）
+
+DESIGN 7：スキルを1つ持つプラグイン。Claude Code はリポジトリの marketplace ファイル
+経由で、Hermes は `skills.external_dirs` 経由で読み込む。Pascal の型は増えない。
+DESIGN 8 のファインチューニングのサンプルにはまだ型がない（設計は実現性の関門で
+止めている）。
+
+```mermaid
+flowchart LR
+  subgraph Repo["tch-fpc リポジトリ"]
+    MP[".claude-plugin/marketplace.json<br/>source: ./plugin"]
+    subgraph Plugin["plugin/"]
+      PJ[".claude-plugin/plugin.json"]
+      subgraph Skill["skills/tch-fpc/"]
+        SK["SKILL.md<br/>規則、表、ドキュメント索引"]
+        REF["reference/*.md"]
+        EX["examples/（.pas と .expected）"]
+        PIT["pitfalls/（コンパイルが通らないこと）"]
+        TR["traps/（.pas と .expected）"]
+        BE["scripts/build-example.sh"]
+      end
+    end
+    DOCS["docs/、src/（索引だけ。写さない）"]
+    CHK["tests/skill/check-examples.sh<br/>tests/skill/check-index.sh"]
+    TASKS["tests/skill/tasks/<br/>検査付きの課題 10 個（H39）"]
+  end
+  CC["Claude Code<br/>/plugin install tch-fpc"]
+  HE["Hermes Agent<br/>skills.external_dirs"]
+  CI["CI：libtorch (CPU) ジョブ"]
+  MP --> Plugin
+  CC --> MP
+  HE --> Skill
+  SK --> REF
+  SK --> EX
+  SK --> PIT
+  SK --> TR
+  SK -. "パスと固定 URL" .-> DOCS
+  CHK --> BE
+  CHK --> EX
+  CHK --> PIT
+  CHK --> TR
+  CI --> CHK
+  classDef planned stroke-dasharray: 5 5
+  class MP,PJ,SK,REF,EX,PIT,TR,BE,CHK,TASKS planned
+```
+
+## 10. 状況
 
 | 領域 | DESIGN | 状態 |
 |---|---|---|
@@ -553,3 +600,5 @@ flowchart LR
 | TorchScript のオブジェクト（`IJitObject`） | 4.6.9 | 実装済み（ローカルセッション6、2026-10-12）、H26〜H28 成立 |
 | Conv1D/3D、ConvTranspose、GroupNorm、LSTM/GRU、Identity | 4.6.10 | 実装済み（ローカルセッション7、2026-10-12）。H29（tch-rs との `.ot` の相互運用）は未解決、Rust が要る |
 | GPU：ROCm / CUDA のビルドと API | 4.8 | 実装済み（ローカルセッション8、2026-10-12）。ROCm は RX 9070 で動作、H31・H33 成立、H32 修正（展開後にシンボリックリンク8つ）、H34 不成立、H35 判明。CUDA は未実測 |
+| 知識パッケージ：プラグイン、スキル、検証済みの例 | 7 | 設計済み（設計セッション9、2026-11-16）。未実装。H37〜H39 は未解決 |
+| Qwen3.8 27B のファインチューニング（tch-fpc のサンプル） | 8 | 実現性の検討のみ：条件 C1〜C4 付きの GO（HANDOFF）。型は未設計。H40〜H46 は未解決 |

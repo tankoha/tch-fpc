@@ -3392,3 +3392,576 @@ H32 amended (eight symlinks after unpacking), H33 confirmed, H34 false, H35
 answered (detection rule changed), H36 resolved, H30 moot on ROCm; the
 CUDA path is unmeasured. With this, every design item from "Handing back
 (end of local session 4)" is implemented.
+
+## 7. LLM-facing knowledge package (decision, design session 9)
+
+A skill that ships in this repository so that users and their coding agents
+(Claude Code, Hermes Agent, others) write correct tch-fpc code. It is the
+retrieval and few-shot material of the project; it is also what the local
+Qwen reads in section 8. Model: the `pascal-dialects` plugin of
+`tankoha/polyglot-scripting` (knowledge in `skills/`, examples and pitfalls
+verified by a script). Nothing below is implemented yet; statements that
+need a run are marked **(H37)**–**(H39)**.
+
+### 7.1 Location and format
+
+```
+.claude-plugin/marketplace.json     repo root: one plugin, "source": "./plugin"
+plugin/
+  .claude-plugin/plugin.json        name tch-fpc, license "MIT OR Apache-2.0"
+  skills/tch-fpc/
+    SKILL.md                        the only file an agent must read
+    reference/                      one topic per file, read on demand
+      naming.md  ownership.md  autograd.md  nn.md  jit.md
+      devices.md  build.md  errors.md
+    examples/NN_name.pas + NN_name.expected
+    pitfalls/pNN_name.pas           must fail to compile ({ expect-error: ... })
+    traps/tNN_name.pas + tNN_name.expected   compiles; shows wrong and right
+    scripts/build-example.sh        the one build line, parameterised
+tests/skill/check-examples.sh       verification (7.4)
+tests/skill/check-index.sh          SKILL.md tables and doc index vs files
+```
+
+- **One skill, not several.** The API is one library; splitting by unit
+  would make an agent guess which skill to load. Progressive disclosure is
+  inside the skill: `SKILL.md` carries the rules that prevent most errors
+  and three tables (examples, pitfalls and traps, doc index); `reference/`
+  and the example files are read one at a time.
+- **Size budget (for a 64k-context model):** `SKILL.md` at most 160 lines;
+  each `reference/*.md` at most 120 lines; each example at most 80 lines
+  with one topic. `check-index.sh` enforces the line limits. Not measured in
+  tokens; the limits are a starting point to revise after H39.
+- **A plugin subdirectory, not the repo root.** `"source": "./plugin"`
+  keeps the 53,000 generated lines and the docs out of the plugin cache.
+  The price: an installed plugin cannot see `docs/` or `src/`. So the doc
+  index names each target twice, as a path inside a checkout
+  (`docs/DESIGN.md`, heading text) and as a URL pinned to the release tag.
+  A user of tch-fpc has a checkout anyway (the units and the C wrapper are
+  built from it).
+- **Both loaders, one tree.** Claude Code: `/plugin install tch-fpc
+  --marketplace tankoha/tch-fpc` reads `plugin/skills/`. Hermes:
+  `skills.external_dirs` gets `<checkout>/plugin/skills`. `SKILL.md` front
+  matter carries `name`, `description`, `version` and `metadata.hermes`
+  (tags, category) as in `pascal-dialects`; how to read a file of the skill
+  is given in both spellings (Read relative to the skill directory;
+  `skill_view(name="tch-fpc", file_path=...)`). **(H37)** both loaders
+  accept this tree as laid out; the layout is copied from a working one,
+  but not run for this repository.
+- **No hooks in the first version.** `pascal-dialects` forces a read and
+  compiles after every write. Here a compile needs a built `libtch` and its
+  path, which a hook cannot know. Instead the skill gives the agent one
+  command, `scripts/build-example.sh <file.pas> [<libtch build dir>]`
+  (`TCH_FPC_ROOT`, default the checkout the script lives in), and tells it
+  to compile and run before reporting. The same script is what
+  `check-examples.sh` calls, so the documented build line cannot drift from
+  the tested one. Dialect rules stay in `pascal-dialects`; the skill says
+  that user code is `{$mode objfpc}{$H+}` and points there.
+- **Language.** English only, an exception to the `_jp` rule: a second
+  `SKILL.md` would be a second skill with the same triggers. `README.md` /
+  `README_jp.md` get a short section on installing it.
+- **Licence.** Every file under the repository's `MIT OR Apache-2.0`.
+  Examples are written for this repository; one ported from tch-rs's
+  `examples/` names its source file in a header comment and in the commit
+  message. The JIT examples read `tests/jit/models/foo*.pt` by path (their
+  tch-rs licence files are already next to them); no model file is copied
+  into the plugin, and an example that needs one says so and is skipped by
+  an installed plugin without a checkout.
+- **Version.** `plugin.json` and the `SKILL.md` front matter carry the
+  tch-fpc release they describe; `SKILL.md` names the libtorch version
+  (2.13.0) and FPC 3.2.2.
+
+### 7.2 Contents of `SKILL.md`
+
+1. *When to use*, and what it is not (not a PyTorch tutorial; not the
+   dialect rules).
+2. *Rules* — numbered, each one line plus a two-line code pair:
+   - Units and mode: `uses Tch, TchNN, TchJit`; `{$mode objfpc}{$H+}`; the
+     build line; never a global `LD_LIBRARY_PATH` (rpath per build).
+   - Naming: generated ops are PyTorch names in snake_case
+     (`t.max_pool2d`, `t.add_(u)`), the hand-written API is CamelCase;
+     reserved words take `&` (`t.&div(u)`, `t.&to(dev)`, `&out`, `&end`);
+     the parameter `result` is `result_`; ops without a `self`/`input`
+     tensor are `TTensor.zeros(...)`; optional arguments are `NoInt64`,
+     `NoDouble`, `NoIntList`, `IntList([...])`.
+   - Ownership: `TTensor` is a managed record, never `Free` it; `B := A`
+     shares the tensor; `ShallowClone` is a new handle on the same storage;
+     `Copy` is new storage; `IsNil` and `Defined` differ. Classes
+     (`TVarStore`, `TModule` descendants, `TOptimizer`, `TJitModule`) are
+     freed by hand in `try..finally`, the store last; a `TVarPath` must not
+     outlive its store.
+   - Data in and out: an array literal is typed by its first element
+     (`[1.0, 2.0]` Double to `kFloat`, `[1, 2]` Int64); `FromSingleArray`,
+     `FromInt32Array`, `FromBytes`; `DoubleValue`, `ToSingleArray`,
+     `CopyData`.
+   - Operators: `*` is elementwise, `matmul` is the matrix product; scalar
+     overloads on both sides.
+   - Autograd: `set_requires_grad`, `Backward`, `grad`, `ZeroGrad`;
+     `G := NoGradGuard;` must be kept in a local.
+   - `TchNN`: `VS := TVarStore.Create(Device)`, `VS.Root / 'name'`, layer
+     constructors take a path, `Forward(X, Train)`, optimizers are class
+     functions (`TOptimizer.Adam(VS, LR)`), `BackwardStep`, `Save`/`Load`;
+     no anonymous functions in FPC 3.2.2, so `TFuncModule` takes a named
+     function or method.
+   - `TchJit`: `TJitModule.Create(FileName[, Device])`, `Forward`,
+     `ForwardIV` with `TIValue`, `TTrainableJitModule`.
+   - Devices: `TDevice.CudaIfAvailable`; "Cuda" means the AMD GPU on a ROCm
+     build; `HIP_VISIBLE_DEVICES=0` when an iGPU is present;
+     `CudnnIsAvailable` is False and `GpuRuntimeVersion` raises on ROCm;
+     the ROCm archive needs eight symlinks.
+   - Errors: `ETorchError`, `ETorchNativeError` (`Message`, `Detail`);
+     libtorch needs FPU exceptions masked, the units do it at start-up, do
+     not unmask.
+3. *Examples*, *Pitfalls*, *Traps* — one table each: file, what it shows,
+   and for pitfalls the compiler message.
+4. *Where to look* — the doc index (7.3).
+5. *Before you report*: compile and run with `build-example.sh`; quote the
+   output.
+
+`reference/*.md` hold what does not fit a line: the full reserved-word
+list, the receiver rule, the ownership table for classes, the variable
+naming of the store, the `TIValue` tags, the build variants. They are
+written from DESIGN, short, and each ends with the DESIGN section it
+summarises. They restate rules; they do not copy rationale.
+
+### 7.3 Index instead of copies
+
+`SKILL.md` has a table *question → where*: a topic, the file and heading
+in a checkout, and the pinned URL. Rows planned: tensor ownership (4.1),
+errors and FPU mask (4.2), value types and `FromArray` (4.3), generated ops
+and naming (4.4), nn overview and each of 4.6.1–4.6.10, grad mode (4.7),
+GPU builds and the ROCm results (4.8), the UML diagrams, and for exact
+signatures `src/Tch.pas`, `src/TchNN.pas`, `src/TchJit.pas` (interface
+part) and `src/TchTensorGenerated_intf.inc` with the instruction to search
+it for `function <op>` rather than read it (4,835 lines). `check-index.sh`
+greps every indexed heading in the named file and fails when one is gone,
+so the index cannot rot silently.
+
+### 7.4 Examples, pitfalls, traps and their verification
+
+Three kinds, because most tch-fpc mistakes compile:
+
+| Kind | Files | Check |
+|---|---|---|
+| example | `examples/NN_name.pas`, `.expected` | compiles, runs on CPU, output equals `.expected` |
+| pitfall | `pitfalls/pNN_name.pas` | fails to compile, log contains the `expect-error:` text |
+| trap | `traps/tNN_name.pas`, `.expected` | compiles and runs; prints the wrong result or the exception, then the right way; output equals `.expected` |
+
+Planned set (each is one topic; names may change in implementation):
+
+- Examples: `01_tensor_basics` (create, shape, kind, operators, scalar
+  out); `02_generated_ops` (snake_case, `&`-escapes, static factories,
+  optional arguments); `03_ownership` (assignment, `ShallowClone`, `Copy`,
+  in-place through a `const`); `04_data_in_out` (`FromBytes`, `CopyData`,
+  `FromInt32Array`, `totype`); `05_autograd` (gradient of a small
+  function, `NoGradGuard` in a local, `ZeroGrad`); `06_train_linear`
+  (store, `TLinear`, Adam, loss falls, free order); `07_custom_module`
+  (a `TModule` descendant, `TSequential`, `TFuncModule` with a named
+  function); `08_save_load` (variable names, `Save`/`Load`, `Freeze`);
+  `09_device` (device-agnostic code, prints `cpu` in CI);
+  `10_jit_run` (`foo*.pt`, `Forward`, `ForwardIV`); `11_jit_finetune`
+  (`TTrainableJitModule`); `12_errors` (catching `ETorchNativeError`).
+- Pitfalls (compile errors): `p01` a reserved-word op without `&`
+  (`t.div(u)`); `p02` a mixed literal `[1, 2.5]`; `p03` an Int32 array
+  passed to `FromArray`; `p04` a parameter written `&result`; `p05` an
+  anonymous function for `TFuncModule`; `p06` `t.to(dev)` without `&`.
+  `tests/compiler/xfail_*` already measures p02–p04; the skill reuses
+  those facts, with its own short sources.
+- Traps (run and show): `t01` a bare `NoGradGuard;` has no effect; `t02`
+  `B := A` then an in-place op changes both; `t03` `*` where `matmul` was
+  meant; `t04` `FromArray([1, 2])` is Int64 and `mean` raises; `t05` an
+  in-place op on a leaf that requires grad raises without a guard; `t06`
+  batch norm with `Train` left False does not update running statistics.
+- Documented only, not runnable in CI (stated as such in `SKILL.md`): a
+  `TVarPath` used after its store is freed; unmasking FPU exceptions; a
+  device mismatch; the `LD_LIBRARY_PATH` trap; everything ROCm.
+
+Expected output must be stable across libtorch CPU builds: examples print
+shapes, kinds, integers, Booleans and floats rounded to three decimals, and
+compare with a tolerance inside the program where the value comes from an
+optimiser. No example prints a raw `ToString` of floats.
+
+`tests/skill/check-examples.sh [name...]` (bash, same shape as
+`pascal-dialects/tests/check-examples.sh`): for each file it calls
+`scripts/build-example.sh` into a temporary directory against
+`build/libtch`, runs the program from the repo root, and applies the check
+of the table. It prints `OK`/`NG` per file and exits non-zero on any `NG`.
+CI: one more step in the existing `libtorch-cpu` job, after "Run Pascal
+tests", plus `check-index.sh` in the `no-libtorch` job (it needs no
+libtorch). Estimated cost: 21 small programs at about 2–4 s compile each
+(`Tch.pas` is compiled once into a shared unit directory); not measured.
+**(H38)** every planned pitfall fails with a stable, greppable message on
+FPC 3.2.2 (p02–p04 are measured in `tests/compiler`, the others not).
+
+### 7.5 Does it work: the acceptance measure
+
+A skill that is only verified to compile says nothing about whether a model
+writes better code with it. **(H39)** is therefore a measurement, done once
+the skill exists: ten small tasks ("write a program that …", each with a
+checker script that compiles and runs the answer), given to the local Qwen
+through Hermes with and without the skill, pass rate reported for both.
+The tasks live in `tests/skill/tasks/` and are not part of the plugin. The
+same task set is the readiness gate of section 8 (condition C4).
+
+The skill's examples are retrieval material. They must never enter a
+fine-tuning data set (8.7): they are written by Claude.
+
+## 8. Fine-tuning Qwen3.8 27B with tch-fpc: feasibility gate (design session 9)
+
+**Verdict: GO with conditions. The design stops at this gate.** Training
+the 27B model on two 16 GB GPUs is not ruled out by any number below, but
+four things are unmeasured or need a decision by the user, and one of them
+(how a trained adapter gets back into the running model) changes what has
+to be built. The conditions and the options are in HANDOFF, "Design session
+9". No module structure, LoRA classes, data specification or milestones are
+designed yet; that is the next session, after the gate.
+
+Goal as given: improve the local Qwen's code in five Pascal dialects by
+LoRA/QLoRA; the training program is a tch-fpc sample in Pascal, generated
+by Qwen3.8 27B itself through the Hermes SDLC process.
+
+How to read the numbers: *measured* = read from this machine today
+(2026-11-16); *computed* = arithmetic on measured values; *estimate* = not
+measured; *from memory* = not checked against a source in this session.
+No libtorch is installed on the host today and the GPUs were not used, so
+nothing about libtorch on the GPUs is measured.
+
+### 8.1 What the model is
+
+*Measured* from `ollama show -v` (866 tensors): architecture `qwen35`,
+embedding 5120, FFN 17408, vocabulary 248320, 64 transformer blocks
+(`blk.0`–`blk.63`) plus `blk.64`, the next-token-prediction (MTP) head that
+Ollama uses as a draft model. Blocks 3, 7, …, 63 (16) are gated full
+attention; the other 48 are linear attention (Gated DeltaNet). Token
+embedding and output matrix are separate tensors. The vision projector is a
+separate blob and is not needed for text training.
+
+| Group | Parameters | Packed size (Q4_K 4.5, Q6_K 6.5625 bit/weight) |
+|---|---|---|
+| 48 linear-attention blocks | 18.40 B (383.3 M each) | 11.23 GB (up to 252.3 MB each) |
+| 16 full-attention blocks | 5.96 B (372.3 M each) | 3.55 GB (up to 233.8 MB each) |
+| `token_embd` (Q4_K) | 1.27 B | 0.72 GB |
+| `output` (Q6_K) | 1.27 B | 1.04 GB |
+| `blk.64` MTP head | 0.43 B | 0.26 GB (not loaded for training) |
+| all | 27.32 B | 16.80 GB |
+
+(*computed* from the tensor list. Q4_K_M mixes types by layer: `attn_qkv`, `attn_v` and `ffn_down` are Q6_K in half of the blocks, so a block is 209–252 MB.)
+
+Block structure, read from upstream llama.cpp `src/models/qwen35.cpp`
+(master, fetched 2026-11-16 and summarised by a tool; the commit Ollama
+bundles, 39febd2ad, was not read) and consistent with the measured shapes:
+
+- Linear block: RMS norm; `attn_qkv` 5120→10240 = q 2048 + k 2048 +
+  v 6144 (16 key heads and 48 value heads of 128); `attn_gate` 5120→6144
+  (`z`); `ssm_beta`, `ssm_alpha` 5120→48; β = sigmoid; decay gate =
+  softplus(α + `ssm_dt`) · `ssm_a`; a causal depthwise conv of kernel 4
+  over all 10240 channels, then SiLU; q and k L2-normalised; the gated
+  delta rule with a state of 128×128 per value head; RMS norm with
+  `ssm_norm` times SiLU(z); `ssm_out` 6144→5120. Then RMS norm and a SwiGLU
+  FFN.
+- Full block: `attn_q` 5120→12288 = 24 heads × (256 query + 256 gate);
+  `attn_k`, `attn_v` 5120→1024 (4 KV heads, GQA); RMS norms on q and k per
+  head; RoPE (64 dimensions, base 1e7, sections for multimodal positions);
+  attention; output times sigmoid(gate); `attn_output` 6144→5120.
+- Not read: the delta-rule kernel (`build_recurrent_attn`), RoPE details,
+  the chunk size. *From memory*: the reference implementation uses a
+  chunked form with chunk 64 and float32 inside the rule.
+
+### 8.2 Memory budget per GPU
+
+Layout: GPU 0 holds `token_embd` and blocks 0–31, GPU 1 blocks 32–63 and
+`output`. The weights stay **packed** on the GPU as the GGUF's own bytes
+and are dequantised per matrix when a block runs (8.3). One sequence of
+T = 2048 tokens, activations in bf16, LoRA rank 16 on the attention-side
+projections only (39.6 M trainable parameters, *computed*).
+
+Backward without `torch.utils.checkpoint` (libtorch has none): block-wise
+recomputation with ops tch-fpc already has. Forward all blocks under
+`NoGradGuard` keeping each block's input; backward from the last block:
+`x := saved.detach.set_requires_grad(True)`, `y := Block(x)`,
+`(y * g).sum.Backward`, then `g := x.grad`. Only one block's graph is alive
+at a time, the two devices never share a graph, and `g` crosses the split
+with `&to`. Cost: two forwards and one backward per step.
+
+| Item | GPU 0 | GPU 1 | Basis |
+|---|---|---|---|
+| packed weights | 8.10 GB | 8.43 GB | computed |
+| dequantised weights of the block in flight (bf16) | 0.77 | 0.77 | computed; held by the graph |
+| dequantisation temporaries | 0.5 | 0.5 | estimate |
+| graph of one block (FFN 6×71 MB; attention scores 24×2048² ×3; delta-rule chunks) | 1.0–1.5 | 1.0–1.5 | estimate |
+| saved block inputs (32 × 21 MB) | 0.67 | 0.67 | computed; can live in host RAM |
+| LoRA parameters, gradients, AdamW state (fp32, ×4) | 0.32 | 0.32 | computed |
+| output matrix dequantised (bf16), head phase only | – | 2.54 | computed |
+| logits and loss for a 256-token slice (fp32, ×3), head phase only | – | 0.76 | computed |
+| HIP context, BLAS/MIOpen handles, allocator slack | 1.0–1.5 | 1.0–1.5 | estimate, not measured |
+| **peak** | **≈ 13.4 GB** | **≈ 13.7 GB (block), ≈ 14.2 GB (head)** | of 16 GB |
+
+- The loss must be **chunked over the sequence**: full logits at T = 2048
+  are 2.03 GB in fp32 before the softmax and its gradient.
+- T = 4096 does not fit this way (attention scores grow fourfold);
+  T ≤ 2048 is the design limit, 1024 the comfortable one. Code samples are
+  expected to be 300–1500 tokens.
+- LoRA on the FFN matrices as well: 108.8 M parameters, 0.87 GB per GPU
+  instead of 0.32. Fits on paper, with under 1.5 GB margin.
+- Host RAM (30 GB, 19 GB free, *measured*) is not a constraint: the file
+  is read tensor by tensor (largest packed tensor 1.04 GB) or mapped with
+  the generated `from_file`.
+- While training runs, Ollama cannot hold the model (it uses about 21 GB
+  of the 32 GB for weights and a 64k KV cache, *measured* from its log).
+  Training and the local LLM exclude each other.
+
+### 8.3 Base weights and dequantisation
+
+Options:
+
+| | GGUF blocks, dequantised in tensor ops | HF safetensors (bf16) + own 4-bit |
+|---|---|---|
+| Download | none; the 16.8 GB blob is on disk but readable only by the `ollama` user | about 54 GB |
+| Adapter matches the deployed weights | exactly | no (trained on a different quantisation) |
+| Code | GGUF reader; Q4_K and Q6_K dequantisation with byte ops | safetensors reader; a quantiser and its dequantiser |
+| Memory | 16.8 GB packed | about 13.7 GB at 4 bit + scales |
+| Deployment (8.4) | all three paths | needs upstream conversion tools (Python) for a new GGUF |
+
+Leaning: **GGUF**. It needs no download, the adapter is trained against
+the weights that will run, and every deployment path of 8.4 starts from
+the GGUF anyway. Needed from the user: read access to the blob (a copy, or
+a group/ACL change). The ops for dequantising exist in the generated API
+(`view_dtype`, `bitwise_and`, `bitwise_right_shift`, `&index`/`gather`,
+`from_file`; *measured* by grep). Cost per step: all 24.3 B block weights
+are dequantised twice (two forwards); the rate on the GPU is not measured.
+The token embedding needs only the rows of the batch (a Q4_K row of 5120
+is 20 whole super-blocks, *computed*).
+
+### 8.4 Getting the adapter back into the running model
+
+*Measured* on the installed Ollama 0.40.13:
+- The binary contains "LoRA adapters are deprecated; the adapter layer is
+  carried over but new adapters cannot be created" and "LoRA adapters are
+  no longer supported"; the current `docs/modelfile.mdx` no longer lists
+  `ADAPTER` (the parser still accepts the word). Behaviour was not
+  exercised, but **a Modelfile `ADAPTER` is not a path to build on.**
+- Ollama serves GGUF models through a bundled upstream `llama-server`
+  (0.8.0-dev, 39febd2ad, ROCm backend; the log shows `ROCm0`/`ROCm1` and
+  an MTP draft context). `/usr/local/lib/ollama/llama-server --help` lists
+  `--lora` and `--lora-scaled`; `llama-quantize` is bundled too and has
+  `--tensor-type name=type` and `--allow-requantize`.
+- Upstream `qwen35.cpp` sends every projection of both block types through
+  `build_lora_mm` (the LoRA-aware product), including `ssm_out`,
+  `attn_qkv`, `attn_gate`.
+
+| Path | What is built | Trade-off |
+|---|---|---|
+| D2: GGUF LoRA adapter + `llama-server --lora`, outside Ollama | a small GGUF writer (F32 `*.lora_a`/`*.lora_b`) | exactly the trained configuration; Hermes must point at a second endpoint and something must start that server; whether the bundled build applies it to `qwen35` is unverified **(H44)** |
+| D3: merged GGUF, adapted tensors stored as Q8_0, the rest copied byte for byte, `ollama create` from the file | GGUF writer, merge, Q8_0 quantiser (or F16 + `llama-quantize --tensor-type`) | stays in Ollama; about +3.3 GB for attention-side targets (*computed*: 7.21 B weights, 4.39 GB today, 7.67 GB at 8.5 bit); whether Ollama imports and runs it is unverified **(H45)** |
+| D4: merge into the original bf16 weights, convert and quantise with upstream tools | 54 GB download, Python conversion script | the textbook route; heaviest; breaks the "no Python" habit for a vendor tool |
+
+Not an option: merging into the dequantised weights and re-quantising to
+Q4_K. A LoRA update is typically smaller than a 4-bit step, so most of it
+would be rounded away (*estimate*, not measured; the standard reason merges
+are done at full precision).
+
+With every path the MTP head (`blk.64`) is no longer matched to the main
+model; expect a lower draft acceptance (today 0.42–0.89, *measured* from
+the log) and so slower generation, not wrong output (*estimate*).
+
+Tokenizer: the GGUF carries tokens, merges and types (`gpt2`, pre-tokenizer
+`qwen35`). Ollama 0.40.13 has no public tokenize endpoint (*measured*:
+`POST /api/tokenize` and `/v1/tokenize` return 404; the bundled
+`llama-server` has `/tokenize`). Leaning: a BPE tokenizer in Pascal from the
+GGUF metadata, checked sample by sample against the bundled `llama-server`
+started on the CPU for `/tokenize` **(H46)**. The chat template is rendered
+inside Ollama (`renderer qwen3.8`), with thinking on by default; training
+text must reproduce it exactly, which needs one captured rendered prompt.
+
+### 8.5 The architecture in tch-fpc ops
+
+*Measured* by grep in `src/TchTensorGenerated_intf.inc`: present are
+`linear`, `matmul`, `conv1d`, `rms_norm`, `silu`, `sigmoid`, `softplus`,
+`scaled_dot_product_attention`, `linalg_solve_triangular`, `einsum`,
+`cumsum`, `tril`, `cross_entropy_loss`, `log_softmax`, `embedding`,
+`view_dtype`, the bit ops, `from_file`, `totype`, `&to`, `detach`,
+`set_requires_grad`, `grad`; `kBFloat16` and `kHalf` exist. The binding is
+not the bottleneck.
+
+Missing, all small:
+- GPU memory statistics and an "empty cache" call: not in the C wrapper
+  (a two-function fork addition); until then VRAM is read from
+  `/sys/class/drm/card*/device/mem_info_vram_used`.
+- `at_run_backward`, `at_autocast_*`, `at_tensor_of_blob`, `at_data_ptr`
+  are in the C wrapper but not declared in `TchSys`; none is required.
+- In the sample itself: GGUF reader and writer, K-quant dequantisation,
+  tokenizer, the two block types, LoRA wrapper, the block-wise backward.
+
+Risks:
+- **No reference in this environment.** Correctness can only be shown
+  end to end: next-token log-probabilities of the Pascal forward against
+  the running model's (`top_logprobs` exists in the Ollama binary;
+  *measured* as a string, not exercised) **(H43)**. Unit level: the chunked
+  delta rule against a naive token-by-token recurrence written first; the
+  tensor-op dequantiser against a scalar Pascal one.
+- **Precision on ROCm.** Whether bf16 matrix products run on gfx1201 at
+  all, and at what speed, is not known (H40). fp16 is the fallback, with an
+  overflow risk in the residual stream; fp32 doubles the transient memory
+  and does not fit T = 2048. The delta rule should run in fp32.
+- **ROCm maturity.** `linalg_solve_triangular`, `conv1d` without cuDNN
+  (H34: no cuDNN on ROCm) and SDPA are untested on this build; each has a
+  plain-op fallback.
+
+### 8.6 Speed
+
+*Measured* (Ollama log, 2026-11-16, this model, both GPUs, llama.cpp ROCm
+backend): prompt processing 740–1000 tokens/s in batches of 512,
+generation 31–48 tokens/s. Prompt processing is one forward pass, so it is
+the reference for what these GPUs do with this model.
+
+*Estimate* for training: two forwards and one backward of about one to two
+forwards are 3–4 forward equivalents; libtorch's dense half-precision
+products instead of llama.cpp's kernels, plus dequantising twice per step,
+cost a further factor of 1–3. Range **60–250 tokens/s, planning value
+100**. Only one GPU works at a time (the layers are in series).
+
+| Data set | Tokens per epoch | At 100 tok/s | Range |
+|---|---|---|---|
+| 5 dialects × 1000 samples × 700 tokens | 3.5 M | 9.7 h | 3.9–16 h |
+| three epochs | 10.5 M | 29 h | 12–49 h |
+
+An evaluation run (250 tasks × about 600 generated tokens at the measured
+31–48 tokens/s) is about 1–1.4 h, before and after.
+
+What only a measurement settles (the gate, about an hour of GPU time with
+Ollama unloaded, needs the ROCm libtorch back: 12 GB unpacked,
+`libtorch-shared-with-deps-2.13.0+rocm7.1.zip`, plus the eight symlinks of
+4.8): **(H40)** bf16 and fp16 `matmul` of 2048×5120 by 5120×17408 on
+gfx1201, in TFLOP/s, forward and backward; **(H41)** Q4_K/Q6_K
+dequantisation rate of an 89 M-weight matrix; **(H42)** peak VRAM of one
+synthetic block (random packed weights, T = 1024 and 2048) through the
+block-wise backward, and whether two devices work from one process.
+
+### 8.7 Can Qwen3.8 27B write this through Hermes
+
+*Measured*: the SDLC harness ran one small project end to end
+(2026-11-16, `hermes-agent-setup/sdlc/README.md`): Qwen produced detailed
+design, test cases, tests and code with 100 % coverage. Not measured: any
+tch-fpc code by Qwen, any numerical code of this size.
+
+*Estimate*: not in one piece. The sample is about ten modules of which
+four (dequantiser, delta rule, RoPE and gated attention, block-wise
+backward) must match a reference to several digits, on an API the model
+has never seen. It becomes plausible only if:
+- the skill of section 7 exists and H39 shows it helps;
+- each module has a numeric oracle the harness can run (golden vectors
+  from a naive version, a scalar version, or the running model), written
+  into the IT cases by the external design;
+- the external design carries the formulas and tensor shapes (from the
+  upstream sources, both permissively licensed), so Qwen translates rather
+  than invents;
+- there is a rehearsal on a small model of the same architecture on the
+  CPU first (Qwen3.5 4B and 9B exist, seen in search results; smaller
+  ones *from memory*): same code, no GPU, no conflict with Ollama;
+- while a 27B run is on the GPUs, Qwen itself is unavailable; the
+  27B stage is run by the user or by Mistral alone.
+
+Data rules, recorded now because they bind every later design:
+- Claude writes a data specification only, never samples (Anthropic's
+  terms on training models with outputs). The skill's examples (section 7)
+  and `pascal-dialects`' examples are Claude-written and stay out of the
+  data set.
+- Mistral generates the samples; **Mistral's terms on using outputs as
+  training data must be checked by the user before generation starts**
+  (not checked in this session). The base model's licence is Apache-2.0
+  (*measured* from the GGUF metadata).
+- A sample is kept only if it compiles and runs with its dialect's
+  compiler. Oxygene cannot be verified here; leaning: exclude it from
+  training and from the measured evaluation, and keep it retrieval-only.
+  Delphi is approximated with FPC as in `pascal-dialects`, and reported
+  separately from the three exactly verified dialects.
+
+### 8.8 Verdict and conditions
+
+**GO with conditions.** Memory fits on paper with about 2 GB margin per
+GPU at T = 2048 (computed and estimated); the speed estimate gives a
+day or two of training, not weeks; the binding lacks nothing essential.
+What stops the design here:
+
+- **C1 (decision):** the deployment path, D2 or D3 (or D4), since the
+  Ollama `ADAPTER` route is closed. It decides whether a GGUF writer, a
+  merge and a second server are in scope.
+- **C2 (user action + measurement):** restore the ROCm libtorch and run
+  the gate H40–H42 with Ollama unloaded. Abort criteria: no working
+  half-precision product, under 30 tokens/s projected, or a peak above
+  15 GB at T = 1024.
+- **C3 (user action):** read access to the model blob; confirm the GGUF
+  base (8.3); check Mistral's output terms.
+- **C4 (measurement):** section 7 implemented and H39 run: Qwen writes
+  tch-fpc code with the skill at a pass rate the user accepts.
+
+If C2 fails, the fallbacks are a smaller model of the same family as the
+training target, or renting a larger GPU for the training run only; both
+are for the user to weigh and are listed in HANDOFF.
+
+#### Gate results (2026-11-16, local, after design session 9)
+
+Run with the ROCm libtorch restored (2.13.0+rocm7.1), Ollama unloaded,
+`HIP_VISIBLE_DEVICES=0,1`. Device 0 is the RX 9070 XT (PCI 03:00.0, it
+also drives the desktop: about 0.7 GiB in use before any run), device 1
+the RX 9070 (PCI 09:00.0). VRAM is the whole card from
+`mem_info_vram_used`, sampled after every block. The throwaway programs
+are kept, git-ignored, in `build/gate-2026-11-16/` (`h40.pas`, `h41.pas`,
+`h42.pas`, `kquant.pas`, `gatecommon.pas`).
+
+- **(H40) holds.** 2048×5120 by 5120×17408, 50 iterations, *measured*:
+  bf16 forward 100 TFLOP/s (XT) / 81 (9070), backward (two products)
+  103 / 86; fp16 103 / 87 forward, 99 / 82 backward. Max relative error
+  against fp32: bf16 4.1e-3, fp16 5.1e-4. Autograd through bf16 and fp16
+  products works. **fp32 products are slow on this build: 1.6 / 1.3
+  TFLOP/s**, so fp32 stays limited to the small delta-rule tensors.
+- **(H41) holds.** Q4_K and Q6_K dequantisation written in tensor ops
+  (`kquant.pas`) equal a scalar Pascal reference exactly (max abs diff 0
+  over 512 random blocks each). Rate for an 89 M-weight matrix to bf16:
+  Q4_K 3.2 ms, Q6_K 4.7 ms on either card (28 / 19 G weights/s). A whole
+  model is dequantised in about 1 s per forward.
+- **Chunked delta rule.** The chunked gated delta rule (chunk 64,
+  `linalg_solve_triangular` for the in-chunk inverse) matches a naive
+  token-by-token recurrence to 5.4e-7 (H = 2, T = 256, D = 16, fp32, CPU)
+  and runs forward and backward on gfx1201.
+- **(H42), one training step of a synthetic stack**: 32 + 32 blocks with
+  the real tensor types and shapes (every fourth block gated full
+  attention with SDPA and GQA, the others Gated-DeltaNet), packed random
+  weights, LoRA rank 16 on the attention-side projections (39 M
+  parameters, plus two fp32 Adam moments), forward under NoGrad keeping
+  block inputs, head loss over 256-token slices, block-wise backward with
+  recomputation, both devices from one process. Not modelled: RoPE, MTP,
+  vision, real data. Weights + LoRA + moments: 8.99 / 9.28 GiB.
+
+  | T | step (2nd) | tokens/s | peak, whole card, XT / 9070 (of 15.92 GiB) |
+  |---|---|---|---|
+  | 1024 | 6.17 s (fwd 2.06, head 0.16, bwd 3.95) | **166** | 12.79 / **14.89** |
+  | 2048 | 14.08 s (1st step) | 145 | 14.29 / 14.61, then **OOM on the 9070** in step 2 (head phase) |
+
+  At T = 2048 the 9070 ran out in the head phase of the second step both
+  with the default allocator (1.1 GiB reserved but unallocated, i.e.
+  fragmentation) and with `PYTORCH_HIP_ALLOC_CONF=expandable_segments:True`
+  (tried to map 2.37 GiB). The head phase alone adds about 3.5 GiB (the
+  2.54 GB bf16 output matrix plus slice logits); dequantising it in one
+  piece, as in a first try, added about 10 GiB of temporaries, so it is
+  dequantised 8192 rows at a time.
+- **New risk, measured: the desktop.** During the second T = 2048 run the
+  kernel logged `ring gfx_0.0.0 timeout` on 0000:03:00.0 for labwc's
+  command submission, reset the ring ("device wedged, but recovered
+  through reset") and the Wayland session restarted. Long compute on the
+  card that drives the display can take the desktop down.
+
+**Reading against the abort criteria.** Half precision works (H40);
+the projected speed, 145–166 tokens/s on the synthetic stack, is far
+above 30 and at the top of 8.6's 60–250 range (real data, RoPE and the
+optimizer step will cost some of it). The memory criterion, "peak above
+15 GB at T = 1024", is met only just: 14.89 GiB on the 9070, which holds
+the head. **T = 2048 does not fit with the 32/32 split.** So the gate
+passes for T = 1024 with three new conditions:
+
+1. Move the desktop off the two RX 9070s (monitor on the Raphael iGPU, or
+   no session while training), which removes both the hang risk and the
+   0.7 GiB the XT gives to the display.
+2. Re-balance the split by memory: the 9070 carries the head, so it gets
+   fewer blocks (e.g. 36/28); the XT is also about 20 % faster (H40).
+3. Keep T ≤ 1024 for training samples, or move the saved block inputs to
+   host memory and re-measure T = 2048 after 1 and 2.

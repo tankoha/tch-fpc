@@ -7,8 +7,8 @@ The detailed log and the next steps are in [HANDOFF.md](HANDOFF.md);
 decisions and numbers in [DESIGN.md](DESIGN.md). Update this page at the
 end of every session, together with HANDOFF.
 
-Last updated: 2026-11-17, local session 9 (gate re-run after moving the
-display to the iGPU).
+Last updated: 2026-11-17, design session 10 (Theme B designed in detail:
+DESIGN 8.9–8.19, UML 10).
 
 ## Goals
 
@@ -32,10 +32,15 @@ display to the iGPU).
 | GPU gate (C2: H40–H42) | **passed**: T = 1024 and T = 2048 fit with the 36/28 split (T = 2048 with saved inputs in host memory) | DESIGN 8.8 "Gate results", "Gate re-run" |
 | Display moved to the iGPU | done 2026-11-17 (HDMI monitor not detected at the time) | HANDOFF local session 9, step 1 |
 | H42 re-run (re-balanced split, T = 2048 with host offload) | done 2026-11-17 | same, step 2 |
-| C1 deployment path (D2 / D3 / D4) | waiting for the user | HANDOFF C1 |
-| C3 inputs (blob access, GGUF base, Mistral terms, Oxygene) | waiting for the user | HANDOFF C3 |
-| Theme B detailed design (milestones, modules, LoRA, data spec, evaluation) | not started; next design session after C1 and C3 | — |
-| Theme B implementation through Hermes | not started | — |
+| C1 deployment path (D2 / D3 / D4) | **decided 2026-11-17: D3** (merged GGUF, adapted tensors Q8_0, `ollama create`) | DESIGN 8.8 "Decisions" |
+| C3 inputs | 2026-11-17: Mistral terms settled (Apache-2.0); GGUF base for the first run, original after it; Oxygene in scope (licence requested from RemObjects); blob read access done with read-only ACLs. **C3 done** | DESIGN 8.8 "Decisions", HANDOFF C3 |
+| Theme B detailed design (milestones, modules, LoRA, data spec, evaluation) | **done** (design session 10, 2026-11-17); eight questions for the user | DESIGN 8.9–8.19, UML 10, HANDOFF design session 10 |
+| Rehearsal model (a small `qwen35` GGUF, Q4_K_M) | not on the host; download needs the user's go | DESIGN 8.11, HANDOFF question 1 |
+| M0 preconditions (C4, rehearsal model, SDLC skeleton, H50) | not started | DESIGN 8.11 |
+| M1 read and reproduce (T01–T11; H46, H43 on the rehearsal model) | not started | DESIGN 8.18 |
+| M2 train and deploy in small (T12–T20; H47), M2g GPU smoke | not started | DESIGN 8.18 |
+| M3 data set v1, evaluation tasks, baseline evaluation | not started | DESIGN 8.16, 8.17 |
+| M4 27B run, M5 merge / H45 / evaluation | not started (by the user; Qwen is down during M4) | DESIGN 8.11 |
 
 ## Hypotheses of this work
 
@@ -47,10 +52,14 @@ display to the iGPU).
 | H40 | bf16 / fp16 products work and are fast on gfx1201 | **holds**: 100 / 81 TFLOP/s bf16 (XT / 9070); fp32 only 1.6 / 1.3 |
 | H41 | Q4_K / Q6_K dequantisation in tensor ops is correct and fast | **holds**: exact; 3.2 / 4.7 ms per 89 M weights |
 | H42 | one training step fits and runs from one process on two GPUs | **holds**: 36/28 split, 167 tokens/s at T = 1024 (13.1 / 13.9 GiB), 172 at T = 2048 with host offload (14.0 / 14.7 GiB) |
-| H43 | the Pascal forward matches the running model's log-probabilities | open |
-| H44 | the bundled `llama-server --lora` applies an adapter to `qwen35` | open (C1) |
-| H45 | Ollama imports and runs a merged GGUF with Q8_0 tensors | open (C1) |
-| H46 | a Pascal BPE tokenizer matches `llama-server /tokenize` | open |
+| H43 | the Pascal forward matches the running model's log-probabilities | open; rehearsal model at M1 (T11), 27B at M4 |
+| H44 | the bundled `llama-server --lora` applies an adapter to `qwen35` | off the plan (design session 10); diagnostic only |
+| H45 | Ollama imports and runs a merged GGUF with Q8_0 tensors | open; required (C1 = D3), at M5 |
+| H46 | a Pascal BPE tokenizer matches `llama-server /tokenize` | open; M1 (T05) |
+| H47 | the bundled `llama-server` reads a merged rehearsal GGUF and matches the Pascal forward with the adapter | open; M2 (T18) |
+| H48 | at least 40 % of the generator's samples pass the filter, under 20 % near-duplicates | open; M3 |
+| H49 | generation speed with the MTP draft stays at 70 % or more after the merge | open; M5 |
+| H50 | a coverage tool gives the SDLC gate an lcov report for FPC | open; M0 |
 
 ## Measured numbers to keep in mind
 
@@ -58,5 +67,8 @@ display to the iGPU).
   in DESIGN 8.6 was 100).
 - Split 36/28 (the 9070 holds the head): peak 14.7 of 15.9 GiB at
   T = 2048 with saved inputs in host memory.
+- Design numbers (DESIGN 8.13–8.15): LoRA rank 16 on 208 tensors, 39.58 M
+  parameters; merged file 20.08 GB (about 24.3 GB in Ollama); about 6 h per
+  epoch of 3.4 M positions.
 - Never train on a card that drives the display: it hung the gfx ring and
   restarted the desktop session. The display is on the iGPU now.

@@ -3613,7 +3613,8 @@ four things are unmeasured or need a decision by the user, and one of them
 (how a trained adapter gets back into the running model) changes what has
 to be built. The conditions and the options are in HANDOFF, "Design session
 9". No module structure, LoRA classes, data specification or milestones are
-designed yet; that is the next session, after the gate.
+designed yet; that is the next session, after the gate. **(Since done:
+the gate passed and the detailed design is 8.9–8.19, design session 10.)**
 
 Goal as given: improve the local Qwen's code in five Pascal dialects by
 LoRA/QLoRA; the training program is a tch-fpc sample in Pascal, generated
@@ -3984,3 +3985,764 @@ well**, with the 36/28 split and the saved block inputs in host memory
 (0.67 GiB per GPU moved out; copies cost little next to the step). The
 margin is about 1.2 GiB on the 9070, which holds the head. Conditions 1–3
 of the gate are met; the remaining Theme B conditions are C1, C3 and C4.
+
+#### Decisions (2026-11-17)
+
+- **C1: D3.** The deployment path is a merged GGUF: the adapted tensors
+  stored as Q8_0, everything else copied byte for byte, imported with
+  `ollama create`. The sample therefore needs a GGUF writer, the merge and
+  a Q8_0 quantiser; H45 (Ollama imports and runs it) becomes a milestone
+  check. D2 is not a deliverable; whether `llama-server --lora` (H44) is
+  still worth running as an intermediate check, since D2's writer is a
+  subset of D3's, is left to the next design session. D4 is dropped.
+- **C3, Mistral's terms: settled by the user.** Mistral Large 3 is
+  licensed under Apache-2.0, so its outputs may be used as training data.
+  (Recorded as the user's answer; not re-checked in this session.)
+- **C3, GGUF base: confirmed for the first run.** Train on the Q4_K_M GGUF
+  through to a deployed D3 model; only after that run completes is the
+  54 GB original considered (for a second run or a D4-style merge).
+- **C3, Oxygene: in scope.** The user is asking RemObjects for an Oxygene
+  licence. Oxygene stays in the training data and the evaluation; until a
+  compiler is available here, its samples cannot pass the
+  "compiles and runs" rule, so the next design session must say how
+  Oxygene samples are gated and reported meanwhile (held back, or a
+  separate unverified class). Delphi via FPC stays a separately reported
+  class.
+- **C3, blob read access: done** (the user set read-only ACLs: traverse
+  on the Ollama directories, list on `blobs/`, read on the two blobs of
+  `qwen3.8:27b`). Both start with `GGUF`: the text model (16,810,714,464
+  bytes, Q4_K_M) and a vision projector (931,146,016 bytes,
+  `general.type` `mmproj`). Training uses the text model only; the D3
+  Modelfile must keep the projector as its second `FROM` line, as the
+  current model's does.
+
+### 8.9 Detailed design: scope and conventions (design session 10, 2026-11-17)
+
+Sections 8.9–8.19 continue from the passed gate and the decisions of
+2026-11-17 (C1 = D3, C3). They fix the milestones, the units of the sample,
+the LoRA layer, the block-wise backward, the D3 writer, the data pipeline,
+the evaluation, the cut into Hermes tasks, and the stop criteria. Nothing
+here is implemented.
+
+Marks, as in 8.1–8.8: *measured* = read from this machine in this session
+(GGUF header, tensor directory and a few values of the two blobs;
+`ollama show --modelfile`; the bundled `llama-server --version`); *read in
+source* = read in upstream llama.cpp at commit `39febd2ad`, the commit the
+bundled `llama-server` reports (*measured*); *computed* = arithmetic on
+those; *estimate*; *from memory* = not checked in this session. Throwaway
+tools of this session are in the git-ignored `build/design10/`
+(`ggufdump.pas`, the fetched upstream files).
+
+Roles, binding for everything below:
+
+| Who | Does | Never |
+|---|---|---|
+| Design session (Claude) | this design; reviews | committed code, training samples |
+| Opus / Sonnet | the data specification (instructions, 8.16), the held-out evaluation tasks (8.17) | training samples |
+| Mistral Large 3 | generates the training samples (external); as the main agent of the Hermes SDLC process, the external design and the IT cases of every task of 8.18 | changes to the formulas and decisions of this section |
+| Qwen3.8 27B (Hermes sub-agent) | detailed design, unit tests and code of the sample | — |
+| User | downloads, every GPU run, `ollama create`, decisions | — |
+
+New hypotheses of this session:
+
+- **(H47)** a merged D3 GGUF of the rehearsal model, served by the bundled
+  `llama-server` on the CPU, reproduces the log-probabilities of the Pascal
+  forward with the adapter attached (8.15).
+- **(H48)** at least 40 % of Mistral's samples pass the compile/run filter,
+  and under 20 % of the accepted ones are near-duplicates (8.16).
+- **(H49)** after the adapter is merged, generation speed with the MTP
+  draft stays at 70 % or more of today's (8.17).
+- **(H50)** a coverage tool produces an lcov report for an FPC test binary
+  that the SDLC gate accepts (8.18).
+
+H44 (`llama-server --lora`) is **taken off the plan**. A merge only needs
+the adapter convention to be consistent inside the sample (W' = W + s·B·A
+in the sample's own layout), so an upstream LoRA loader proves nothing the
+merge depends on. The intermediate check that does carry weight is H47:
+upstream llama.cpp reads the merged file. H44 stays as a diagnostic if H45
+fails and the user wants D2 as a fallback.
+
+### 8.10 Architecture facts, verified against the source
+
+Upstream files read at `39febd2ad`: `src/models/qwen35.cpp`,
+`src/models/delta-net-base.cpp`, `src/models/models.h`
+(`build_gdn_l2_norm`), parts of `src/llama-graph.cpp` (`build_lora_mm`,
+`build_norm`, `build_qkv`, `build_attn_mha`, `build_ffn`,
+`llm_graph_input_pos::set_input`), `src/llama-model.cpp` (RoPE type,
+`n_rot`), `ggml/src/ggml-cpu/ops.cpp` (RoPE, RMS norm, `ssm_conv`,
+`repeat`, flash attention head mapping), `ggml/src/ggml-cpu/ggml-cpu.c`
+(`mul_mat` broadcast), `ggml/src/ggml-quants.c` (`quantize_row_q8_0_ref`),
+`ggml/src/gguf.cpp` (alignment), `src/llama-vocab.cpp` (pre-tokenizer).
+`master` differs from `39febd2ad` in `qwen35.cpp` only by optional fused
+tensors (`attn_qkv_gate`, a concatenated beta/alpha) that this file does
+not have; the design is pinned to `39febd2ad`.
+
+**File** (*measured*): GGUF version 3, 42 metadata keys, 866 tensors, no
+`general.alignment` (so 32), data section at byte 10,995,040; the end of
+the last tensor equals the file size (*computed* = `stat`). Tensor order in
+the file: `output.weight`, `output_norm.weight`, `token_embd.weight`, then
+`blk.0` … `blk.64`. Types: 360 F32 (type 0), 439 Q4_K (12), 67 Q6_K (14).
+866 = 3 + 48 × 14 + 16 × 11 + 15 (*computed*). There are no per-tensor
+scale tensors and no Hadamard tensors, so those branches of
+`build_lora_mm` are inactive. `general.file_type` 15.
+
+Hyperparameters (*measured* from the metadata): `block_count` 65,
+`nextn_predict_layers` 1 (so 64 trunk blocks + 1 MTP block),
+`embedding_length` 5120, `feed_forward_length` 17408, `head_count` 24,
+`head_count_kv` 4, `key_length` = `value_length` 256,
+`layer_norm_rms_epsilon` 1e-6, `rope.dimension_count` 64,
+`rope.freq_base` 1e7, `rope.dimension_sections` [11, 11, 10, 0],
+`full_attention_interval` 4, `ssm.conv_kernel` 4, `ssm.state_size` 128,
+`ssm.group_count` 16, `ssm.time_step_rank` 48, `ssm.inner_size` 6144,
+`context_length` 262144.
+
+Shapes below are in libtorch order `[out, in]`; a GGUF dimension list is
+the reverse (`attn_qkv.weight` is listed as `5120 10240`). K-quant blocks
+run along the flattened row-major data, so a row of 5120 is 20 whole
+super-blocks.
+
+**Block skeleton** (*read in source*), for trunk block `i`, hidden `h`:
+
+```
+a  = Attn_i(rms(h, attn_norm))          linear if (i+1) mod 4 <> 0, else full
+h1 = h + a
+h2 = h1 + Wdown · (silu(Wgate · n) ⊙ (Wup · n)),   n = rms(h1, post_attention_norm)
+logits = Woutput · rms(h_64, output_norm)
+rms(x, w) = x / sqrt(mean(x²) + 1e-6) ⊙ w          (mean over the last dimension)
+```
+
+No bias anywhere. Activations are F32 throughout upstream.
+
+**Linear block (Gated DeltaNet)** (*read in source*), `x = rms(h)`,
+T tokens, one sequence:
+
+1. `qkv = Wqkv·x` [T, 10240]; `z = Wgate·x` [T, 6144];
+   `β = sigmoid(Wbeta·x)` [T, 48];
+   `g = softplus(Walpha·x + ssm_dt.bias) ⊙ ssm_a` [T, 48]. `ssm_a` is
+   negative (*measured*: block 0 starts −0.0406, −0.0095, …), so `g ≤ 0`
+   and `exp(g)` is a decay.
+2. Causal depthwise convolution over time, no bias, three zeros in front:
+   `u[t, c] = Σ_{i=0..3} w[c, i] · qkv[t − 3 + i, c]`, then SiLU.
+   `ssm_conv1d.weight` is `[10240, 4]` in libtorch order; index 3
+   multiplies the current token (*measured*: it dominates in block 0).
+   This is `conv1d` with `groups = 10240`, left padding 3.
+3. Split `u`: `q = u[:, 0:2048]` as [T, 16, 128], `k = u[:, 2048:4096]`
+   as [T, 16, 128], `v = u[:, 4096:10240]` as [T, 48, 128].
+4. `q`, `k`: L2 norm per head, `x / sqrt(Σx² + 1e-6)`
+   (`build_gdn_l2_norm` is an RMS norm with ε/n, scaled by 1/√n).
+5. **Key heads are tiled to the 48 value heads: value head `j` uses key
+   head `j mod 16`** (`ggml_repeat_4d`, whose kernel copies whole source
+   blocks in turn). This differs from the full-attention blocks below.
+6. `q := q / sqrt(128)`.
+7. Gated delta rule per value head, state `M` 128 × 128 (value × key),
+   zero at sequence start; per token (the autoregressive form in
+   `build_delta_net_autoregressive`, which is the oracle):
+   ```
+   M := exp(g_t) · M
+   d := β_t · (v_t − M · k_t)
+   M := M + d · k_tᵀ
+   o_t := M · q_t
+   ```
+   The multi-token form is chunked with chunk size 64, the sequence padded
+   to a multiple of 64, a unit-lower-triangular solve inside the chunk and
+   one state update per chunk; no clamp on the cumulative gate. (8.1's
+   "chunk 64" is now *read in source*; "float32 inside the rule" is
+   simply upstream's F32 activations.)
+8. `o` [T, 48, 128] → `rms(o, ssm_norm)` over the 128 (weight of 128,
+   shared by the heads) `⊙ silu(z as [T, 48, 128])` → [T, 6144] →
+   `Wssm_out` → [T, 5120].
+
+**Full block (gated attention)** (*read in source*):
+
+1. `qg = Wq·x` as [T, 24, 512]; per head the first 256 are the query, the
+   last 256 the output gate. `k = Wk·x`, `v = Wv·x` as [T, 4, 256].
+2. `q := rms(q, attn_q_norm)`, `k := rms(k, attn_k_norm)` over the 256
+   (weights of 256, shared by the heads). `v` is not normalised.
+3. RoPE on `q` and `k`, type IMROPE (interleaved multimodal). For text
+   tokens the position is `[p, p, p, 0]`, and with sections [11, 11, 10, 0]
+   every one of the 32 rotated pairs takes `p` (*computed* from the read
+   kernel), so for text it is: **only the first 64 of the 256 dimensions
+   of a head rotate**, pair `(i, i + 32)` for `i = 0..31`, angle
+   `p · 1e7^(−i/32)`; `x0' = x0·cos − x1·sin`, `x1' = x0·sin + x1·cos`;
+   dimensions 64–255 pass unchanged. Positions start at 0.
+4. Causal attention, scale `1/sqrt(256)`, softmax in F32. GQA: **query
+   head `h` uses key/value head `h div 6`** (`iq2 / rk2` in the kernel).
+5. Output [T, 6144] `⊙ sigmoid(gate as [T, 6144])` → `Wattn_output`.
+
+**MTP block `blk.64`** (*read in source*): input
+`eh_proj · concat(rms(emb(token), enorm), rms(h, hnorm))`, where `h` is
+the trunk's hidden state **after** `output_norm`; then one full-attention
+block; `shared_head_norm`; then the trunk's `output.weight`. The file has
+no `nextn.embed_tokens` and no `nextn.shared_head_head` (*measured*), so
+the MTP block shares `token_embd` and `output`. Consequence for D3: all
+15 tensors of `blk.64` are copied unchanged, and since `token_embd` and
+`output` are not adapted, only the distribution of `h` shifts under it.
+
+**Tokenizer** (*measured*): `tokenizer.ggml.model` `gpt2`, `pre`
+`qwen35`, 248,320 tokens (248,043 normal, 27 control, 6 user-defined,
+243 unused), 247,587 merges, `add_bos_token` false, EOS 248046
+`<|im_end|>`, BOS = padding 248044 `<|endoftext|>`; 248045
+`<|im_start|>`, 248068 `<think>`, 248069 `</think>`, 248058/248059
+`<tool_call>`/`</tool_call>`. Pre-tokenizer regex (*read in source*):
+
+```
+(?:'[sS]|'[tT]|'[rR][eE]|'[vV][eE]|'[mM]|'[lL][lL]|'[dD])|[^\r\n\p{L}\p{N}]?[\p{L}\p{M}]+|\p{N}| ?[^\s\p{L}\p{M}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+
+```
+
+It needs the Unicode categories L, M, N and white space; the sample
+implements it as a hand-written scanner, not with a regex engine.
+
+**Chat template** (*measured*, 8,952 bytes of Jinja in
+`tokenizer.chat_template`). The part the sample needs:
+
+```
+[<|im_start|>system\n{R}<|im_end|>\n]            only if thinking is on and no system message
+<|im_start|>user\n{prompt}<|im_end|>\n
+<|im_start|>assistant\n<think>\n{reasoning}\n</think>\n\n{answer}<|im_end|>\n
+generation prompt: <|im_start|>assistant\n<think>\n          (thinking on)
+                   <|im_start|>assistant\n<think>\n\n</think>\n\n   (enable_thinking = false)
+```
+
+`R` is a fixed sentence chosen by `reasoning_effort` (default `xhigh`:
+"Reasoning effort is set to xhigh. …"; `low` has its own sentence;
+`medium` adds none); with a system message it is put in front of it,
+separated by an empty line. Contents are trimmed. **But Ollama does not
+run this template**: the model's Modelfile is `TEMPLATE {{ .Prompt }}`,
+`RENDERER qwen3.8`, `PARSER qwen3.5` (*measured* with
+`ollama show --modelfile`), so what the deployed model sees is produced by
+Ollama's built-in renderer. Whether it equals the Jinja text is **not
+verified**; one rendered prompt has to be captured (8.11, M3).
+
+**Corrections and additions to 8.1:** the key-head tiling (`j mod 16`)
+against GQA's `h div 6`; the L2 norm's ε; `q / sqrt(128)`; the state
+orientation; the convolution's index order and missing bias; RoPE touching
+64 of 256 dimensions and reducing to plain rotary for text; the MTP input
+taken after `output_norm`. The rest of 8.1 holds.
+
+**Still from memory or unread**, each settled by a named check:
+
+| Claim | Status | Settled by |
+|---|---|---|
+| no scaling of the token embedding (`build_inp_embd` not read) | from memory | H43 |
+| BPE merge loop, byte-level mapping, how special tokens are split out before BPE (only the regex and the token types were read) | from memory | H46 |
+| no Unicode normalisation before BPE | from memory | H46 on non-ASCII text |
+| Ollama's `qwen3.8` renderer equals the Jinja template for system/user/assistant turns | not verified | captured prompt (M3) |
+| the reference model in transformers (not read at all); the facts above are about the GGUF layout only | unread | not needed: the GGUF is the base |
+| `llama-server` endpoints `/tokenize`, `/completion` with `n_probs`, `/apply-template` and their JSON fields | from memory | task T05, first use |
+| GGUF type ids F16 = 1, Q8_0 = 7 (12 and 14 are *measured*) | from memory | H47 |
+| FPC 3.2.2's `fpjson`, `fphttpclient` and Unicode category data are enough for the tools | from memory | tasks T05, T06 |
+
+### 8.11 Milestones
+
+A 27B run occupies both GPUs for a day; while it runs the local Qwen, and
+so Hermes' sub-agent, is down. So **all code is finished and exercised
+before the first 27B run**, on a small model of the same architecture on
+the CPU, where the GPUs stay with Ollama.
+
+Rehearsal model: the smallest `qwen35` GGUF in Q4_K_M. Upstream knows the
+sizes 0.8B and 2B (24 blocks; 0.8B has an embedding of 1024), 4B and 9B
+(32 blocks) and 27B (*read in source*). None is on this host (*measured*:
+the other local models are `qwen3moe`, `gpt-oss`, `mistral3`). It has to be
+downloaded once by the user (about 0.5–1.6 GB, *estimate*); requirements:
+`general.architecture` `qwen35`, Q4_K and Q6_K tensors both present,
+ideally `nextn_predict_layers` 1. The first task that touches it prints its
+metadata and checks these. Fallback without a download: a tiny random
+`qwen35` GGUF made by the sample's own writer; it tests the code paths but
+says nothing about training.
+
+| | Milestone | Where | Exit |
+|---|---|---|---|
+| M0 | Preconditions: C4 (Theme A, H39); rehearsal model present; SDLC project skeleton; coverage tool **(H50)**; bundled `llama-server` serves the rehearsal model on the CPU with the GPUs hidden | CPU | all four hold |
+| M1 | Read and reproduce: GGUF reader, dequantisation, tokenizer, chat rendering, forward | CPU, rehearsal model | **H46** and **H43** hold on the rehearsal model |
+| M2 | Train and deploy in small: LoRA, block-wise backward, optimiser, checkpoints, loader, D3 writer, evaluation harness | CPU, rehearsal model | loss on 32 fixed samples falls below 10 % of its start; resume is exact; **H47**; the merged small model imports into Ollama |
+| M2g | GPU smoke of the same code: rehearsal model split over both cards in bf16, 20 steps | GPUs, by the user, minutes | the loss curve follows the CPU fp32 curve; the two-device path works |
+| M3 | Data: specification, generation, filter, frozen data set v1; evaluation tasks; **baseline evaluation** of the unmodified 27B; one captured Ollama-rendered prompt | external + Ollama | data set card written; "before" numbers recorded |
+| M4 | 27B: reference log-probabilities, **H43** on the GPUs, 20-step smoke, the full run | GPUs, by the user, 1–2 days; Qwen down | run finished, best checkpoint chosen on validation loss |
+| M5 | Deploy and evaluate: merge, `ollama create` under a new name, **H45**, "after" evaluation, **H49** | CPU merge, then Ollama | the adoption rule of 8.17 is evaluated |
+| M6 | Afterwards: Oxygene verification when a compiler arrives; a second run (the bf16 original, FFN targets, reasoning text, tool-call format) | — | separate decisions |
+
+M3 runs in parallel with M1 and M2 (different actors); it needs task T06
+(the verifier) early. M2g is the only GPU use before M4 and exists because
+a CPU rehearsal has one device: the hand-over of activations and gradients
+between two devices, bf16, and host offload are otherwise first run at M4,
+when Qwen is no longer there to fix anything.
+
+H43 in detail. Reference: the bundled `llama-server` started by hand on
+the same GGUF (`/completion`, `n_predict` 1, `n_probs` 20), for 24 prompts
+of 1, 2, 5, 63, 64, 65, 130 and about 600 tokens (single token: no
+attention and a one-step delta rule; 64 ± 1: the chunk boundary), saved as
+a JSONL file so it is taken once. Pass, rehearsal model in fp32 on the
+CPU: the same top-1 token for all prompts and at most 0.02 absolute
+difference over the reference's top 10. Pass, 27B in bf16 on the GPUs: at
+most 0.15, and the same top-1 wherever the reference's margin between its
+first and second token exceeds 0.5. The thresholds are *estimates* fixed
+before measuring; a miss on the 27B alone, with the rehearsal model
+passing, is a precision question and goes to the user (8.19).
+
+### 8.12 Location and units of the sample
+
+The sample is its own SDLC project inside the repository:
+
+```
+samples/qwen-lora/
+  AGENTS.md  .sdlc/config.edn        SDLC rules and gate (from the harness template)
+  docs/external-design/ system-flow/ detailed-design/ program-flow/ defects.md
+  src/                               units and programs below
+  tests/ut/ ita/ itb/ st/            cases and tests
+  test-results/
+  data-spec/                         the data specification (8.16), written by Opus/Sonnet
+  eval/tasks/<dialect>/NNN/          held-out tasks (8.17)
+  eval/regress/                      non-Pascal and tool-call checks
+  README.md  README_jp.md            how to run each stage
+  work/                              git-ignored: data set, token cache, checkpoints, GGUFs, results
+```
+
+Everything is Pascal (`{$mode objfpc}{$H+}`, FPC 3.2.2), including the
+tools that call HTTP endpoints and compilers (`fphttpclient`, `fpjson`,
+`process`); bash only for one-line wrappers. One tool chain means one
+coverage measurement and one set of skills for Qwen. Units fall into three
+groups by what their tests need:
+
+| Unit | Responsibility | Needs |
+|---|---|---|
+| `GgufFile` | read header, metadata and tensor directory; read a tensor's bytes; write a GGUF (metadata section copied as bytes, directory and offsets rebuilt, alignment 32) | Pascal only |
+| `GgufQuant` | scalar reference: dequantise Q4_K, Q6_K, Q8_0, F16; quantise Q8_0 (`roundf`, that is half away from zero; scale kept as fp16) | Pascal only |
+| `QwenTokenizer` | byte-level BPE from the metadata; the `qwen35` pre-tokenizer scanner; special tokens; encode and decode | Pascal only |
+| `QwenChat` | render system/user/assistant turns with thinking on or off; return the token span the loss covers | Pascal only |
+| `DialectVerify` | detect the dialect of a source; compile and run it with that dialect's compiler; classify the result (8.16) | Pascal only + compilers |
+| `GgufQuantT` | the same dequantisers and the Q8_0 quantiser in tensor ops, on any device | Tch |
+| `QwenConfig` | hyperparameters from the metadata; block kinds; device map | Tch |
+| `PackedLinear` | a matrix kept packed on a device, dequantised per call to the compute dtype; optional LoRA pair | Tch |
+| `Lora` | `TLoraPair`, `TLoraSet`: parameters, init, naming, save/load, export for the merge (8.13) | TchNN |
+| `DeltaRule` | the gated delta rule: token-by-token reference and the chunked form | Tch |
+| `QwenBlocks` | RMS norm, RoPE, the linear block, the full block, the FFN | Tch |
+| `QwenModel` | embedding rows, the list of stages, the head; logits for a token sequence | Tch |
+| `Recompute` | the block-wise backward, independent of Qwen (8.14) | Tch |
+| `LoraOptim` | AdamW with state in a `TVarStore`, schedule, global-norm clipping over several stores (8.14) | TchNN |
+| `TrainData` | JSONL records → rendered text → tokens (cached); length buckets; batches with loss masks | Pascal + Tch |
+| `Checkpoint` | atomic save/restore of adapters, optimiser state and the run state | TchNN |
+| `GgufMerge` | D3: merge, quantise, write (8.15) | Tch |
+
+Programs (each a thin `program` over the units): `qlora_inspect` (print
+metadata and tensor directory), `qlora_tokenize`, `qlora_logprobs` (H43),
+`qlora_verify` (the compile/run filter), `qlora_dataset` (filter, dedup,
+split, card), `qlora_train`, `qlora_merge`, `qlora_eval`.
+
+Tests that need a model file read its path from an environment variable
+and are skipped without it; CI runs the Pascal-only group in the
+`no-libtorch` job and the tensor group on the tiny random model in the
+`libtorch-cpu` job. No model data and no generated training data are
+committed.
+
+`Recompute` and `PackedLinear` are written without reference to Qwen so
+that they can later move into the library; that move is not part of this
+work.
+
+### 8.13 The LoRA layer
+
+Targets (decision): the seven attention-side projections, in all 64 trunk
+blocks; `blk.64` is not touched.
+
+| Block kind | Tensors | In → out |
+|---|---|---|
+| linear (48) | `attn_qkv`, `attn_gate`, `ssm_out` | 5120 → 10240, 5120 → 6144, 6144 → 5120 |
+| full (16) | `attn_q`, `attn_k`, `attn_v`, `attn_output` | 5120 → 12288, 5120 → 1024 (twice), 6144 → 5120 |
+
+208 tensors, 7.214 B weights; at rank 16 that is 39.58 M trainable
+parameters, 22.27 M of them on GPU 0 with the 36/28 split (*computed* from
+the tensor directory; the gate's H42 used this set). Not adapted in the
+first run: the FFN matrices (they would be another 69 M parameters and
++8 GB in the merged file), `ssm_alpha`/`ssm_beta` (tiny), the norms, the
+convolution, `token_embd`, `output`.
+
+| Setting | Value | Note |
+|---|---|---|
+| rank `r` | 16 | as measured in the gate |
+| scale `s = alpha / r` | 2 (alpha 32) | starting value, *from memory* of common practice; tuned at M2 |
+| init | `A` Kaiming-uniform, `B` zero | so the adapted model starts identical to the base |
+| parameter dtype | fp32 | gradients and optimiser state in fp32 |
+| compute dtype | bf16 on the GPUs (H40), fp32 on the CPU | `A`, `B` are cast per call; autograd carries the cast |
+| dropout | none | the two forwards of 8.14 must compute the same function |
+
+Forward of an adapted projection, `x` in the compute dtype:
+`y = x·Wᵀ + s · ((x·Aᵀ)·Bᵀ)`, `A` [r, in], `B` [out, r], `W` dequantised
+for the call and not part of the graph's leaves.
+
+In `TchNN` terms: a `TVarStore` has one device, so there is **one store
+per device**; the block-to-device map decides the store. Names follow the
+GGUF: path `blk` / `<n>` / `<tensor>`, variables `lora_a`, `lora_b`
+(full name `blk.12.attn_qkv.lora_a`).
+
+```pascal
+type
+  TLoraPair = class
+    constructor Create(const P: TVarPath; InDim, OutDim, Rank: Int64; Scale: Double);
+    function Delta(const X: TTensor; ComputeKind: TKind): TTensor;  // s·((x·Aᵀ)·Bᵀ)
+    function MergedDelta: TTensor;                                  // s·B·A, fp32, for 8.15
+  end;
+  TPackedLinear = class
+    constructor Create(const Packed: TTensor; QuantType: TGgufType;
+      OutDim, InDim: Int64; Lora: TLoraPair = nil);
+    function Forward(const X: TTensor; ComputeKind: TKind): TTensor;
+  end;
+```
+
+The MTP head is not trained and not loaded for training.
+
+### 8.14 Block-wise backward, optimiser, checkpoints, the step
+
+**`Recompute`** — the reusable routine. A stage is anything with a device
+and a forward; a trunk block is one stage.
+
+```pascal
+type
+  TStage = class abstract
+    function Device: TDevice; virtual; abstract;
+    function Forward(const X: TTensor): TTensor; virtual; abstract;
+  end;
+  TStageArray = array of TStage;
+  TSavedInputs = class            // one tensor per stage, on the host or on the stage's device
+    constructor Create(OnHost: Boolean);
+  end;
+
+// Runs all stages under NoGrad, keeps every stage's input, returns the last output.
+function RecomputeForward(const Stages: TStageArray; const X0: TTensor;
+  Saved: TSavedInputs): TTensor;
+// From dL/d(last output): per stage, last to first:
+//   x := saved.detach + requires_grad;  y := Stage.Forward(x);
+//   (y * g).sum.Backward;  g := x.grad;  free the graph.
+// Parameter gradients accumulate in the stages' own leaves.
+procedure RecomputeBackward(const Stages: TStageArray; Saved: TSavedInputs;
+  const GradOut: TTensor);
+```
+
+Tensors cross devices with `&to` inside the two loops only. Acceptance:
+on a stack of eight small stages, the parameter gradients equal those of
+one ordinary backward through the whole stack (CPU, fp64, 1e-10).
+
+**Head.** `h` (the last stage's output, moved to the head's device)
+becomes a leaf; the output matrix is dequantised once per step, 8192 rows
+at a time (the gate's finding); the loss is taken over slices of 256
+positions: `logits = rms(h_slice)·Woutᵀ` in the compute dtype, cast to
+fp32, cross-entropy summed over the positions the mask selects and divided
+by the batch's mask count; each slice's backward adds to `h.grad`. The
+result is the loss and `dL/dh`.
+
+**Batches.** Dequantisation costs about 1 s per forward whatever the
+length (*measured*, 8.8), so short samples are batched: samples are
+bucketed by length and a batch holds as many as fit into 2048 positions
+(`B · T_max ≤ 2048`), right-padded. Every part of the model is causal, so
+padding at the end needs no attention mask, only the loss mask. One
+optimiser update accumulates two batches (about 4096 positions).
+
+**Loss mask.** Only the assistant's answer and the closing `<|im_end|>`;
+nothing of the system or user turn or the template text.
+
+**Thinking format (decision for the first run).** Training text uses the
+no-thinking form (`<think>\n\n</think>\n\n` before the answer), because
+Mistral's samples carry no reasoning in Qwen's style and inventing one
+would teach Qwen to think like the generator. The price is a mismatch with
+how Hermes runs the model (thinking on); the evaluation measures both
+modes (8.17), and reasoning text is a candidate for a second run.
+
+**`LoraOptim`.** `TOptimizer` cannot save its state, and a run of a day
+must survive an interruption, so the sample has its own AdamW: the two
+moments are non-trainable variables in a second `TVarStore` per device
+(saved with `Save`), the update is three tensor expressions under NoGrad.
+Starting values (*from memory* of common practice, tuned at M2): learning
+rate 1e-4, betas 0.9 / 0.999, weight decay 0.01, 50 warm-up updates, cosine
+decay to 10 %, global-norm clipping at 1.0 computed over both stores.
+Acceptance: twenty steps on a toy problem follow `TOptimizer.AdamW` to
+1e-6.
+
+**`Checkpoint`.** Every 50 updates and at the end of each epoch: adapters
+and moments per device (`.ot`), and a `state.json` (update count, epoch,
+position in the shuffled order, seed, schedule position, configuration
+hash, sha256 name of the base GGUF, validation loss). Written to a
+temporary name and renamed; the last three and the best on validation loss
+are kept. Acceptance: ten updates in one go and five + resume + five give
+identical parameters on the CPU.
+
+**One step** (also UML 10):
+
+1. batch → token ids, mask; embedding rows dequantised for the ids only;
+2. `RecomputeForward` over 64 stages (36 on GPU 0, 28 on GPU 1), inputs
+   saved in host memory;
+3. head: loss and `dL/dh` on GPU 1;
+4. `RecomputeBackward`, GPU 1 then GPU 0;
+5. every second batch: clip, AdamW update on both stores, zero the
+   gradients; log loss, tokens/s, peak VRAM (from
+   `/sys/class/drm/card*/device/mem_info_vram_used`); checkpoint when due;
+   stop on a non-finite loss.
+
+Planning numbers (*computed* from the gate's 167–172 tokens/s; real data,
+RoPE and the update will cost some of it): four dialects × 1000 samples ×
+about 850 positions = 3.4 M positions per epoch, about 6 h; three epochs
+17–20 h.
+
+### 8.15 The D3 writer
+
+`qlora_merge <base.gguf> <checkpoint> <out.gguf>`:
+
+1. read the base header; copy the metadata section **as bytes** (no key is
+   changed in the first attempt, `general.file_type` stays 15);
+2. rebuild the tensor directory in the base's order: adapted tensors get
+   type Q8_0 and their new size, offsets are recomputed with alignment 32;
+3. per tensor in order: unchanged tensors are copied byte for byte;
+   an adapted tensor is dequantised to fp32, `s·B·A` is added in fp32, and
+   the sum is quantised to Q8_0: blocks of 32, `d = max|x| / 127`,
+   `q = roundf(x / d)` with the fp32 `d`, stored as fp16 `d` + 32 × int8
+   (34 bytes; *read in source*). `roundf` rounds halves away from zero;
+   neither Pascal's `Round` nor `torch.round` does.
+
+Sizes (*computed*): the 208 tensors go from 4.39 GB to 7.67 GB; the file
+from 16.81 GB to **20.08 GB**; in Ollama about 24.3 GB of the 31.8 GB
+instead of today's 21 GB at the 64k context. Free disk is ample
+(*measured*). The largest tensor in fp32 is 252 MB, so the merge runs on
+the CPU in minutes.
+
+Checks, in this order:
+- **identity:** with an empty adapter set and no retyping, the output is
+  byte-identical to the base (same sha256). This proves the writer before
+  any numerics;
+- **round trip:** the merged file read back by `GgufFile`, its Q8_0
+  tensors dequantised, equals the fp32 merge to within one Q8_0 step;
+- **fidelity (rehearsal model):** the Pascal forward on the merged file
+  against the Pascal forward with the adapter attached: mean absolute
+  log-probability difference over the top 10 at most 0.05 on the H43
+  prompts, and at least 90 % of the validation-loss gain kept;
+- **(H47):** the bundled `llama-server` on the CPU loads the merged
+  rehearsal file and matches the Pascal forward with the adapter under the
+  same thresholds;
+- **(H45), by the user:** `ollama create` under a **new name** from a
+  Modelfile that repeats what `ollama show --modelfile` prints for the
+  current model (*measured*: two `FROM` lines, `TEMPLATE {{ .Prompt }}`,
+  `RENDERER qwen3.8`, `PARSER qwen3.5`, the sampling parameters,
+  `draft_num_predict 4`, `num_ctx 65536`), with the first `FROM` pointing
+  at the merged file and the second at the projector blob
+  `sha256-ac3714bf…` under `/usr/share/ollama/.ollama/models/blobs/`.
+  Holds if the model loads fully on the GPUs at the 64k context, answers a
+  text prompt and an image prompt, emits a well-formed tool call, and
+  drafts with the MTP head. The original model stays installed; it is the
+  rollback and the "before" of every later comparison.
+
+### 8.16 Data pipeline and the data specification
+
+```
+data-spec/ (Opus/Sonnet, in the repo)  ──►  Mistral Large 3 (external)
+                                              generates, compiles, repairs
+        raw JSONL (outside the repo)  ◄──────┘
+              │ qlora_verify   compile + run per dialect, classify
+              │ qlora_dataset  dedup, leak check, quotas, split, card
+              ▼
+   work/dataset-v1/{train,valid}.jsonl + manifest.jsonl     (not committed)
+   samples/qwen-lora/data-spec/dataset-v1.card.md           (committed: counts, hashes, provenance)
+```
+
+**Boundary.** In the repository: this design, the specification, the
+tools, the evaluation tasks, the record schema, the data set card. Outside
+it: the generated samples, the token cache, checkpoints, GGUFs. Mistral's
+part covers: generating records to the specification, compiling and
+running each sample itself before delivering it, repairing with the
+compiler's message, and filling in the generator fields. The repository's
+tools then decide independently what is accepted; Mistral's own claim of
+"compiles" is never trusted.
+
+**What the specification must contain** (it is instructions and lists;
+it contains **no example programs**, and it does not hand the
+Claude-written skill examples to the generator):
+
+1. Purpose, and the rule that a sample is one self-contained console
+   program (or a unit plus its test program) with deterministic output: no
+   input, no network, no files outside the working directory, no GUI, no
+   timing, at most 5 s.
+2. The record schema: `id`, `dialect`, `task_type`, `topic`, `features[]`,
+   `language` (of the prompt), `prompt`, `answer` (text with exactly one
+   fenced block per file), `expected_stdout`, `generator` (model, version,
+   date, prompt id, temperature, repair attempts), and for repair-derived
+   records the broken source and the compiler's message.
+3. Per dialect: how a source declares it (so the verifier recognises it),
+   the allowed libraries, and the **feature list** that distinguishes it
+   from the others, as prose. Each record tags the features it uses; each
+   feature has a minimum count.
+4. Task types and quotas per dialect: write from a description 50 %,
+   extend or change given code 15 %, fix a compile error 15 %, convert
+   from another dialect 10 %, unit plus test program 10 %.
+   "Fix a compile error" records are built from Mistral's own failed
+   attempts: the broken source, the real compiler message, the repaired
+   source. The message is reproduced by `qlora_verify`, not copied.
+5. A topic list (algorithms, containers, strings, dates, parsing, object
+   models, generics, numerics, error handling, small simulations, …) and a
+   length distribution: answers of 150–1500 tokens, median about 600.
+6. Prompt language: English 70 %, Japanese 30 % (a parameter; for the user
+   to confirm). Comments and identifiers in English.
+7. Prohibitions: no verbatim reproduction of existing code, no personal
+   data, no dialect mixing, nothing outside the dialect's feature list.
+8. The generation protocol: batch sizes, seeds, at most three repair
+   attempts, what to deliver.
+
+**Quotas for data set v1:** 1000 accepted records per dialect; 5 % of
+each dialect × task-type cell goes to `valid` (loss curve only).
+
+**The filter** (`qlora_verify`), per dialect:
+
+| Dialect | Compiler and flags | Class recorded |
+|---|---|---|
+| `{$mode objfpc}` | stock FPC 3.2.2 | `compiled-run` |
+| FPC `{$mode delphi}` | stock FPC 3.2.2 | `compiled-run` |
+| Unleashed Pascal | the Unleashed `fpc` | `compiled-run` |
+| Delphi | the Unleashed `fpc` with `-Mdelphiunicode` plus the anonymous-function, function-reference and inline-variable mode switches, on a copy whose dotted unit names are mapped to FPC's (the method of the `pascal-dialects` skills) | `fpc-approx` |
+| Oxygene | none yet: static checks only (a `namespace` header, one extractable source, no construct from a short list of things that are not Oxygene) | `static-only` |
+
+A record is accepted when the source compiles without error, runs within
+the limit with exit code 0, and prints `expected_stdout` exactly. The
+verifier's own compile log hash, compiler version and flags are written
+into the manifest. Compilation and execution happen in a fresh temporary
+directory with a time and memory limit.
+
+**Dedup and leaks** (`qlora_dataset`): exact duplicates by normalised
+source hash; near-duplicates by Jaccard similarity of token 5-grams at
+0.5 or more, within the data set, **against every evaluation task's prompt
+and reference solution**, and against every example file of the
+`pascal-dialects` skills and of this repository's skill. Then every
+accepted record is tokenised by `QwenTokenizer` **and** by `llama-server`
+and dropped if the two differ, which makes H46 exact for the data actually
+trained on.
+
+**Provenance.** The manifest has one line per accepted record: id, sha256
+of the record, generator fields, verification class and compiler, the
+specification's version. The card states the counts per dialect × task
+type × class, the reject reasons with counts, the yield **(H48)**, the
+generator's licence as stated by the user (Mistral Large 3, Apache-2.0)
+and that no record was written by Claude.
+
+**Oxygene until a compiler is here (decision).** Oxygene records are
+generated, statically checked, stored with class `static-only`, and
+**held back from training**: the first run trains on four dialects unless
+a compiler arrives before the data set is frozen. Reason: an Oxygene
+sample that is wrong cannot be detected, a model trained on it copies the
+generator's errors, and the evaluation could not show the damage; waiting
+costs one further run of under a day, which is planned anyway. The
+training configuration has an explicit list of admitted classes
+(default `compiled-run`, `fpc-approx`), so the user can admit
+`static-only` knowingly. **Once a compiler is available:** add its row to
+the table (compile, and run on one target chosen then), re-verify the
+stored records, move the passing ones to `compiled-run`, generate to fill
+the quota, verify the Oxygene evaluation tasks' reference solutions, and
+measure the unmodified model on them before the next run.
+
+### 8.17 Evaluation
+
+**Tasks.** 200 held-out tasks, 40 per dialect (30 write from a
+description, 5 fix a compile error, 5 convert), each a prompt, the
+expected standard output and a reference solution that the dialect's
+verifier accepts. They are written by Opus/Sonnet, are not training data,
+are never shown to the generator, and are protected by the leak check of
+8.16. Oxygene's reference solutions stay unverified until a compiler is
+here.
+
+**Runs.** Through Ollama's chat endpoint, that is through the renderer and
+parser the deployed model really uses; the deployed sampling parameters;
+two fixed seeds per task; once with thinking on (how Hermes uses the
+model) and once with thinking off (the format trained on). The same for
+the original model ("before") and the merged model ("after"). The first
+fenced block of the answer is the source; `DialectVerify` judges it.
+*Estimate*: 400 generations per mode, 2–5 h per model with thinking on.
+
+**Report**, per model and thinking mode:
+
+| Column | Content |
+|---|---|
+| `objfpc`, FPC `delphi`, Unleashed | compile rate and run-pass rate (compiles, runs, exact output), each of 80 |
+| **verified aggregate** | the three above together, of 240; the headline number |
+| Delphi (FPC approximation) | the same two rates, reported separately and marked as an approximation; not in the aggregate |
+| Oxygene (unverified) | static-check pass rate only, marked "not a correctness measure"; not in the aggregate |
+| paired flips | per column, tasks that went fail → pass and pass → fail |
+| regression | 20 non-Pascal tasks (shell, another language, plain questions) and 10 tool-call prompts (the reply must parse as a tool call) |
+| speed | tokens/s and the MTP draft acceptance from the server's log, same prompts **(H49)** |
+
+With 80 generations a single dialect's rate has a 95 % interval of about
+±11 points, the aggregate of 240 about ±6 (*computed*); per-dialect
+numbers are descriptive, decisions use the aggregate and the flips.
+
+**Adoption rule.** The merged model replaces the original for Pascal work
+if, with thinking on: the verified aggregate rises, the flips are
+significant in an exact sign test at 5 %, no verified dialect falls by more
+than 5 points, the tool-call check loses nothing, and H49 holds. If only
+the thinking-off series improves, the result is reported and the choice
+(use it with thinking off for Pascal tasks, or a second run with reasoning
+text) is the user's. When the Oxygene compiler arrives its column becomes
+a measured one and joins the aggregate, with a new "before".
+
+### 8.18 Hand-off to the Hermes process
+
+Per task: Mistral (main agent) writes the external design and the IT cases
+from the named sections of this design; Qwen (sub-agent) writes the
+detailed design, the unit tests and the code; the gate is the SDLC
+harness's (unit coverage, all cases run). One task is one unit or one
+program, sized for a 64k context. Every numeric task has an oracle that is
+written **first, as its own task**, or comes from outside the code under
+test.
+
+| | Task | Depends on | Acceptance (the oracle) |
+|---|---|---|---|
+| T01 | `GgufFile` reader, `qlora_inspect` | — | on the rehearsal model: counts, data offset, every tensor's end inside the file, the last end equal to the file size; the per-type tensor counts equal those in `llama-server`'s load log |
+| T02 | `GgufQuant` scalar dequantisers and Q8_0 quantiser | — | hand-computed blocks from the format definition; Q8_0 dequantise∘quantise within half a step; halves round away from zero |
+| T03 | `GgufQuantT` | T02 | equals T02 exactly on 512 random blocks per type |
+| T04 | `GgufFile` writer | T01 | identity copy of the rehearsal model has the same sha256 |
+| T05 | `QwenTokenizer`, `qlora_tokenize` | T01 | **H46**: equals `/tokenize` on a corpus of Pascal sources of all five dialects, English and Japanese prose, and the special tokens: 100 % of lines |
+| T06 | `DialectVerify`, `qlora_verify` | — | the `pascal-dialects` example and pitfall files are classified as their own check script classifies them |
+| T07 | `QwenChat` | T05 | equals `/apply-template` on twelve conversations; later the captured Ollama prompt |
+| T08 | `DeltaRule`, token-by-token | — | hand-computed two-step case; state stays zero for β = 0 |
+| T09 | `DeltaRule`, chunked | T08 | equals T08 to 1e-5 (fp32) for lengths 1, 63, 64, 65, 200 |
+| T10 | `PackedLinear`, `QwenBlocks` (norm, RoPE, FFN, the two blocks) | T03, T09 | RoPE against a scalar loop; each block against a deliberately slow scalar version on a tiny configuration |
+| T11 | `QwenModel`, `qlora_logprobs` | T05, T10 | **H43** on the rehearsal model |
+| T12 | `Lora` | T10 | zero `B` leaves the output unchanged; `MergedDelta` equals the two-product form |
+| T13 | `Recompute` | — | gradient parity with a whole-graph backward |
+| T14 | `LoraOptim` | — | parity with `TOptimizer.AdamW` |
+| T15 | `TrainData` | T05, T07 | masks cover exactly the answer; buckets respect the position budget |
+| T16 | `Checkpoint` | T12, T14 | exact resume |
+| T17 | `qlora_train` | T11–T16 | on the rehearsal model: overfits 32 samples; validation loss falls on a small real set |
+| T18 | `GgufMerge`, `qlora_merge` | T04, T12 | round trip and fidelity checks of 8.15; **H47** |
+| T19 | `qlora_dataset` | T05, T06 | on a synthetic raw set with planted duplicates, leaks and failures, exactly the planted ones are rejected |
+| T20 | `qlora_eval` | T06 | against the rehearsal model: the report of 8.17 from a fixed transcript of replies |
+
+Order: T01–T06 and T08, T13, T14 have no numeric predecessors and come
+first (T06 early, M3 needs it); then T07, T09, T10, T11 (end of M1); then
+T12, T15–T20 (M2).
+
+**What the user runs by hand:** the rehearsal download; starting the
+bundled `llama-server` for references; M2g; capturing one rendered prompt
+from Ollama; the baseline evaluation; every step of M4 (unload the model,
+reference log-probabilities, H43, smoke, the run in a terminal multiplexer
+with a log file, reload); `ollama create` and H45; the "after"
+evaluation. While M4 runs nothing can be delegated to Qwen; a defect found
+then stops the run and goes back through Hermes after the model is
+reloaded.
+
+### 8.19 Risks and stop criteria
+
+| | Risk | Detected by | Then |
+|---|---|---|---|
+| R1 | the forward does not match (H43) on the rehearsal model | T11 | isolate with the 1-token and 64 ± 1 prompts; after three Hermes rounds without progress: **stop**, the design session re-reads the source for the failing part |
+| R2 | H43 passes on the CPU in fp32 but not in bf16 on the 27B | M4 | keep norms, softmax and the delta rule in fp32 (already so); try fp16; else **stop and ask** |
+| R3 | tokenizer mismatches on some non-ASCII text | T05 | accept if every training record still matches (the per-record check of 8.16); list the classes that differ |
+| R4 | Qwen cannot write the numeric units (C4 low, or repeated gate failures) | H39, T08–T11 | **stop and ask**: the goal says Qwen writes the code; who writes instead is the user's decision |
+| R5 | peak memory with real data above the gate's 14.74 GiB | M2g, M4 smoke | position budget 1536 or 1024; split 37/27; **stop** above 15.5 GiB |
+| R6 | speed under 60 positions/s in the smoke | M4 | two epochs or a smaller set; **stop** under 30 (the gate's criterion) |
+| R7 | non-finite loss, or validation loss rising | every step, every checkpoint | halve the learning rate from the last good checkpoint; keep the best checkpoint; **stop** on a second occurrence |
+| R8 | Q8_0 loses the adaptation | fidelity check at M2 | fewer targets at higher rank, or F16 for part of them if memory allows; **ask** |
+| R9 | H45 fails | M5 | serve the merged file with the bundled `llama-server` to separate "file wrong" from "import wrong"; try `general.file_type`; D2 as fallback is the user's decision |
+| R10 | draft acceptance collapses (H49 fails) | M5 | compare with drafting off; re-fitting `blk.64` to the adapted trunk is a later task; the user weighs speed against quality |
+| R11 | the adapter harms other abilities or tool calls | regression columns | do not make it the default; keep it as a separately named model for Pascal tasks only |
+| R12 | training without reasoning text does not help with thinking on | the two evaluation series | report; second run with reasoning text, or thinking off for Pascal tasks |
+| R13 | low yield or low diversity from the generator (H48 fails) | data set card | revise the specification before generating more; never relax the filter |
+| R14 | the generator reproduces existing code | cannot be fully detected | the prohibition in the specification and the near-duplicate check against the known skill examples; recorded as a limit on the card |
+| R15 | unverified Oxygene | — | held back (8.16); the user may admit the class knowingly |
+| R16 | no coverage tool for FPC (H50 fails) | M0 | the user changes the gate's criterion for this project before T01 |
+| R17 | an Ollama update changes the bundled `llama-server` or the import | version check at M0 and M5 | pin Ollama 0.40.13 for the duration |
+| R18 | a long run is interrupted | — | checkpoints every 50 updates, exact resume (T16) |
+
+General stop rule, unchanged from the gate: when a criterion above says
+stop, the work stops and the question goes to HANDOFF; nobody lowers a
+threshold to get past it.

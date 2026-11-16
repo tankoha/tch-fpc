@@ -6,7 +6,103 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 Status at a glance of the knowledge-package and fine-tuning work:
 [progress.md](progress.md).
 
-## Local session 9 (2026-11-16): ROCm libtorch restored, GPU gate run — resume here
+## Design session 10 (2026-11-17): Theme B designed in detail — resume here
+
+Run as a Fable sub-agent from the local session. Result: DESIGN 8.9–8.19
+and UML 10. Nothing is implemented, nothing was committed, the GPUs and
+Ollama were not touched. The plan was **not** found infeasible; eight
+points need the user (below).
+
+**Decided in this session** (rationale in DESIGN):
+- Milestones M0–M6 (8.11): everything is written and exercised on a small
+  `qwen35` model on the CPU (M1, M2) and smoke-tested on the two GPUs with
+  that small model (M2g) before the 27B run (M4), because Qwen is down
+  while the 27B trains. H43 and H46 close M1.
+- The sample is an SDLC project of its own at `samples/qwen-lora/`,
+  all Pascal, 17 units and 8 programs (8.12).
+- LoRA: rank 16, alpha 32, on the seven attention-side projections of all
+  64 trunk blocks (208 tensors, 39.58 M parameters); one `TVarStore` per
+  device; no dropout; `blk.64` untouched (8.13).
+- The block-wise backward is a Qwen-independent unit `Recompute`; the
+  sample has its own AdamW because `TOptimizer` cannot save its state;
+  checkpoints every 50 updates with exact resume (8.14).
+- Training text uses the no-thinking form for the first run; the loss
+  covers the answer only (8.14).
+- D3 writer: metadata copied as bytes, adapted tensors as Q8_0, file
+  20.08 GB, about 24.3 GB in Ollama; checks in the order identity copy,
+  round trip, fidelity, H47, H45 (8.15).
+- **H44 is off the plan**; the intermediate check is the new H47 (the
+  bundled `llama-server` reads the merged rehearsal file).
+- Data: the specification's contents, the record schema, quotas (1000 per
+  dialect), the filter per dialect, dedup and leak check, provenance
+  (8.16). **Oxygene records are generated and stored as `static-only` and
+  held back from training until a compiler is here**; Delphi via FPC is the
+  class `fpc-approx`, trained on and reported separately.
+- Evaluation: 200 held-out tasks, two seeds, thinking on and off, before
+  and after; verified aggregate of three dialects as the headline; Delphi
+  and Oxygene in separate columns; regression and tool-call checks; MTP
+  speed (8.17).
+- Twenty Hermes tasks T01–T20, each with its oracle (8.18); risks and stop
+  criteria R1–R18 (8.19).
+
+**Verified in upstream source** (llama.cpp at `39febd2ad`, the commit the
+bundled `llama-server` reports) and in the GGUF itself: the block graph,
+the gated delta rule (token-by-token form and the chunk size 64), the L2
+norm, the convolution, RoPE (IMROPE; for text it rotates 64 of the 256
+head dimensions like plain rotary), the Q/K norms, GQA, the MTP block, the
+Q8_0 quantiser, the pre-tokenizer regex, the chat template. Two traps
+found: key heads are **tiled** in the linear blocks (`j mod 16`) but
+**divided** in the full blocks (`h div 6`); and **Ollama does not run the
+GGUF's chat template** (the Modelfile has `RENDERER qwen3.8`), so one
+rendered prompt must be captured. What is still from memory is tabled at
+the end of DESIGN 8.10.
+
+**Questions for the user** (the design assumes the first option of each):
+1. **Rehearsal model download.** A small `qwen35` GGUF in Q4_K_M (0.8B or
+   2B, about 0.5–1.6 GB) is needed for M1–M2g; none is on the host. Which
+   one, and may it be pulled? Requirements in DESIGN 8.11. Without it the
+   fallback is a tiny random model, which cannot rehearse training.
+2. **Oxygene held back** from the first run unless the compiler arrives
+   before the data set is frozen (8.16) — or train on the unverified
+   class knowingly?
+3. **No reasoning text** in the training samples for the first run (8.14)
+   — accepted?
+4. **Prompt languages** English 70 % / Japanese 30 % (8.16) — or another
+   mix?
+5. **Where the generated data set lives** and whether it is ever
+   published; and is it acceptable that the held-out evaluation tasks with
+   their Opus/Sonnet-written reference solutions are in this public
+   repository (they are never training data)?
+6. **Coverage for FPC (H50).** The SDLC gate wants an lcov report; which
+   tool, or a different gate criterion for this project?
+7. **If Qwen cannot write the numeric units** (R4): who does?
+8. **Language of the SDLC documents** under `samples/qwen-lora/docs/`:
+   English is assumed, as the repository is public and English-canonical.
+
+**Next local steps, in order:**
+1. Answer the questions above; download the rehearsal model (1).
+2. C4 as before: Theme A, local list below, through H39.
+3. M0 (DESIGN 8.11): create `samples/qwen-lora/` from the SDLC project
+   template; settle H50; check that the bundled `llama-server` serves the
+   rehearsal model on the CPU with the GPUs hidden
+   (`HIP_VISIBLE_DEVICES=-1 ROCR_VISIBLE_DEVICES=-1`) and that
+   `/tokenize`, `/completion` with `n_probs` and `/apply-template` answer
+   as DESIGN 8.10's last table assumes; add `samples/qwen-lora/work/` to
+   `.gitignore`.
+4. Hand T01–T06, T08, T13, T14 to Hermes (DESIGN 8.18), then the rest in
+   the stated order. Record H46 and H43 on the rehearsal model here.
+5. In parallel (M3): Opus/Sonnet write `data-spec/` and the evaluation
+   tasks; Mistral generates; `qlora_verify` and `qlora_dataset` freeze
+   data set v1; the user runs the baseline evaluation and captures one
+   rendered prompt from Ollama.
+6. M2g, M4, M5 by the user, as listed at the end of DESIGN 8.18. Stop
+   criteria: DESIGN 8.19.
+
+New hypotheses: H47 (merged file under `llama-server`), H48 (generator
+yield), H49 (MTP speed after the merge), H50 (coverage tool). Throwaway
+tools of this session: `build/design10/` (git-ignored).
+
+## Local session 9 (2026-11-16): ROCm libtorch restored, GPU gate run
 
 **Where things stand.** Nothing is committed: the working tree has the
 design session 9 documents (DESIGN 7 and 8, UML 9, this file, the `_jp`
@@ -40,8 +136,12 @@ Next, in order:
    "Gate re-run"): 36/28 gives 167 tokens/s at T = 1024 (13.06 / 13.88
    GiB) and, with saved inputs in host memory, 172 tokens/s at T = 2048
    (14.03 / 14.74 GiB); no ring timeouts. The gate is passed.
-3. **User:** C1 (deployment path) and C3 (blob read access, GGUF base,
-   Mistral output terms, Oxygene excluded) below; then the next design
+3. **User:** ~~C1~~ **D3, decided 2026-11-17**; C3: ~~Mistral output
+   terms~~ **Apache-2.0, settled 2026-11-17**; ~~GGUF base~~ **GGUF for
+   the first run, original after it**; ~~Oxygene excluded~~ **Oxygene in
+   scope** (licence requested from RemObjects); ~~blob read access~~ **ACLs set,
+   both blobs readable** (below, DESIGN 8.8 "Decisions"). C3 is done;
+   then the next design
    session continues DESIGN 8 (milestones, module structure, LoRA layer,
    data specification, evaluation, hand-off to the Hermes process).
 4. In parallel: Theme A, local list below (C4).
@@ -103,7 +203,8 @@ What the verdict rests on:
 **Conditions — the user decides or enables each (trade-offs in DESIGN
 8.3, 8.4, 8.8):**
 
-- **C1, deployment path.**
+- **C1, deployment path. Decided 2026-11-17: D3** (DESIGN 8.8
+  "Decisions").
   - D2: a GGUF LoRA adapter served by `llama-server --lora` outside
     Ollama. Least code, exactly the trained configuration; Hermes needs a
     second endpoint and the server has to be started by something. (H44)
@@ -145,10 +246,13 @@ What the verdict rests on:
   keep T ≤ 1024 or offload saved inputs to host memory.
 - **C3, inputs.** Read access to the model blob under
   `/usr/share/ollama/.ollama/models/blobs/` (16.8 GB; a copy or a
-  group/ACL change, needs root); confirm GGUF as the base rather than the
-  54 GB original; **check Mistral's terms on using its outputs as training
-  data**; decide whether Oxygene is excluded (leaning: yes, retrieval
-  only) and whether the FPC approximation of Delphi is accepted as a
+  group/ACL change, needs root; **done 2026-11-17 with read-only ACLs**; the
+  text GGUF and the `mmproj` GGUF are both readable); ~~confirm GGUF as the base rather than the 54 GB original~~
+  **2026-11-17: GGUF for the first run, the original only after it
+  completes**; ~~check Mistral's terms on using its outputs as training
+  data~~ **settled 2026-11-17: Mistral Large 3 is Apache-2.0**; ~~decide whether Oxygene is excluded~~ **2026-11-17: Oxygene in
+  scope**, a licence is being requested from RemObjects; the next design
+  session decides how Oxygene samples are gated until a compiler is here and whether the FPC approximation of Delphi is accepted as a
   separately reported class.
 - **C4, readiness.** Theme A implemented and H39 run. If the local Qwen
   cannot write small tch-fpc programs with the skill, it will not write
@@ -168,7 +272,7 @@ Also for the user to know:
   upstream `qwen35.cpp`; the delta-rule kernel, RoPE and the chat template
   were not read. The next design session must read them in the source.
 
-**Next design session, once C1–C3 are answered** (C4 may run in parallel):
+**Next design session — held as design session 10, above.** It was to cover (C1 = D3, C3 answered; C4 may run in parallel):
 staged milestones (CPU rehearsal on a small `qwen35` model, then 27B),
 module and unit structure of the sample, the LoRA layer in `TchNN` terms,
 the block-wise backward as a reusable routine, data pipeline and data

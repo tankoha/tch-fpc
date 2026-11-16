@@ -4,8 +4,8 @@
 
 実装済みのもの（マイルストーン1〜3、TorchScript のオブジェクト、マイルストーン3の
 レイヤー、ROCm での GPU デバイス）と、予定のもの（破線）の図です。予定は、NVIDIA の
-機械が要る CUDA ビルドと、DESIGN 7 の知識パッケージです。時点：2026-11-16、設計
-セッション9の後。正は DESIGN.md で、このファイルはそれを図にしただけです。
+機械が要る CUDA ビルド、DESIGN 7 の知識パッケージ、DESIGN 8 のファインチューニングの
+サンプルです。時点：2026-11-17、設計セッション10の後。正は DESIGN.md で、このファイルはそれを図にしただけです。
 
 目次：
 1. [層とユニット](#1-層とユニット)
@@ -17,7 +17,8 @@
 7. [シーケンス：TorchScript モジュールのファインチューニング](#7-シーケンスtorchscript-モジュールのファインチューニング)
 8. [配置：CPU、ROCm、CUDA のビルド](#8-配置cpurocmcuda-のビルド)
 9. [知識パッケージ（予定）](#9-知識パッケージ予定)
-10. [状況](#10-状況)
+10. [ファインチューニングのサンプル（予定）](#10-ファインチューニングのサンプル予定)
+11. [状況](#11-状況)
 
 ## 1. 層とユニット
 
@@ -547,8 +548,7 @@ flowchart LR
 
 DESIGN 7：スキルを1つ持つプラグイン。Claude Code はリポジトリの marketplace ファイル
 経由で、Hermes は `skills.external_dirs` 経由で読み込む。Pascal の型は増えない。
-DESIGN 8 のファインチューニングのサンプルにはまだ型がない（設計は実現性の関門で
-止めている）。
+DESIGN 8 のファインチューニングのサンプルは 10 節に描いた。
 
 ```mermaid
 flowchart LR
@@ -589,7 +589,205 @@ flowchart LR
   class MP,PJ,SK,REF,EX,PIT,TR,BE,CHK,TASKS planned
 ```
 
-## 10. 状況
+## 10. ファインチューニングのサンプル（予定）
+
+DESIGN 8.9〜8.19：GGUF の詰めた重みの上で Qwen3.8 27B を LoRA でファインチューニング
+するサンプル `samples/qwen-lora/`。この節のものはすべて予定で、まだ何も無い。
+
+ユニットと、それぞれに必要なもの（DESIGN 8.12）。左の組は Pascal だけ、右の組は
+`Tch` / `TchNN` を使う。
+
+```mermaid
+flowchart LR
+  subgraph P["Pascal のみ"]
+    GF["GgufFile<br/>読み込み / 書き出し"]
+    GQ["GgufQuant<br/>スカラー版 Q4_K Q6_K Q8_0"]
+    TK["QwenTokenizer"]
+    CH["QwenChat"]
+    DV["DialectVerify"]
+  end
+  subgraph T["Tch / TchNN の上"]
+    GQT["GgufQuantT"]
+    CFG["QwenConfig"]
+    PL["PackedLinear"]
+    LO["Lora"]
+    DR["DeltaRule"]
+    BL["QwenBlocks"]
+    MD["QwenModel"]
+    RC["Recompute"]
+    OP["LoraOptim"]
+    TD["TrainData"]
+    CK["Checkpoint"]
+    MG["GgufMerge"]
+  end
+  subgraph X["プログラム"]
+    PI["qlora_inspect"]
+    PT["qlora_tokenize"]
+    PLG["qlora_logprobs"]
+    PV["qlora_verify"]
+    PD["qlora_dataset"]
+    PTR["qlora_train"]
+    PM["qlora_merge"]
+    PE["qlora_eval"]
+  end
+  GQT --> GQ
+  CFG --> GF
+  PL --> GQT
+  PL --> LO
+  BL --> PL
+  BL --> DR
+  MD --> BL
+  MD --> CFG
+  CH --> TK
+  TK --> GF
+  TD --> CH
+  CK --> LO
+  CK --> OP
+  MG --> GF
+  MG --> GQT
+  MG --> LO
+  PI --> GF
+  PT --> TK
+  PLG --> MD
+  PV --> DV
+  PD --> DV
+  PD --> TK
+  PTR --> MD
+  PTR --> RC
+  PTR --> OP
+  PTR --> TD
+  PTR --> CK
+  PM --> MG
+  PE --> DV
+  classDef planned stroke-dasharray: 5 5
+  class GF,GQ,TK,CH,DV,GQT,CFG,PL,LO,DR,BL,MD,RC,OP,TD,CK,MG,PI,PT,PLG,PV,PD,PTR,PM,PE planned
+```
+
+モデルと学習の型（DESIGN 8.13、8.14）。
+
+```mermaid
+classDiagram
+  class TStage {
+    <<abstract>>
+    +Device() TDevice
+    +Forward(X) TTensor
+  }
+  class TLinearAttnBlock {
+    qkv, gate, out : TPackedLinear
+    beta, alpha : TPackedLinear
+    conv, dt, a, norms : TTensor
+  }
+  class TFullAttnBlock {
+    q, k, v, output : TPackedLinear
+    qNorm, kNorm, norms : TTensor
+  }
+  class TPackedLinear {
+    packed : TTensor
+    quantType
+    +Forward(X, ComputeKind) TTensor
+  }
+  class TLoraPair {
+    A, B : TTensor
+    scale
+    +Delta(X, ComputeKind) TTensor
+    +MergedDelta() TTensor
+  }
+  class TLoraSet {
+    デバイスごとに TVarStore 1つ
+    +Save() +Load()
+  }
+  class TSavedInputs {
+    onHost : Boolean
+  }
+  class Recompute {
+    <<unit>>
+    +RecomputeForward(Stages, X0, Saved) TTensor
+    +RecomputeBackward(Stages, Saved, GradOut)
+  }
+  class TLoraAdamW {
+    モーメントはデバイスごとの TVarStore
+    +Step() +ZeroGrad()
+    +ClipGlobalNorm(Max)
+  }
+  class TQwenModel {
+    stages : TStage[64]
+    +EmbedRows(Ids) TTensor
+    +HeadLoss(H, Targets, Mask) loss, dH
+    +LogProbs(Ids) TTensor
+  }
+  TStage <|-- TLinearAttnBlock
+  TStage <|-- TFullAttnBlock
+  TLinearAttnBlock o-- TPackedLinear
+  TFullAttnBlock o-- TPackedLinear
+  TPackedLinear o-- TLoraPair : optional
+  TLoraSet o-- TLoraPair
+  TQwenModel o-- TStage
+  Recompute ..> TStage
+  Recompute ..> TSavedInputs
+  TLoraAdamW ..> TLoraSet
+```
+
+GPU 2枚での学習1ステップ（DESIGN 8.14）。
+
+```mermaid
+sequenceDiagram
+  participant D as TrainData
+  participant G0 as GPU 0（埋め込み、ブロック 0〜35）
+  participant H as ホストのメモリ
+  participant G1 as GPU 1（ブロック 36〜63、ヘッド）
+  participant O as LoraOptim
+  D->>G0: トークン ID、損失のマスク
+  Note over G0,G1: RecomputeForward（NoGrad）
+  loop ブロック 0..35
+    G0->>H: ブロックの入力を保存
+    G0->>G0: 逆量子化、順方向
+  end
+  G0->>G1: 隠れ状態（&to）
+  loop ブロック 36..63
+    G1->>H: ブロックの入力を保存
+    G1->>G1: 逆量子化、順方向
+  end
+  Note over G1: ヘッド：出力行列を 8192 行ずつ逆量子化、<br/>256 位置ずつの区間で損失、dL/dh
+  Note over G0,G1: RecomputeBackward
+  loop ブロック 63..36
+    H->>G1: 保存した入力（勾配を要求）
+    G1->>G1: グラフ付きの順方向、逆伝播、x.grad を残す
+  end
+  G1->>G0: 勾配（&to）
+  loop ブロック 35..0
+    H->>G0: 保存した入力（勾配を要求）
+    G0->>G0: グラフ付きの順方向、逆伝播、x.grad を残す
+  end
+  G0->>O: LoRA の勾配（ストア 0）
+  G1->>O: LoRA の勾配（ストア 1）
+  O->>O: バッチ2つごとに：両ストアを通したクリップ、AdamW、勾配をゼロに
+```
+
+データ仕様から配備したモデルまで（DESIGN 8.15〜8.17）。
+
+```mermaid
+flowchart TD
+  SPEC["data-spec/<br/>(Opus/Sonnet)"] --> GEN["Mistral Large 3<br/>生成、コンパイル、修復"]
+  GEN --> RAW["生の JSONL（リポジトリの外）"]
+  RAW --> VER["qlora_verify<br/>compiled-run / fpc-approx / static-only"]
+  VER --> DS["qlora_dataset<br/>重複の除去、漏れの検査、分割、カード"]
+  TASKS["eval/tasks/（取り分け）"] -. "漏れの検査" .-> DS
+  DS --> TRAINSET["work/dataset-v1<br/>train / valid"]
+  DS --> HOLD["Oxygene（static-only）：<br/>保管し、学習から外す"]
+  TRAINSET --> TRAIN["qlora_train<br/>土台の GGUF Q4_K_M + LoRA"]
+  TRAIN --> CKPT["チェックポイント"]
+  CKPT --> MERGE["qlora_merge<br/>アダプタを足したテンソルは Q8_0"]
+  MERGE --> GGUF["マージ済みの GGUF、20.08 GB"]
+  GGUF --> H47["llama-server（H47、リハーサル用モデル）"]
+  GGUF --> OLL["ollama create、新しい名前（H45）<br/>2行目の FROM：プロジェクタ"]
+  TASKS --> EVAL["qlora_eval<br/>前 / 後、思考あり / なし"]
+  OLL --> EVAL
+  BASE["Ollama にある元のモデル"] --> EVAL
+  EVAL --> REP["報告：検証済みの合計、<br/>Delphi（FPC 近似）、Oxygene（未検証）、<br/>退行、MTP の速さ（H49）"]
+  classDef planned stroke-dasharray: 5 5
+  class SPEC,GEN,RAW,VER,DS,TASKS,TRAINSET,HOLD,TRAIN,CKPT,MERGE,GGUF,H47,OLL,EVAL,REP planned
+```
+## 11. 状況
 
 | 領域 | DESIGN | 状態 |
 |---|---|---|
@@ -601,4 +799,4 @@ flowchart LR
 | Conv1D/3D、ConvTranspose、GroupNorm、LSTM/GRU、Identity | 4.6.10 | 実装済み（ローカルセッション7、2026-10-12）。H29（tch-rs との `.ot` の相互運用）は未解決、Rust が要る |
 | GPU：ROCm / CUDA のビルドと API | 4.8 | 実装済み（ローカルセッション8、2026-10-12）。ROCm は RX 9070 で動作、H31・H33 成立、H32 修正（展開後にシンボリックリンク8つ）、H34 不成立、H35 判明。CUDA は未実測 |
 | 知識パッケージ：プラグイン、スキル、検証済みの例 | 7 | 設計済み（設計セッション9、2026-11-16）。未実装。H37〜H39 は未解決 |
-| Qwen3.8 27B のファインチューニング（tch-fpc のサンプル） | 8 | 実現性の検討のみ：条件 C1〜C4 付きの GO（HANDOFF）。型は未設計。H40〜H46 は未解決 |
+| Qwen3.8 27B のファインチューニング（tch-fpc のサンプル） | 8 | 関門を通過（H40〜H42 成立）。詳細設計済み（設計セッション10、2026-11-17：8.9〜8.19、このファイルの 10 節）。未実装。H43、H45〜H50 は未解決、H44 は計画から外した |

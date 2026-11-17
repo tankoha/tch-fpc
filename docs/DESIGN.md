@@ -4250,6 +4250,26 @@ metadata and checks these. Fallback without a download: a tiny random
 `qwen35` GGUF made by the sample's own writer; it tests the code paths but
 says nothing about training.
 
+**Rehearsal model chosen and downloaded (2026-11-17).** The user chose
+0.8B. Ollama's library has no Q4_K_M build of it (only Q8_0 and wider), so
+it comes from Hugging Face `unsloth/Qwen3.5-0.8B-GGUF` at revision
+`6ab461498e2023f6e3c1baea90a8f0fe38ab64d0` (licence Apache-2.0, base
+`Qwen/Qwen3.5-0.8B`): `Qwen3.5-0.8B-Q4_K_M.gguf` (532,517,120 bytes,
+sha256 `bd258782…dc517`) and `mmproj-BF16.gguf` (207,346,528 bytes, sha256
+`d312c4d0…35d6`), both matching the published sha256, kept in the
+git-ignored `build/models/`. *Measured* from the file: GGUF v3, 46 keys,
+320 tensors, `qwen35`, 24 blocks, embedding 1024, `file_type` 15. Types:
+133 F32, 98 Q4_K, 36 Q5_K, 36 Q8_0, 17 Q6_K. Three differences from the
+27B that the tasks must absorb:
+- **Q5_K and Q8_0 tensors are present**, so the rehearsal needs
+  dequantisation for both (Q8_0 is needed anyway by the D3 writer's round
+  trip; Q5_K is extra work that the 27B does not need).
+- **No `output.weight`**: the output head is tied to `token_embd` (Q6_K).
+  The forward and the D3 writer must handle a missing head tensor.
+- **No MTP block** (`nextn_predict_layers` absent): the "`blk.64`
+  untouched" path and H49 cannot be rehearsed; they are first exercised on
+  the 27B.
+
 | | Milestone | Where | Exit |
 |---|---|---|---|
 | M0 | Preconditions: C4 (Theme A, H39); rehearsal model present; SDLC project skeleton; coverage tool **(H50)**; bundled `llama-server` serves the rehearsal model on the CPU with the GPUs hidden | CPU | all four hold |

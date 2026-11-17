@@ -58,7 +58,7 @@ rendered prompt must be captured. What is still from memory is tabled at
 the end of DESIGN 8.10.
 
 **Questions for the user** (the design assumes the first option of each):
-1. **Rehearsal model download.** A small `qwen35` GGUF in Q4_K_M (0.8B or
+1. ~~**Rehearsal model download.**~~ **Answered 2026-11-17: 0.8B, downloaded** (Unsloth Q4_K_M + mmproj BF16 in `build/models/`, sha256 verified; it has Q5_K and Q8_0 tensors, a tied output head and no MTP block, see DESIGN 8.11). A small `qwen35` GGUF in Q4_K_M (0.8B or
    2B, about 0.5–1.6 GB) is needed for M1–M2g; none is on the host. Which
    one, and may it be pulled? Requirements in DESIGN 8.11. Without it the
    fallback is a tiny random model, which cannot rehearse training.

@@ -4053,7 +4053,13 @@ New hypotheses of this session:
 - **(H49)** after the adapter is merged, generation speed with the MTP
   draft stays at 70 % or more of today's (8.17).
 - **(H50)** a coverage tool produces an lcov report for an FPC test binary
-  that the SDLC gate accepts (8.18).
+  that the SDLC gate accepts (8.18). Tool: kcov (decided 2026-11-17).
+  *Measured* 2026-11-17 with kcov 43 on a two-unit FPC program built
+  with `-gl -gw -O-`: per-line hits are right (the one untaken `else`
+  line has 0 hits); kcov writes Cobertura, SonarQube and JSON but no
+  lcov, and a 15-line Babashka converter (Cobertura to `SF`/`DA`/`LF`/`LH`)
+  produces lcov. Branch counts are not available (`:coverage-kind :c0`).
+  Still open for M0: the converted report through the SDLC gate itself.
 
 H44 (`llama-server --lora`) is **taken off the plan**. A merge only needs
 the adapter convention to be consistent inside the sample (W' = W + s·B·A
@@ -4228,7 +4234,7 @@ taken after `output_norm`. The rest of 8.1 holds.
 | no Unicode normalisation before BPE | from memory | H46 on non-ASCII text |
 | Ollama's `qwen3.8` renderer equals the Jinja template for system/user/assistant turns | not verified | captured prompt (M3) |
 | the reference model in transformers (not read at all); the facts above are about the GGUF layout only | unread | not needed: the GGUF is the base |
-| `llama-server` endpoints `/tokenize`, `/completion` with `n_probs`, `/apply-template` and their JSON fields | from memory | task T05, first use |
+| `llama-server` endpoints `/tokenize`, `/completion` with `n_probs`, `/apply-template` and their JSON fields | **measured** (local session 10, 0.8B on the CPU): `/tokenize` with `with_pieces` gives `tokens[].id`/`piece`; `/completion` gives `completion_probabilities[].top_logprobs[]` with `id`, `token`, `bytes`, `logprob`; `/apply-template` gives `prompt` | — |
 | GGUF type ids F16 = 1, Q8_0 = 7 (12 and 14 are *measured*) | from memory | H47 |
 | FPC 3.2.2's `fpjson`, `fphttpclient` and Unicode category data are enough for the tools | from memory | tasks T05, T06 |
 
@@ -4464,6 +4470,27 @@ Mistral's samples carry no reasoning in Qwen's style and inventing one
 would teach Qwen to think like the generator. The price is a mismatch with
 how Hermes runs the model (thinking on); the evaluation measures both
 modes (8.17), and reasoning text is a candidate for a second run.
+Confirmed by the user 2026-11-17.
+
+**Reasoning text: concerns** (why it stays out of the first run):
+- **Style mismatch.** Mistral Large 3 is not a reasoning model in Qwen's
+  sense; reasoning it writes would be explanations in another model's
+  voice. Training Qwen's `<think>` span on it risks degrading the
+  reasoning Qwen already does, beyond Pascal.
+- **No verifier.** The compile/run filter checks the code, not the
+  reasoning. A wrong rationale above right code would be trained as
+  right.
+- **Length.** Reasoning multiplies the tokens per sample against the
+  T ≤ 2048 budget and the training time (8.6).
+- **Template traps.** Ollama renders with its own `qwen3.8` renderer, not
+  the GGUF template (8.10); how past `<think>` spans are dropped in
+  multi-turn prompts must be reproduced exactly before reasoning is
+  trained.
+- **A better source for a second run:** Qwen's own reasoning, kept only
+  where the final code passes the filter (rejection sampling), which
+  keeps the style and verifies the outcome. **Decided by the user
+  2026-11-17:** the second run takes reasoning text this way, and only
+  this way.
 
 **`LoraOptim`.** `TOptimizer` cannot save its state, and a run of a day
 must survive an interruption, so the sample has its own AdamW: the two
@@ -4568,6 +4595,17 @@ compiler's message, and filling in the generator fields. The repository's
 tools then decide independently what is accepted; Mistral's own claim of
 "compiles" is never trusted.
 
+**Publication (decided by the user 2026-11-17).** The accepted data set is
+published in this repository: `qlora_dataset` writes
+`train.jsonl`, `valid.jsonl` and `manifest.jsonl` to
+`samples/qwen-lora/data/dataset-v1/` (committed, a few MB of JSONL) instead
+of `work/`. The raw generator output, the rejected records and the token
+cache stay outside the repository. The held-out evaluation tasks and their
+Opus/Sonnet-written reference solutions are committed as well; they are
+never training data, and the leak check keeps them out of the data set.
+Before a commit, the card's hashes are recomputed and the added records
+are scanned for personal paths, host names and e-mail addresses.
+
 **What the specification must contain** (it is instructions and lists;
 it contains **no example programs**, and it does not hand the
 Claude-written skill examples to the generator):
@@ -4594,8 +4632,8 @@ Claude-written skill examples to the generator):
 5. A topic list (algorithms, containers, strings, dates, parsing, object
    models, generics, numerics, error handling, small simulations, …) and a
    length distribution: answers of 150–1500 tokens, median about 600.
-6. Prompt language: English 70 %, Japanese 30 % (a parameter; for the user
-   to confirm). Comments and identifiers in English.
+6. Prompt language: English 90 %, Japanese 10 % (a parameter; decided by
+   the user 2026-11-17). Comments and identifiers in English.
 7. Prohibitions: no verbatim reproduction of existing code, no personal
    data, no dialect mixing, nothing outside the dialect's feature list.
 8. The generation protocol: batch sizes, seeds, at most three repair
@@ -4747,7 +4785,7 @@ reloaded.
 | R1 | the forward does not match (H43) on the rehearsal model | T11 | isolate with the 1-token and 64 ± 1 prompts; after three Hermes rounds without progress: **stop**, the design session re-reads the source for the failing part |
 | R2 | H43 passes on the CPU in fp32 but not in bf16 on the 27B | M4 | keep norms, softmax and the delta rule in fp32 (already so); try fp16; else **stop and ask** |
 | R3 | tokenizer mismatches on some non-ASCII text | T05 | accept if every training record still matches (the per-record check of 8.16); list the classes that differ |
-| R4 | Qwen cannot write the numeric units (C4 low, or repeated gate failures) | H39, T08–T11 | **stop and ask**: the goal says Qwen writes the code; who writes instead is the user's decision |
+| R4 | Qwen cannot write the numeric units (C4 low, or repeated gate failures) | H39, T08–T11 | fall back, in order, to the local `devstral-small-2:24b-instruct-2512-q4_K_M`, GPT-OSS-120B (Bedrock), Mistral Large 3 (Bedrock), each through the same SDLC gates (decided by the user 2026-11-17); if all three fail: **stop and ask** |
 | R5 | peak memory with real data above the gate's 14.74 GiB | M2g, M4 smoke | position budget 1536 or 1024; split 37/27; **stop** above 15.5 GiB |
 | R6 | speed under 60 positions/s in the smoke | M4 | two epochs or a smaller set; **stop** under 30 (the gate's criterion) |
 | R7 | non-finite loss, or validation loss rising | every step, every checkpoint | halve the learning rate from the last good checkpoint; keep the best checkpoint; **stop** on a second occurrence |
@@ -4759,7 +4797,7 @@ reloaded.
 | R13 | low yield or low diversity from the generator (H48 fails) | data set card | revise the specification before generating more; never relax the filter |
 | R14 | the generator reproduces existing code | cannot be fully detected | the prohibition in the specification and the near-duplicate check against the known skill examples; recorded as a limit on the card |
 | R15 | unverified Oxygene | — | held back (8.16); the user may admit the class knowingly |
-| R16 | no coverage tool for FPC (H50 fails) | M0 | the user changes the gate's criterion for this project before T01 |
+| R16 | no coverage tool for FPC (H50 fails; the chosen tool is kcov, lines only, `:coverage-kind :c0`) | M0 | the user changes the gate's criterion for this project before T01 |
 | R17 | an Ollama update changes the bundled `llama-server` or the import | version check at M0 and M5 | pin Ollama 0.40.13 for the duration |
 | R18 | a long run is interrupted | — | checkpoints every 50 updates, exact resume (T16) |
 

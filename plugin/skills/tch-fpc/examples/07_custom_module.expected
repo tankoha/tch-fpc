@@ -1,0 +1,3 @@
+output shape 5x2
+non-negative: TRUE
+variables: 4

@@ -1,0 +1,3 @@
+wrong: mean of Int64 raises ETorchNativeError
+right: 1.500
+right: 1.500

@@ -36,6 +36,20 @@ they are listed under "Results" in 4.8.
   implicitly (parameters are locals, methods are reached as `self.dim()`).
   Your own units are not affected; the switch lives in `Tch.pas` only.
 
+## A skill for coding agents
+
+`plugin/skills/tch-fpc/` is a skill for Claude Code, Hermes Agent and other
+agents that read `SKILL.md` skills: rules, examples, pitfalls and traps,
+each checked by the compiler and a run in CI (`tests/skill/`).
+
+- Claude Code: `/plugin marketplace add tankoha/tch-fpc`, then
+  `/plugin install tch-fpc@tch-fpc`.
+- Hermes Agent: add `<checkout>/plugin/skills` to `skills.external_dirs` in
+  `~/.hermes/config.yaml`.
+
+The skill builds programs with `plugin/skills/tch-fpc/scripts/build-example.sh`;
+when it is installed as a plugin, set `TCH_FPC_ROOT` to your checkout.
+
 ## License
 
 Licensed under either of

@@ -1,0 +1,2 @@
+wrong: (A * B)[0,0] = 5.000
+right: A.matmul(B)[0,0] = 19.000

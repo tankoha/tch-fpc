@@ -1,0 +1,9 @@
+;; SDLC gate settings (read by sdlc.bb). The directory holding this file is the project root.
+;; Agents cannot change anything under .sdlc/ (the guard hook blocks it).
+{;; Builds tests/ut/*_test.pas with line info, runs them under kcov, writes lcov (DESIGN 8.9, H50)
+ :coverage-cmd    "bash .sdlc/ut-coverage.sh"
+ :coverage-report "coverage/lcov.info"
+ ;; kcov measures lines only: :c0 = every line of src/ executed by the UT
+ :coverage-kind   :c0
+ ;; test procedures (fpcunit published methods), used to detect deleted tests
+ :test-func-re    "(?m)^\\s*procedure\\s+Test"}

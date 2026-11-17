@@ -5,7 +5,45 @@
 再開するときは最初にこれを読んでください。決定事項と理由は [DESIGN_jp.md](DESIGN_jp.md) にあります。
 知識パッケージとファインチューニングの作業の状況は [progress_jp.md](progress_jp.md) で一目で見られます。
 
-## 設計セッション10（2026-11-17）：テーマ B の詳細設計 — ここから再開
+## ローカルセッション10（2026-11-17）：テーマ A を実装、M0 を準備 — ここから再開
+
+計画：C4 → M0 → M1 → M2 → M2g（M3 は別）。このセッションではまだ何もコミットしていない。
+ここまで、すべて CPU で行った（GPU は Qwen のベンチマークが使っていた）：
+
+- **テーマ A を実装**（DESIGN 7）：`plugin/` にスキル `plugin/skills/tch-fpc/`（`SKILL.md` 160 行、
+  `reference/*.md` 8 つ、例 12、落とし穴 6、罠 6、`scripts/build-example.sh`）、
+  `.claude-plugin/marketplace.json`、`tests/skill/check-examples.sh`（GPU を隠して
+  `build/libtch-rocm` に対して 24 件 OK）、`tests/skill/check-index.sh`（索引 20 行 OK）。
+  どちらも CI に入れ、README に節を足した。期待する出力では浮動小数をそのまま印字しない。
+- **H38 は成り立つ**：どの落とし穴も安定したメッセージで失敗する。そのメッセージを `SKILL.md`
+  と各ファイルの `expect-error:` に正確に引いた。
+- **H37 は Hermes 側で成り立つ**：ローカルの Hermes の設定の `skills.external_dirs` に
+  `<checkout>/plugin/skills` を足し、`hermes skills list` で `tch-fpc` が有効と表示される。
+  Claude Code 側は push 済みのリポジトリが要る（`/plugin marketplace add tankoha/tch-fpc`）。
+  ユーザーが行う。
+- **H39 を準備**：`tests/skill/tasks/NN_*/` に課題 10 個（指示と期待する出力。Claude が書いた
+  もので、学習データには決してしない）、`tests/skill/check-task.sh`（検査。リポジトリの外に
+  置いた参照解で自己試験済み）、`tests/skill/run-h39.sh <with|without>`（ローカルの Qwen を
+  メインのモデルにした Hermes。ツールは terminal/file/skills。with は `tch-fpc` を先に読み込む）。
+  まだ走らせていない：GPU が空くのを待つ。
+- **M0**：SDLC の雛形から `samples/qwen-lora/` を作り、英語にした（`AGENTS.md` が正で、
+  プロジェクトの Pascal の規則を含む。`AGENTS_jp.md`）。`.sdlc/config.edn` は
+  `:coverage-kind :c0`、`.sdlc/ut-coverage.sh`（fpcunit のテストを `-gl` でビルドし、kcov の下で
+  動かしてまとめる）と `.sdlc/cobertura2lcov.bb`。**H50 は成り立つ**：使い捨ての試験用
+  ユニットで、`sdlc.bb gate ut . --run` はテストしていない 1 行を NG と報告し、それを覆う
+  ケースを足すと 100 % で OK になった。試験用ユニットは削除した。`samples/qwen-lora/work/` と
+  `coverage/` は git 管理外。
+- **リハーサル用モデルでの llama-server、CPU（M0）**：同梱のビルド（`39febd2ad`）は、GPU を
+  隠した状態で 0.8B の GGUF を動かせる。`/tokenize`（`with_pieces` 付き）、`/apply-template`、
+  `n_probs` 付きの `/completion` が応答する。`/completion` は
+  `completion_probabilities[].top_logprobs[]` に `id`、`token`、`bytes`、`logprob`（自然対数）を
+  返す。`/apply-template` は生成のプロンプトを `<think>\n` で終える（思考あり）。これで
+  DESIGN 8.10 の最後の表のエンドポイントの行が決着した。
+
+次：ベンチマークが終わったら H39（`run-h39.sh with` と `without`）を走らせ、合格率を見せる
+（関門 C4）。その後、DESIGN 8.18 の順に Hermes で M1 を進める。
+
+## 設計セッション10（2026-11-17）：テーマ B の詳細設計
 
 ローカルセッションから Fable のサブエージェントとして実行した。成果は DESIGN 8.9〜8.19 と
 UML 10。実装はしておらず、コミットもしていない。GPU にも Ollama にも触れていない。
@@ -50,23 +88,29 @@ Q と K の正規化、GQA、MTP のブロック、Q8_0 の量子化、前処理
 レンダリング済みのプロンプトを1つ採取する必要がある。まだ記憶に頼っているものは、
 DESIGN 8.10 の最後の表にまとめた。
 
-**ユーザーへの質問**（設計は、それぞれ最初の選択肢を仮定している）：
-1. ~~**リハーサル用モデルのダウンロード。**~~ **2026-11-17 回答：0.8B をダウンロード済み**（Unsloth の Q4_K_M と mmproj BF16 を `build/models/` に。sha256 を確認。Q5_K と Q8_0 のテンソルがあり、出力層は共有、MTP のブロックは無い。DESIGN 8.11）。 M1〜M2g には、Q4_K_M の小さな `qwen35` の
-   GGUF（0.8B か 2B、約 0.5〜1.6 GB）が要る。ホストには無い。どれにするか、取得して
-   よいか。条件は DESIGN 8.11。無い場合の代替は乱数の小さなモデルだが、学習の
-   リハーサルはできない。
-2. **Oxygene を最初の実行から外す**こと（8.16）。データセットを凍結する前にコンパイラが
-   届けば別である。それとも、未検証の区分を承知のうえで学習に入れるか。
-3. 最初の実行では、学習サンプルに**推論の文を入れない**こと（8.14）。これでよいか。
-4. **プロンプトの言語**を英語 70 % / 日本語 30 % にすること（8.16）。ほかの配分にするか。
-5. **生成したデータセットの置き場所**と、公開するかどうか。それと、取り分けた評価の
-   課題と、Opus/Sonnet が書くその参照解を、この公開リポジトリに置いてよいか
-   （学習データには決してしない）。
-6. **FPC のカバレッジ（H50）。** SDLC のゲートは lcov のレポートを求める。どの道具を
-   使うか。または、このプロジェクトではゲートの基準を変えるか。
-7. **Qwen が数値のユニットを書けない場合**（R4）、誰が書くか。
-8. `samples/qwen-lora/docs/` の下の **SDLC の文書の言語**。リポジトリが公開で英語が
-   正なので、英語を仮定している。
+**ユーザーへの質問**（2026-11-17 に回答。2 を除く）：
+1. ~~リハーサル用モデル~~ **0.8B をダウンロード済み**（Unsloth の Q4_K_M と mmproj BF16 を
+   `build/models/` に。sha256 を確認。Q5_K と Q8_0 のテンソルがあり、出力層は共有、MTP の
+   ブロックは無い。DESIGN 8.11）。
+2. **未決：** Oxygene を最初の実行から外すか（8.16。データセットを凍結する前にコンパイラが
+   届けば別）。それとも未検証の区分を承知のうえで学習に入れるか。（設計は引き続き
+   「外す」を仮定。）
+3. ~~推論の文~~ **最初の実行では入れない（設計どおり）**（8.14）。ユーザーから懸念点の
+   質問があり、8.14「推論の文：懸念点」に記録した。2回目の実行では、Qwen 自身の推論のうち、
+   最終的なコードがふるいを通ったものだけを入れる（決定）。
+4. ~~プロンプトの言語~~ **英語 90 % / 日本語 10 %**（8.16）。
+5. ~~データセット~~ **公開する**。取り分けた評価の課題と、Opus/Sonnet が書くその参照解は、
+   この公開リポジトリに置いてよい（学習データには決してしない）。データセットは
+   `samples/qwen-lora/data/dataset-v1/` に置く（決定。DESIGN 8.16「公開」）。
+6. ~~カバレッジ~~ **kcov 43 を導入済み。FPC のバイナリで動き、lcov は Babashka の変換器で作る（DESIGN 8.9 H50）。ゲートそのものは M0 で。** FPC には gcov のような計測の仕組みが
+   無い。kcov はネイティブのバイナリの DWARF の行表を読む（`-gl` でビルド）。Ubuntu の
+   アーカイブにある。行しか測れないので、このプロジェクトの `.sdlc/config.edn` は
+   `:coverage-kind :c0` とし、kcov が lcov を直接書けなければ、出力を Babashka で lcov に
+   変換する。
+7. ~~代わりの書き手（R4）~~ **この順：ローカルの
+   `devstral-small-2:24b-instruct-2512-q4_K_M`、GPT-OSS-120B（Bedrock）、Mistral Large 3
+   （Bedrock）。3つとも書けなければ止まってユーザーに判断を仰ぐ**（R4）。
+8. ~~SDLC の文書の言語~~ **英語が正、日本語訳は末尾に `_jp`**（リポジトリの他の部分と同じ）。
 
 **次のローカルの手順。この順に：**
 1. 上の質問に答える。リハーサル用モデルをダウンロードする（1）。

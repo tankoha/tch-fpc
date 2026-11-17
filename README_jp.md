@@ -33,6 +33,20 @@ ROCm または CUDA 版の libtorch については [docs/DESIGN.md](docs/DESIGN
   （引数はローカル変数、メソッドは `self.dim()` で呼ぶ）。利用側のユニットには
   影響しない。スイッチは `Tch.pas` の中だけ。
 
+## コーディングエージェント向けのスキル
+
+`plugin/skills/tch-fpc/` は、Claude Code、Hermes Agent など `SKILL.md` 形式の
+スキルを読むエージェント向けのスキルです。規則、例、落とし穴、罠を含み、どれも CI で
+コンパイルと実行によって確かめています（`tests/skill/`）。スキル本体は英語のみです。
+
+- Claude Code：`/plugin marketplace add tankoha/tch-fpc` の後、
+  `/plugin install tch-fpc@tch-fpc`。
+- Hermes Agent：`~/.hermes/config.yaml` の `skills.external_dirs` に
+  `<checkout>/plugin/skills` を足す。
+
+スキルはプログラムを `plugin/skills/tch-fpc/scripts/build-example.sh` でビルドします。
+プラグインとして入れた場合は、`TCH_FPC_ROOT` にチェックアウトの場所を設定してください。
+
 ## ライセンス
 
 次のいずれかを選択できる:

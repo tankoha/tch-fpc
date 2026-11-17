@@ -30,6 +30,10 @@ jobs:
       - name: Compiler acceptance tests
         run: bash tests/compiler/run.sh
 
+      # スキル（plugin/skills/tch-fpc）の表・索引・行数の検査。libtorch は要らない。
+      - name: Skill index check
+        run: bash tests/skill/check-index.sh
+
   libtorch-cpu:
     name: libtorch (CPU)
     runs-on: ubuntu-24.04
@@ -94,6 +98,10 @@ jobs:
             echo "=== $t"
             "build/${t}_test"
           done
+
+      # スキルの例・落とし穴・罠を、本物のコンパイラと CPU 版 libtorch で確かめる。
+      - name: Skill examples, pitfalls and traps
+        run: bash tests/skill/check-examples.sh
 
       - name: FPU exception mask tests
         run: bash tests/fpu/run.sh build/fpu_test

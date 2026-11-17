@@ -7,8 +7,7 @@ The detailed log and the next steps are in [HANDOFF.md](HANDOFF.md);
 decisions and numbers in [DESIGN.md](DESIGN.md). Update this page at the
 end of every session, together with HANDOFF.
 
-Last updated: 2026-11-17, design session 10 (Theme B designed in detail:
-DESIGN 8.9–8.19, UML 10).
+Last updated: 2026-11-17, local session 10 (Theme A implemented, M0 prepared).
 
 ## Goals
 
@@ -26,7 +25,7 @@ DESIGN 8.9–8.19, UML 10).
 | Item | Status | Where |
 |---|---|---|
 | Theme A design | done (design session 9) | DESIGN 7, UML 9 |
-| Theme A implementation | not started | HANDOFF "Local list for Theme A" |
+| Theme A implementation | **done** except H39 (local session 10): skill, 24 checked files, CI, README | HANDOFF local session 10 |
 | Theme B feasibility analysis | done: GO with conditions | DESIGN 8.1–8.8 |
 | ROCm libtorch on this host | restored, `build/libtch-rocm` built, CI tests pass on the CPU | HANDOFF local session 9 |
 | GPU gate (C2: H40–H42) | **passed**: T = 1024 and T = 2048 fit with the 36/28 split (T = 2048 with saved inputs in host memory) | DESIGN 8.8 "Gate results", "Gate re-run" |
@@ -34,7 +33,7 @@ DESIGN 8.9–8.19, UML 10).
 | H42 re-run (re-balanced split, T = 2048 with host offload) | done 2026-11-17 | same, step 2 |
 | C1 deployment path (D2 / D3 / D4) | **decided 2026-11-17: D3** (merged GGUF, adapted tensors Q8_0, `ollama create`) | DESIGN 8.8 "Decisions" |
 | C3 inputs | 2026-11-17: Mistral terms settled (Apache-2.0); GGUF base for the first run, original after it; Oxygene in scope (licence requested from RemObjects); blob read access done with read-only ACLs. **C3 done** | DESIGN 8.8 "Decisions", HANDOFF C3 |
-| Theme B detailed design (milestones, modules, LoRA, data spec, evaluation) | **done** (design session 10, 2026-11-17); eight questions for the user | DESIGN 8.9–8.19, UML 10, HANDOFF design session 10 |
+| Theme B detailed design (milestones, modules, LoRA, data spec, evaluation) | **done** (design session 10, 2026-11-17); questions answered 2026-11-17 except Oxygene (2) | DESIGN 8.9–8.19, UML 10, HANDOFF design session 10 |
 | Rehearsal model (a small `qwen35` GGUF, Q4_K_M) | **downloaded 2026-11-17**: Qwen3.5 0.8B Q4_K_M (Unsloth) + mmproj BF16 in `build/models/`, sha256 verified; has Q5_K/Q8_0, tied head, no MTP | DESIGN 8.11, HANDOFF question 1 |
 | M0 preconditions (C4, rehearsal model, SDLC skeleton, H50) | not started | DESIGN 8.11 |
 | M1 read and reproduce (T01–T11; H46, H43 on the rehearsal model) | not started | DESIGN 8.18 |
@@ -46,9 +45,9 @@ DESIGN 8.9–8.19, UML 10).
 
 | | Question | Status |
 |---|---|---|
-| H37 | Claude Code and Hermes both load the planned skill tree | open (Theme A step 6) |
-| H38 | every planned pitfall fails with a stable message | open (Theme A step 3) |
-| H39 | the skill raises the local Qwen's pass rate on ten tasks | open (Theme A step 7, = C4) |
+| H37 | Claude Code and Hermes both load the planned skill tree | **Hermes holds**; Claude Code after the push |
+| H38 | every planned pitfall fails with a stable message | **holds**: six pitfalls, messages quoted in SKILL.md |
+| H39 | the skill raises the local Qwen's pass rate on ten tasks | prepared (tasks, checker, runner); run after the benchmark |
 | H40 | bf16 / fp16 products work and are fast on gfx1201 | **holds**: 100 / 81 TFLOP/s bf16 (XT / 9070); fp32 only 1.6 / 1.3 |
 | H41 | Q4_K / Q6_K dequantisation in tensor ops is correct and fast | **holds**: exact; 3.2 / 4.7 ms per 89 M weights |
 | H42 | one training step fits and runs from one process on two GPUs | **holds**: 36/28 split, 167 tokens/s at T = 1024 (13.1 / 13.9 GiB), 172 at T = 2048 with host offload (14.0 / 14.7 GiB) |
@@ -59,7 +58,7 @@ DESIGN 8.9–8.19, UML 10).
 | H47 | the bundled `llama-server` reads a merged rehearsal GGUF and matches the Pascal forward with the adapter | open; M2 (T18) |
 | H48 | at least 40 % of the generator's samples pass the filter, under 20 % near-duplicates | open; M3 |
 | H49 | generation speed with the MTP draft stays at 70 % or more after the merge | open; M5 |
-| H50 | a coverage tool gives the SDLC gate an lcov report for FPC | open; M0 |
+| H50 | a coverage tool gives the SDLC gate an lcov report for FPC | **holds**: kcov 43 + Babashka converter; `sdlc.bb gate ut . --run` OK on a probe unit |
 
 ## Measured numbers to keep in mind
 

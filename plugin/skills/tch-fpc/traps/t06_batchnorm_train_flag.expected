@@ -1,0 +1,2 @@
+wrong: running mean after Forward(X) = 0.000
+right: running mean after Forward(X, True) = 0.300

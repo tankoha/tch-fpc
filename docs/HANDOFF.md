@@ -6,7 +6,53 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 Status at a glance of the knowledge-package and fine-tuning work:
 [progress.md](progress.md).
 
-## Design session 10 (2026-11-17): Theme B designed in detail — resume here
+## Local session 10 (2026-11-17): Theme A implemented, M0 prepared — resume here
+
+Plan: C4 → M0 → M1 → M2 → M2g (M3 separately). Nothing committed yet in
+this session. Done so far, all on the CPU (a Qwen benchmark held the GPUs):
+
+- **Theme A implemented** (DESIGN 7): `plugin/` with the skill
+  `plugin/skills/tch-fpc/` (`SKILL.md` 160 lines, eight `reference/*.md`,
+  twelve examples, six pitfalls, six traps, `scripts/build-example.sh`),
+  `.claude-plugin/marketplace.json`, `tests/skill/check-examples.sh` (24 OK
+  against `build/libtch-rocm` with the GPUs hidden),
+  `tests/skill/check-index.sh` (20 index rows OK), both in CI, README
+  sections. Expected outputs avoid raw float printing.
+- **H38 holds**: every pitfall fails with a stable message, now quoted
+  exactly in `SKILL.md` and in each file's `expect-error:`.
+- **H37, Hermes side holds**: `<checkout>/plugin/skills` added to
+  `skills.external_dirs` in the local Hermes config; `hermes skills list`
+  shows `tch-fpc` enabled. Claude Code side: needs the pushed repository
+  (`/plugin marketplace add tankoha/tch-fpc`), for the user.
+- **H39 prepared**: ten tasks in `tests/skill/tasks/NN_*/` (prompt and
+  expected output; written by Claude, never training data),
+  `tests/skill/check-task.sh` (checker, self-tested with reference answers
+  kept outside the repository), `tests/skill/run-h39.sh <with|without>`
+  (Hermes with the local Qwen as the main model, toolsets
+  terminal/file/skills; "with" preloads `tch-fpc`). Not run yet: waits
+  for the GPUs.
+- **M0**: `samples/qwen-lora/` created from the SDLC template, translated
+  to English (`AGENTS.md` canonical with the project's Pascal rules,
+  `AGENTS_jp.md`); `.sdlc/config.edn` with `:coverage-kind :c0`,
+  `.sdlc/ut-coverage.sh` (fpcunit tests built with `-gl`, run under kcov,
+  merged) and `.sdlc/cobertura2lcov.bb`. **H50 holds**: on a throwaway
+  probe unit `sdlc.bb gate ut . --run` reported the one untested line as
+  NG, and OK at 100 % once a case covered it; the probe was removed.
+  `samples/qwen-lora/work/` and `coverage/` are git-ignored.
+- **llama-server on the rehearsal model, CPU (M0)**: the bundled build
+  (`39febd2ad`) serves the 0.8B GGUF with the GPUs hidden; `/tokenize`
+  (with `with_pieces`), `/apply-template` and `/completion` with
+  `n_probs` answer. `/completion` returns
+  `completion_probabilities[].top_logprobs[]` with `id`, `token`, `bytes`,
+  `logprob` (natural log); `/apply-template` ends the generation prompt
+  with `<think>\n` (thinking on). This settles the endpoint row of DESIGN
+  8.10's last table.
+
+Next: when the benchmark ends, run H39 (`run-h39.sh with` and `without`),
+show the pass rates (gate C4), then M1 through Hermes in the order of
+DESIGN 8.18.
+
+## Design session 10 (2026-11-17): Theme B designed in detail
 
 Run as a Fable sub-agent from the local session. Result: DESIGN 8.9–8.19
 and UML 10. Nothing is implemented, nothing was committed, the GPUs and
@@ -57,27 +103,36 @@ GGUF's chat template** (the Modelfile has `RENDERER qwen3.8`), so one
 rendered prompt must be captured. What is still from memory is tabled at
 the end of DESIGN 8.10.
 
-**Questions for the user** (the design assumes the first option of each):
-1. ~~**Rehearsal model download.**~~ **Answered 2026-11-17: 0.8B, downloaded** (Unsloth Q4_K_M + mmproj BF16 in `build/models/`, sha256 verified; it has Q5_K and Q8_0 tensors, a tied output head and no MTP block, see DESIGN 8.11). A small `qwen35` GGUF in Q4_K_M (0.8B or
-   2B, about 0.5–1.6 GB) is needed for M1–M2g; none is on the host. Which
-   one, and may it be pulled? Requirements in DESIGN 8.11. Without it the
-   fallback is a tiny random model, which cannot rehearse training.
-2. **Oxygene held back** from the first run unless the compiler arrives
-   before the data set is frozen (8.16) — or train on the unverified
-   class knowingly?
-3. **No reasoning text** in the training samples for the first run (8.14)
-   — accepted?
-4. **Prompt languages** English 70 % / Japanese 30 % (8.16) — or another
-   mix?
-5. **Where the generated data set lives** and whether it is ever
-   published; and is it acceptable that the held-out evaluation tasks with
-   their Opus/Sonnet-written reference solutions are in this public
-   repository (they are never training data)?
-6. **Coverage for FPC (H50).** The SDLC gate wants an lcov report; which
-   tool, or a different gate criterion for this project?
-7. **If Qwen cannot write the numeric units** (R4): who does?
-8. **Language of the SDLC documents** under `samples/qwen-lora/docs/`:
-   English is assumed, as the repository is public and English-canonical.
+**Questions for the user** (answered 2026-11-17 except 2):
+1. ~~Rehearsal model~~ **0.8B, downloaded** (Unsloth Q4_K_M + mmproj BF16
+   in `build/models/`, sha256 verified; Q5_K and Q8_0 tensors, a tied
+   output head, no MTP block; DESIGN 8.11).
+2. **Open:** Oxygene held back from the first run unless the compiler
+   arrives before the data set is frozen (8.16) — or train on the
+   unverified class knowingly? (The design keeps assuming "held back".)
+3. ~~Reasoning text~~ **none in the first run, as designed** (8.14). The
+   user asked about the concerns; they are recorded in 8.14
+   "Reasoning text: concerns". Second run: Qwen's own reasoning, kept
+   only where the final code passes the filter (decided).
+4. ~~Prompt languages~~ **English 90 % / Japanese 10 %** (8.16).
+5. ~~Data set~~ **published**; the held-out tasks and their
+   Opus/Sonnet-written reference solutions may sit in this public
+   repository (never training data). The data set lives in
+   `samples/qwen-lora/data/dataset-v1/` (decided; DESIGN 8.16
+   "Publication").
+6. ~~Coverage~~ **kcov 43, installed; works on FPC binaries, lcov via a Babashka converter (DESIGN 8.9 H50); the gate itself at M0.** FPC has no
+   gcov-style instrumentation of its own; kcov reads the DWARF line
+   tables of any native binary (build with `-gl`) and is in the Ubuntu
+   archive. It measures lines only, so this project's
+   `.sdlc/config.edn` uses `:coverage-kind :c0` and an lcov file
+   converted from kcov's output (Babashka) if kcov does not write lcov
+   directly.
+7. ~~Fallback author (R4)~~ **in order: local
+   `devstral-small-2:24b-instruct-2512-q4_K_M`, then GPT-OSS-120B (Bedrock),
+   then Mistral Large 3 (Bedrock); if all three fail, stop and ask the
+   user** (R4).
+8. ~~SDLC document language~~ **English canonical, Japanese translations
+   with the `_jp` suffix**, as in the rest of the repository.
 
 **Next local steps, in order:**
 1. Answer the questions above; download the rehearsal model (1).

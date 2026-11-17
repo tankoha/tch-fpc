@@ -1,0 +1,4 @@
+grad = 2.000 4.000 6.000
+x[2] after step = 2.400
+grad after ZeroGrad = 0.000
+requires grad: TRUE

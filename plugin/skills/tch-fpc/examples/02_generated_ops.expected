@@ -1,0 +1,7 @@
+div[1,2] = 2.500
+device cpu
+argmax all = 5
+argmax dim 1 = 2
+row sums = 3.000 12.000
+after add_ = 2.000
+clamp = 5.000

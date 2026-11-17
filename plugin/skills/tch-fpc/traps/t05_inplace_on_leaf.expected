@@ -1,0 +1,2 @@
+wrong: in-place op on a leaf raises ETorchNativeError
+right: W[0] = 0.500

@@ -1,0 +1,14 @@
+{
+  "name": "tch-fpc",
+  "description": "Free Pascal bindings for libtorch: an LLM-facing skill for writing tch-fpc code",
+  "owner": {
+    "name": "tankoha"
+  },
+  "plugins": [
+    {
+      "name": "tch-fpc",
+      "source": "./plugin",
+      "description": "Rules, verified examples, pitfalls and traps for writing tch-fpc (Free Pascal + libtorch) code"
+    }
+  ]
+}

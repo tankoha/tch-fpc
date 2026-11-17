@@ -1,0 +1,11 @@
+{
+  "name": "tch-fpc",
+  "displayName": "tch-fpc (Free Pascal bindings for libtorch)",
+  "version": "0.1.0",
+  "description": "A skill for coding agents writing tch-fpc code: rules, compile-and-run verified examples, pitfalls (compile errors) and traps (code that compiles but is wrong)",
+  "author": {
+    "name": "tankoha"
+  },
+  "license": "MIT OR Apache-2.0",
+  "keywords": ["pascal", "free-pascal", "libtorch", "pytorch", "tch"]
+}

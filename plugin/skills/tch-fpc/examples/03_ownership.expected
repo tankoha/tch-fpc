@@ -1,0 +1,4 @@
+A=2.0 B=2.0 S=2.0 C=1.0
+B same handle: TRUE, S same handle: FALSE
+after Scale: 30.0
+N.IsNil = TRUE

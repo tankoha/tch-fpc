@@ -1,0 +1,3 @@
+device cpu
+on chosen device: TRUE
+sum = 4.000

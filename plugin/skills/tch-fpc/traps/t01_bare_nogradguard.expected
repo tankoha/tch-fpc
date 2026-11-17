@@ -1,0 +1,2 @@
+wrong: result requires grad = TRUE
+right: result requires grad = FALSE

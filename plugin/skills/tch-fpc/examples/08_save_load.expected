@@ -1,0 +1,5 @@
+variable enc.lin.weight
+variable enc.lin.bias
+same output after load: TRUE
+requires grad after Freeze: FALSE
+requires grad after Unfreeze: TRUE

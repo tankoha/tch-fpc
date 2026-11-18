@@ -1,0 +1,11 @@
+# fpc options for the Hermes Pascal verify hook (hermes-agent-setup,
+# pascal/agent-hooks/pascal.bb): the sample's units use tch-fpc's units in
+# ../../src and link against libtch. {dir} is this directory. A missing
+# library directory is harmless.
+-Mobjfpc
+-Sh
+-Fu{dir}/src
+-Fu{dir}/../../src
+-Fu{dir}/tests/ut
+-Fl{dir}/../../build/libtch
+-Fl{dir}/../../build/libtch-rocm

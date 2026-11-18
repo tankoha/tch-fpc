@@ -25,7 +25,7 @@ Last updated: 2026-11-17, local session 10 (Theme A implemented, M0 prepared).
 | Item | Status | Where |
 |---|---|---|
 | Theme A design | done (design session 9) | DESIGN 7, UML 9 |
-| Theme A implementation | **done** except H39 (local session 10): skill, 24 checked files, CI, README | HANDOFF local session 10 |
+| Theme A implementation | **done** incl. H39 (local session 10): skill, 24 checked files, CI, README | HANDOFF local session 10 |
 | Theme B feasibility analysis | done: GO with conditions | DESIGN 8.1–8.8 |
 | ROCm libtorch on this host | restored, `build/libtch-rocm` built, CI tests pass on the CPU | HANDOFF local session 9 |
 | GPU gate (C2: H40–H42) | **passed**: T = 1024 and T = 2048 fit with the 36/28 split (T = 2048 with saved inputs in host memory) | DESIGN 8.8 "Gate results", "Gate re-run" |
@@ -47,7 +47,7 @@ Last updated: 2026-11-17, local session 10 (Theme A implemented, M0 prepared).
 |---|---|---|
 | H37 | Claude Code and Hermes both load the planned skill tree | **Hermes holds**; Claude Code after the push |
 | H38 | every planned pitfall fails with a stable message | **holds**: six pitfalls, messages quoted in SKILL.md |
-| H39 | the skill raises the local Qwen's pass rate on ten tasks | prepared (tasks, checker, runner); run after the benchmark |
+| H39 | the skill raises the local Qwen's pass rate on ten tasks | **measured**: 10/10 with and without (ceiling); the skill halves the time (29 against 55 min). C4: Qwen writes small tch-fpc programs |
 | H40 | bf16 / fp16 products work and are fast on gfx1201 | **holds**: 100 / 81 TFLOP/s bf16 (XT / 9070); fp32 only 1.6 / 1.3 |
 | H41 | Q4_K / Q6_K dequantisation in tensor ops is correct and fast | **holds**: exact; 3.2 / 4.7 ms per 89 M weights |
 | H42 | one training step fits and runs from one process on two GPUs | **holds**: 36/28 split, 167 tokens/s at T = 1024 (13.1 / 13.9 GiB), 172 at T = 2048 with host offload (14.0 / 14.7 GiB) |

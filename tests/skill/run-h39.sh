@@ -27,6 +27,11 @@ mkdir -p "$out/$mode"
 for t in $tasks; do
   dir=$out/$mode/$t
   mkdir -p "$dir"
+  # The Hermes Pascal verify hook compiles a written .pas with plain fpc and
+  # only the file's own directory as unit and library path. Links to the
+  # tch-fpc units and libtch let that check pass, so the agent is not sent
+  # after a phantom "Can't find unit Tch".
+  ln -sf "$root"/src/*.pas "$root"/src/*.inc "$libtch/libtch.so" "$dir/"
   build="TCH_FPC_ROOT=$root TCH_OUT=$dir/bin TCH_UNITS=$dir/units $root/plugin/skills/tch-fpc/scripts/build-example.sh $dir/answer.pas $libtch"
   if [ "$mode" = with ]; then
     skill_note="Read the tch-fpc skill first (skill_view name=\"tch-fpc\") and follow it."
@@ -43,7 +48,7 @@ Rules for this job:
 - $skill_note
 - Build with: $build
   It prints the path of the executable. Run that executable with $root as the current directory and compare its output with the required output. Repeat until it matches exactly.
-- A verify hook may report \"Can't find unit Tch\" because it compiles without tch-fpc's paths; the build command above is the one that counts.
+- The tch-fpc units linked into $dir are for the verify hook; do not edit them.
 - Do not change files outside $dir."
   start=$(date +%s)
   "$hermes" chat -Q --max-turns "$turns" --provider custom \
@@ -51,8 +56,8 @@ Rules for this job:
       -t terminal,file,skills "${skill_args[@]}" --in "$dir" -q "$prompt" \
       < /dev/null > "$dir/hermes.txt" 2>&1 || true
   secs=$(( $(date +%s) - start ))
-  used=no
-  grep -q 'tch-fpc' "$dir/hermes.txt" && grep -qiE 'skill_view.*tch-fpc|tch-fpc.*skill_view' "$dir/hermes.txt" && used=yes
+  if [ "$mode" = with ]; then used=preloaded; else
+    used=no; grep -qiE 'skill_view[^\n]*tch-fpc' "$dir/hermes.txt" && used=yes; fi
   LIBTCH=$libtch "$root/tests/skill/check-task.sh" "$root/tests/skill/tasks/$t" "$dir/answer.pas" > "$dir/check.txt" 2>&1 || true
   printf '%s\t%s\t%s\t%s\t%s\n' "$mode" "$t" "$(cut -d' ' -f1 "$dir/check.txt")" "$secs" "$used" | tee -a "$out/summary.tsv"
 done

@@ -3605,6 +3605,24 @@ same task set is the readiness gate of section 8 (condition C4).
 The skill's examples are retrieval material. They must never enter a
 fine-tuning data set (8.7): they are written by Claude.
 
+**H39 result (local session 10, 2026-11-17, *measured*).** Local Qwen
+(`qwen3.8-27b-64k`) as the main model of Hermes, toolsets terminal, file
+and skills, 40 turns, one run per task and mode:
+
+| | with the skill (preloaded) | without |
+|---|---|---|
+| passed | 10 / 10 | 10 / 10 |
+| total time | 1,759 s (29 min) | 3,305 s (55 min) |
+| slowest task | 375 s (06) | 717 s (05) |
+
+The pass rate cannot separate the two (both at the ceiling); the skill
+cuts the time to about half; every task but 02 is faster with it (02:
+352 s against 173 s). The tasks
+are small; a harder set would be needed to show a difference in pass
+rate. A first trial run without links to the units lost most of its 15
+minutes to the Pascal verify hook (plain `fpc` cannot find `Tch`);
+`run-h39.sh` now links the tch-fpc units into each task directory.
+
 ## 8. Fine-tuning Qwen3.8 27B with tch-fpc: feasibility gate (design session 9)
 
 **Verdict: GO with conditions. The design stops at this gate.** Training

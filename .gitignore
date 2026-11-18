@@ -17,3 +17,5 @@ _build/
 # samples/qwen-lora: data set work, token cache, checkpoints, GGUFs, coverage
 samples/qwen-lora/work/
 samples/qwen-lora/coverage/
+# test executables built next to their sources
+samples/qwen-lora/tests/ut/*_test

@@ -48,9 +48,17 @@ this session. Done so far, all on the CPU (a Qwen benchmark held the GPUs):
   with `<think>\n` (thinking on). This settles the endpoint row of DESIGN
   8.10's last table.
 
-Next: when the benchmark ends, run H39 (`run-h39.sh with` and `without`),
-show the pass rates (gate C4), then M1 through Hermes in the order of
-DESIGN 8.18.
+- **H39 run** (DESIGN 7.5 "H39 result"): 10/10 with and 10/10 without
+  the skill; total time 29 against 55 minutes. Results in the git-ignored
+  `build/h39/run1/`. C4: the local Qwen writes small tch-fpc programs; the
+  user decides the gate.
+
+Next: the Pascal verify hook of Hermes (`hermes-agent-setup`,
+`pascal/agent-hooks/pascal.bb`) compiles a written `.pas` with only the
+file's directory as unit path, so every M1 unit that uses `Tch` would be
+sent back with "Can't find unit Tch". Give it the tch-fpc paths (for
+example an environment variable with extra fpc options) before M1; then M1
+through Hermes in the order of DESIGN 8.18.
 
 ## Design session 10 (2026-11-17): Theme B designed in detail
 

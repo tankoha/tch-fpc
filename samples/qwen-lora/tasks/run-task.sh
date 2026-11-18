@@ -42,5 +42,8 @@ cur=${HERMES_HOME:-$HOME/.hermes}/sdlc/current-task
 mkdir -p "$(dirname "$cur")"
 printf '%s\n' "$spec" > "$cur"
 trap 'rm -f "$cur"' EXIT
-hermes chat -Q --max-turns "${TURNS:-150}" --in "$proj" -q "$prompt" < /dev/null > "$log" 2>&1 || true
+# Toolsets: no code_execution (execute_code runs Python, which this project
+# forbids; Hermes refused it 21 times in T06 and each refusal cost a re-think).
+# Sub-agents never get tools the main agent lacks.
+hermes chat -Q -t terminal,file,skills,todo,delegation --max-turns "${TURNS:-150}" --in "$proj" -q "$prompt" < /dev/null > "$log" 2>&1 || true
 echo "$log"

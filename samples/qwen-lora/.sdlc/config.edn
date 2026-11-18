@@ -8,4 +8,6 @@
  ;; test procedures (fpcunit published methods), used to detect deleted tests
  :test-func-re    "(?m)^\\s*procedure\\s+Test"
  ;; interpreters the agents may not start from terminal (AGENTS.md: no Python, no Node.js)
- :forbidden-commands "python[0-9.]*|node|nodejs"}
+ :forbidden-commands "python[0-9.]*|node|nodejs"
+ ;; skills the sdlc.bb delegate hook tells every sub-agent to load first (the Pascal guard blocks writing without them)
+ :delegate-skills ["pascal-fpc-objfpc" "tch-fpc"]}

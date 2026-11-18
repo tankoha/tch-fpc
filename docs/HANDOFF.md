@@ -55,6 +55,22 @@ Lessons, applied to every remaining M1/M2 task:
   Qwen had used python3 through a script file), the ITa conditions and the
   report rule.
 
+- **Fewer triggers for long thinking.** Hermes logs of T06: about 100
+  refused or failed tool calls (execute_code 21, dangerous-command
+  approvals about 40, Pascal guard about 30, patch mismatches 14) and 68
+  context compressions; the long silences (8-28 min) followed reading
+  large files whole. Now: `run-task.sh` passes
+  `-t terminal,file,skills,todo,delegation` (no `execute_code`; children
+  never gain tools the parent lacks); the delegate hook also asks the
+  sub-agent to load `:delegate-skills` of `.sdlc/config.edn` first;
+  AGENTS.md "Working with the tools" (scripts in files run with `bash`,
+  no `rm -r` but `mktemp -d`, `{$mode}` in probes too, read by line
+  range, read before `patch`, do not read hook sources). Task design:
+  one test program per stage or group of functions. Not known: whether the
+  thinking loops (logs keep only its start), and whether the sampling
+  settings (temperature 1, presence_penalty 0, no thinking budget) matter;
+  an Ollama experiment needs the user's consent.
+
 Next: M1 T01, T02, T03, T04, T05 (H46), T08, T13, T14, then T07, T09, T10,
 T11 (H43), each as facts file plus small steps through `tasks/run-task.sh`.
 

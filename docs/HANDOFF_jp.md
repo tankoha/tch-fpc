@@ -41,6 +41,17 @@ OK とするファイル（44。Oxygene は静的検査のみ）をすべて受�
   未実施と数える）、Python と Node.js の禁止（`.sdlc/config.edn` の `:forbidden-commands` で `terminal`
   から止めるようにした。Qwen はスクリプトファイル経由で python3 を使っていた）、ITa の条件、報告の決まり。
 
+- **長考のきっかけを減らす。** T06 の Hermes のログ：ツールの拒否と失敗が約 100 回（execute_code 21、
+  危険なコマンドの確認 約 40、Pascal ガード 約 30、patch の不一致 14）、文脈の圧縮が 68 回。長い沈黙
+  （8〜28 分）は大きいファイルを丸ごと読んだ直後だった。対策：`run-task.sh` は
+  `-t terminal,file,skills,todo,delegation` で起動する（`execute_code` なし。子は親にないツールを
+  得られない）。delegate フックは、`.sdlc/config.edn` の `:delegate-skills` を先に読むようにも子へ
+  伝える。AGENTS.md の「ツールの使い方」（スクリプトはファイルに書いて `bash` で実行、`rm -r` ではなく
+  `mktemp -d`、試しのファイルにも `{$mode}`、行の範囲を指定して読む、`patch` の前に読む、フックの
+  ソースは読まない）。タスクの設計：テストのプログラムを段階か関数のまとまりごとに分ける。分かって
+  いないこと：思考がループしているか（ログには冒頭しか残らない）、サンプリングの設定（temperature 1、
+  presence_penalty 0、思考の上限なし）が効いているか。Ollama での実験はユーザーの了承を得てから。
+
 次：M1 の T01、T02、T03、T04、T05（H46）、T08、T13、T14、続いて T07、T09、T10、T11（H43）。
 それぞれ事実ファイルと小さな段階に分け、`tasks/run-task.sh` で流す。
 

@@ -12,6 +12,28 @@ Always give absolute paths: for `write_file` and `patch`, and for the
 `workdir` of `terminal`. With a relative path the hook cannot tell the
 project and stops the operation.
 
+## Working with the tools
+
+Each rule below avoids a refusal seen in T06; every refusal costs a long
+re-think.
+
+- Probe scripts go into a file under `work/` and run as `bash <file>`.
+  Do not pass code inline (`bash -c`, `bb -e`, a heredoc into an
+  interpreter): Hermes asks for approval, and this run cannot give it.
+- Do not clean up with `rm -r` or `find -delete` (refused the same way).
+  For a fresh directory use `mktemp -d <proj>/work/tmp.XXXXXX`; `work/` is
+  git-ignored and cleaned by the user.
+- Every `.pas` file starts with `{$mode objfpc}{$H+}`, probes and
+  scratch files too; load the skills with `skill_view` before writing the
+  first one (the Pascal guard blocks otherwise).
+- Read large files by line range (`read_file` with offset and limit) after
+  locating the place with `search_files`; do not read whole files you have
+  read before. Context compression costs minutes and the details.
+- Before `patch`, read the lines you change, and take `old_string` from
+  that read. Read a file before overwriting it.
+- When a hook blocks, do what its reason says. Do not read the hooks'
+  sources (`~/.hermes/agent-hooks/`).
+
 ## Owners
 
 | Phase | Owner | Output |

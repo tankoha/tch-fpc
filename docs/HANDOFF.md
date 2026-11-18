@@ -6,7 +6,59 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 Status at a glance of the knowledge-package and fine-tuning work:
 [progress.md](progress.md).
 
-## Local session 10 (2026-11-17): Theme A implemented, M0 prepared — resume here
+## Local session 10, continued (2026-11-18): M1 T06 done, lessons — resume here
+
+**T06 done** (`qlora_verify`, the dialect verifier M3 needs first): unit
+`DialectVerify` and program `src/qlora_verify.pas`, written by the local
+Qwen through Hermes SDLC (main agent Mistral Large 3). Gate ut OK 104/104,
+line coverage 100 % (516/516); gate ita OK 11/11, no NG. Checked by Claude
+outside the agents: with `QLORA_FPC*` unset, `qlora_verify --dialect D` on
+each `pascal-dialects` skill directory accepts every file the plugin's
+oracle (`tests/check-examples.sh`) reports OK (44; Oxygene is static-only).
+ITa found three defects that 100 % line coverage had hidden (BUG-001
+expect-error text compared after lowercasing; BUG-002 bare compiler name
+not looked up in `PATH`; BUG-003 bare name turned into `<cwd>/fpc`), all
+fixed test-first. It took about 20 hours of wall time in seven runs
+(`samples/qwen-lora/tasks/T06*.md`).
+
+Lessons, applied to every remaining M1/M2 task:
+
+- **Small tasks.** A whole task in one run made Qwen hit 250 tool calls,
+  context compression and Bedrock errors. Write a facts file
+  (`tasks/Txx-facts.md`) and steps of at most about 60 turns each (a,
+  b1..., c...); split T10/T11 most.
+- **Schedule.** Qwen thinks 20–30 minutes per reply; one verifier took
+  about 20 hours. The other twelve M1 tasks may take one to several weeks.
+  Measure after T05; if M4 is at risk, hand parts to the R4 alternates
+  (devstral, GPT-OSS-120B, Mistral Large 3) for the schedule, not only for
+  quality.
+- **Coverage is not enough.** UT viewpoints now required (AGENTS.md):
+  upper and lower case, defaults when a variable is unset, bare names and
+  relative paths. ITa runs as a user would: `QLORA_*` unset, started
+  outside the project, compared with the oracle.
+- **Check, do not trust.** gate ita prints OK when NG rows carry a defect
+  ID, and Qwen reported "pass" with seven NG. At the end of each task
+  Claude runs the oracle itself (scratchpad) and diffs Qwen's outputs;
+  count NG rows instead of reading the verdict.
+- **Delegation harness** (`hermes-agent-setup` `sdlc.bb`): Mistral
+  shortens Qwen's instructions and drops rules. The `delegate` hook
+  (pre_tool_call on `delegate_task`) puts "First read <task file>" at the
+  head of each goal; the task file comes from `~/.hermes/sdlc/current-task`
+  written by `tasks/run-task.sh` (one run at a time). A resident Hermes
+  gateway keeps the environment of the run that started it, so the hook
+  does not use environment variables, and `run-task.sh` refuses to start
+  (exit 3) when the gateway's GPU hiding or `QLORA_*` differ. Check
+  `~/.hermes/sdlc/delegations.log` after each run.
+- **Rules in AGENTS.md**, not repeated per task: the literal `[廃止]`
+  (the gate counts `[廃止: ...]` as not run), no Python or Node.js (now
+  blocked in `terminal` by `:forbidden-commands` in `.sdlc/config.edn`;
+  Qwen had used python3 through a script file), the ITa conditions and the
+  report rule.
+
+Next: M1 T01, T02, T03, T04, T05 (H46), T08, T13, T14, then T07, T09, T10,
+T11 (H43), each as facts file plus small steps through `tasks/run-task.sh`.
+
+## Local session 10 (2026-11-17): Theme A implemented, M0 prepared
 
 Plan: C4 → M0 → M1 → M2 → M2g (M3 separately). Nothing committed yet in
 this session. Done so far, all on the CPU (a Qwen benchmark held the GPUs):

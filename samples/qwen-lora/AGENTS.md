@@ -43,7 +43,12 @@ The sub-agent knows nothing of the parent's conversation. `goal` and
 - the completion condition (which outputs, updated how)
 
 One delegation covers one unit or one program. The sub-agent's context is
-64k tokens.
+128k tokens, and its long thinking fills it: keep each delegation to a step
+of the task file, not the whole task.
+
+When a task file is given (`tasks/<Txx>.md`), a hook puts "First read <task
+file>" at the head of every delegated goal. Keep your own goal short and do
+not restate the task file's rules in other words.
 
 ## Updating the design documents
 
@@ -60,7 +65,13 @@ One delegation covers one unit or one program. The sub-agent's context is
   stops it).
 - Test cases are never deleted. Changes that reduce cases, test procedures
   or result rows are stopped by the hook. A case no longer needed stays,
-  with "[廃止]" (retired) and the reason in its notes.
+  with the literal `[廃止]` (retired) followed by the reason in its notes:
+  `[廃止] replaced by UT-X-012`. Not `[廃止: ...]`: the gate recognises only
+  the literal and would count the row as not run.
+- UT cases cover, for every text, name and path input: upper and lower case
+  (and texts compared literally), the default when an environment variable
+  or option is not set, and a bare name or relative path as well as an
+  absolute one. Line coverage of 100 % does not show these.
 - A test that does not pass is reported. If possible, record symptom and
   cause in `docs/defects.md` and put the ID in the result table's Defect ID
   column. Format: skill `sdlc-defect-record`.
@@ -75,6 +86,12 @@ UT is complete only when both hold; `sdlc.bb gate ut . --run` decides.
 
 ITa / ITb / ST are complete at 100 % execution (`sdlc.bb gate ita` etc.).
 
+- Run ITa as a user would: environment variables that override defaults
+  (`QLORA_*`) unset unless the case sets them, and the program started from
+  a working directory outside the project. Compare with the task's oracle.
+- A gate prints OK also when NG rows carry a defect ID. Report the numbers
+  (cases run, OK, NG, open defects), never "passed" while NG rows remain.
+
 ## This project: Pascal and tch-fpc
 
 The sample fine-tunes Qwen3.8 27B with LoRA on two GPUs, in Pascal on top of
@@ -83,8 +100,10 @@ list with the acceptance oracle of each task is 8.18.
 
 - Everything is Free Pascal 3.2.2, `{$mode objfpc}{$H+}` in every file.
   Units `Tch`, `TchNN` (tch-fpc, in `../../src`); HTTP and JSON with
-  `fphttpclient`, `fpjson`; processes with `process`. No Python, no Node.js;
-  bash only for one-line wrappers.
+  `fphttpclient`, `fpjson`; processes with `process`. No Python, no
+  Node.js, also not through a script file (the guard hook blocks
+  `python*`, `node`, `nodejs` in `terminal`: `:forbidden-commands` of
+  `.sdlc/config.edn`); bash, grep, awk and sed for one-line work.
 - One unit per file in `src/`, named as in DESIGN 8.12 (`GgufFile`,
   `GgufQuant`, ...). Programs are `src/qlora_*.pas`.
 - Unit tests use fpcunit: `tests/ut/<Unit>_test.pas` is a program with a

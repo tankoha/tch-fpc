@@ -7,7 +7,7 @@ The detailed log and the next steps are in [HANDOFF.md](HANDOFF.md);
 decisions and numbers in [DESIGN.md](DESIGN.md). Update this page at the
 end of every session, together with HANDOFF.
 
-Last updated: 2026-11-17, local session 10 (Theme A implemented, M0 prepared).
+Last updated: 2026-11-18, local session 10 continued (M1 T06 done; lessons in HANDOFF).
 
 ## Goals
 
@@ -35,8 +35,8 @@ Last updated: 2026-11-17, local session 10 (Theme A implemented, M0 prepared).
 | C3 inputs | 2026-11-17: Mistral terms settled (Apache-2.0); GGUF base for the first run, original after it; Oxygene in scope (licence requested from RemObjects); blob read access done with read-only ACLs. **C3 done** | DESIGN 8.8 "Decisions", HANDOFF C3 |
 | Theme B detailed design (milestones, modules, LoRA, data spec, evaluation) | **done** (design session 10, 2026-11-17); questions answered 2026-11-17 except Oxygene (2) | DESIGN 8.9–8.19, UML 10, HANDOFF design session 10 |
 | Rehearsal model (a small `qwen35` GGUF, Q4_K_M) | **downloaded 2026-11-17**: Qwen3.5 0.8B Q4_K_M (Unsloth) + mmproj BF16 in `build/models/`, sha256 verified; has Q5_K/Q8_0, tied head, no MTP | DESIGN 8.11, HANDOFF question 1 |
-| M0 preconditions (C4, rehearsal model, SDLC skeleton, H50) | not started | DESIGN 8.11 |
-| M1 read and reproduce (T01–T11; H46, H43 on the rehearsal model) | not started | DESIGN 8.18 |
+| M0 preconditions (C4, rehearsal model, SDLC skeleton, H50) | **done** (local session 10) | HANDOFF local session 10 |
+| M1 read and reproduce (T01–T11; H46, H43 on the rehearsal model) | **in progress**: T06 (verifier) done 2026-11-18, agrees with the oracle; about 20 h per task, schedule to be re-measured after T05 | DESIGN 8.18, HANDOFF 2026-11-18 |
 | M2 train and deploy in small (T12–T20; H47), M2g GPU smoke | not started | DESIGN 8.18 |
 | M3 data set v1, evaluation tasks, baseline evaluation | not started | DESIGN 8.16, 8.17 |
 | M4 27B run, M5 merge / H45 / evaluation | not started (by the user; Qwen is down during M4) | DESIGN 8.11 |

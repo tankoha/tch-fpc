@@ -16,6 +16,21 @@ The design is $proj/../../docs/DESIGN.md (sections 8.9-8.19); read the sections 
 
 $(sed "s|{proj}|$proj|g" "$spec")"
 export HIP_VISIBLE_DEVICES=-1 ROCR_VISIBLE_DEVICES=-1
+# A resident Hermes gateway keeps the environment of the run that started it,
+# and tools and hooks may run in it. Refuse to start when its GPU hiding or
+# QLORA_* values differ from this run's (stop the gateway, then retry).
+for gw in $(pgrep -f 'hermes_cli.main.* gateway run' || true); do
+  genv=$(tr '\0' '\n' < "/proc/$gw/environ" 2>/dev/null || true)
+  for v in HIP_VISIBLE_DEVICES ROCR_VISIBLE_DEVICES $(compgen -e | grep '^QLORA_' || true) \
+           $(printf '%s\n' "$genv" | sed -n 's/^\(QLORA_[A-Za-z0-9_]*\)=.*/\1/p'); do
+    g=$(printf '%s\n' "$genv" | sed -n "s/^$v=//p")
+    if [ "$g" != "${!v:-}" ]; then
+      echo "Hermes gateway (pid $gw) has $v='$g', this run '${!v:-}'." >&2
+      echo "Stop it first: hermes gateway stop (or kill $gw)." >&2
+      exit 3
+    fi
+  done
+done
 # sdlc.bb delegate (pre_tool_call on delegate_task) puts "First read <this
 # file>" at the head of every delegated goal, so the sub-agent reads the task
 # itself instead of the main agent's summary.

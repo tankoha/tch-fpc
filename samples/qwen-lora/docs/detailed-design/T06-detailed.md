@@ -114,6 +114,11 @@ parameters are implementation notes; all text parameters are `const string`.
   before start: the child chdirs to `ADir` before `exec`, so a relative
   path would otherwise resolve against the new working directory and fail
   with ENOENT (exit 127, observed on FPC 3.2.2 / glibc).
+- T06c4 (BUG-003): a bare name (no `/`) that is not a local file is a program
+  name — it is resolved in `PATH` the way a shell would (SysUtils `ExeSearch`)
+  BEFORE the cwd-prefix rebase above; a bare name that resolves nowhere falls
+  back to the cwd-prefix logic (or a local file of the same name), so the
+  relative-exe behaviour is unchanged (mirrors `IsPathUsable`, 2.12, BUG-002).
 
 ### 2.10 `function ExpectedPathFor(ASrcName: string): string`
 - `<dir>/<basename>.expected` — the `.expected` file next to the source,
@@ -127,6 +132,10 @@ parameters are implementation notes; all text parameters are `const string`.
 ### 2.12 `function IsPathUsable(APath: string): Boolean`
 - File exists and is readable, or directory exists. Used for CLI validation
   and the compiler-existence check.
+- T06c2 (BUG-002): a bare name (no `/`) that is not a local file is a program
+  name — it is resolved in `PATH` the way a shell would (SysUtils `ExeSearch`),
+  and the file checks above apply to the resolved file; a bare name that
+  resolves nowhere falls back to the directory check.
 
 ### 2.13 `function CompileStep(ACompiler, ASrcPath, AOutDir: string; ATimeoutMs: Integer; ADelphi: Boolean; out ALog: string; out AExePath: string): TCompileState`
 - `TCompileState = (csNoCompiler, csStartFail, csTimeout, csFail, csOk)`.

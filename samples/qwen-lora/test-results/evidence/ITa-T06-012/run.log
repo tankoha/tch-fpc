@@ -1,0 +1,2 @@
+cmd: QLORA_FPC=<repo>/samples/qwen-lora/work/ita-cases/fake-fpc.sh qlora_verify --dialect objfpc --timeout 2 sample_012.pas
+sample_012.pas	objfpc	compiled-run	skipped	timeout

@@ -1,0 +1,13 @@
+cmd: cd <repo>/samples/qwen-lora/work/ita-cases/010 && for (file,dialect) in 001:objfpc 002:objfpc 003:objfpc 004:objfpc 005:fpc-delphi 006:unleashed 007:oxygene 008:oxygene 009:objfpc: env -u QLORA_FPC -u QLORA_FPC_UNLEASHED <repo>/samples/qwen-lora/work/bin/qlora_verify --dialect <dialect> <file>.pas   (T06c4 BUG-003 re-run, 2026-11-18, default env, rebuilt binary)
+--- stdout (TSV), one line per per-file run ---
+001.pas	objfpc	compiled-run	accepted	
+002.pas	objfpc	compiled-run	no-expected	
+003.pas	objfpc	compiled-run	compile-error	003.pas(3,3) Error: Identifier not found "nonexistentproc"
+004.pas	objfpc	compiled-run	accepted	
+005.pas	fpc-delphi	compiled-run	accepted	
+006.pas	unleashed	compiled-run	accepted	
+007.pas	oxygene	static-only	static-ok	
+008.pas	oxygene	static-only	static-reject	
+009.pas	objfpc	compiled-run	compiled-but-should-fail	
+exit per run (order above): 001=0 002=1 003=1 004=0 005=0 006=0 007=0 008=1 009=1 (non-accepted fixtures exit 1 by design)
+expected (T06-ita.md case ITa-T06-010): 9/9 lines match (003 detail contains `Identifier not found "nonexistentproc"`)

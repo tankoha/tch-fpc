@@ -78,6 +78,8 @@ function VerifyFile(ASrcName, AForcedDialect: string; ATimeoutSec: Integer;
 function CollectPascalFiles(APath: string; out AFiles: TStringArray): Boolean;
 function VerifyMain(AArgs: array of string; AWorkRoot: string; const AEnv: TEnvRec;
   out ALines: TStringArray; out AExitCode: Integer): Boolean;
+function RunVerifyCLI(AArgs: array of string; AWorkRoot: string;
+  const AEnv: TEnvRec): Integer;
 
 implementation
 
@@ -315,7 +317,11 @@ begin
         E := S;
         while (E <= Length(Low)) and (Low[E] <> '}') and (Low[E] <> #10) do
           Inc(E);
-        Line := Copy(Low, S, E - S);
+        { BUG-001 fix: extract from the ORIGINAL text (not the lowercased
+          copy) — the pitfall text is matched case-sensitively against the
+          compiler log (grep -F semantics, T06-facts). The scan offsets S/E
+          are identical, because LowerCase is 1:1 per character }
+        Line := Copy(AText, S, E - S);
         if (Length(Line) > 0) and (Line[Length(Line)] = #13) then
           Delete(Line, Length(Line), 1);
         Result := Trim(Line);
@@ -430,10 +436,24 @@ end;
 function IsPathUsable(APath: string): Boolean;
 var
   FS: TFileStream;
+  R: string;
 begin
   Result := False;
   if APath = '' then
     Exit;
+  { BUG-002 fix: a bare name (no '/') is a program name, not a path — like
+    a shell, resolve it in PATH (SysUtils ExeSearch); the existence and
+    readability checks below then apply to the resolved file. A bare name
+    that resolves nowhere falls back to the old "is a local directory"
+    check, so previous behaviour for bare directory names is unchanged }
+  if (Pos('/', APath) = 0) and (not FileExists(APath)) then
+  begin
+    R := ExeSearch(APath);
+    if R <> '' then
+      APath := R
+    else if not CheckDir(APath) then
+      Exit;
+  end;
   if FileExists(APath) then
   begin
     FS := nil;
@@ -496,13 +516,24 @@ var
   OutS: TStringStream;
   T0: QWord;
   A: string;
-  Exe, Dir: string;
+  Exe, Dir, R: string;
 begin
   AOutput := '';
   AExitCode := -1;
   ATimedOut := False;
   Exe := AExe;
   Dir := ADir;
+  { BUG-003 fix: a bare name (no '/') is a program NAME, not a path — like a
+    shell, resolve it in PATH (SysUtils ExeSearch) BEFORE the relative→absolute
+    rebase below. A bare name that resolves nowhere falls back to the old
+    cwd-prefix logic (or a local file of the same name), so the relative-exe
+    behaviour is unchanged. Mirrors the IsPathUsable gate (BUG-002). }
+  if (Pos('/', Exe) = 0) and (not FileExists(Exe)) then
+  begin
+    R := ExeSearch(Exe);
+    if R <> '' then
+      Exe := R;
+  end;
   { the child chdirs to ADir before exec: a relative exe or dir would then
     resolve against the NEW working directory (ENOENT → exit 127), so both
     are resolved against the program working directory before start }
@@ -621,10 +652,13 @@ begin
   Inc(I);
   Args[I] := SrcToCompile;
   { empty work dir: all paths in the flag table are absolute (AOutDir is
-    resolved above), so the child needs no cwd change. FPC 3.2.2's TProcess
-    cannot exec a shebang script after CurrentDirectory is set (verified:
-    127 / ENOENT for scripts, works for ELF binaries) — the rehearsal
-    fixtures are shell scripts, so the compile runs in the inherited cwd }
+    resolved above), so the compile child needs no cwd change.
+    T06c verification of the old T06b2 note: FPC 3.2.2's TProcess CAN exec
+    a shebang script after CurrentDirectory is set, provided the script is
+    named by an ABSOLUTE path (probe: exit 0, output captured). The T06b2
+    failure (127 / ENOENT) was the relative script path resolving against
+    the child's new cwd, not a TProcess limitation. RunLimited therefore
+    pre-resolves a relative AExe to absolute before start (see its body). }
   { Started is not inspected here: the compiler was pre-validated above
     (csNoCompiler), and FPC 3.2.2's TProcess reports post-start exec
     failures as exit 127 (handled via csFail below), not via Result }
@@ -713,7 +747,12 @@ begin
     begin
       Outcome := OUT_SKIPPED;
       Detail := 'could not start';
-      Ran := RunLimited(ExePath, [], '', ATimeoutSec * 1000, RunOut, Code,
+      { T06c fix: the program runs INSIDE its fresh out dir <out> (the facts:
+        run it where the compiler put it). RunLimited pre-resolves the relative
+        dir to absolute before setting CurrentDirectory, so the absolute-shebang
+        exec path below stays valid. Fixing the inherited-cwd default meant
+        test 106's fixture now logs to an absolute path (see its notes). }
+      Ran := RunLimited(ExePath, [], W, ATimeoutSec * 1000, RunOut, Code,
         TimedOut);
       if Ran and TimedOut then
       begin
@@ -909,6 +948,25 @@ begin
   else
     AExitCode := 1;
   Result := True;
+end;
+
+{ 2.22 CLI wrapper for the program qlora_verify (T06c). Forwards the whole
+  argument vector to VerifyMain with AWorkRoot, prints each result line to
+  stdout, and returns the process exit code (2 on a usage error, i.e. when
+  VerifyMain itself reports failure; 0/1 are VerifyMain's verify verdicts).
+  AEnv is injected by the caller — the program fills it with
+  ReadEnvRec(GetEnvironmentVariable(...)); this function never reads the
+  environment, so unit tests can drive it hermetically. }
+function RunVerifyCLI(AArgs: array of string; AWorkRoot: string;
+  const AEnv: TEnvRec): Integer;
+var
+  Lines: TStringArray;
+  i: Integer;
+begin
+  if not VerifyMain(AArgs, AWorkRoot, AEnv, Lines, Result) then
+    Result := 2;
+  for i := 0 to Length(Lines) - 1 do
+    WriteLn(Lines[i]);
 end;
 
 initialization

@@ -1,0 +1,4 @@
+cmd: cd <repo>/samples/qwen-lora/work/ita-cases/001 && env -u QLORA_FPC -u QLORA_FPC_UNLEASHED <repo>/samples/qwen-lora/work/bin/qlora_verify --dialect objfpc sample_001.pas
+--- stdout (TSV) ---
+sample_001.pas	objfpc	compiled-run	accepted	
+exit=0

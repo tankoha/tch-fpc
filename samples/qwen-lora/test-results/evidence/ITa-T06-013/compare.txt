@@ -1,0 +1,66 @@
+# ITa comparison  (oracle = tests/check-examples.sh, per T06-facts)
+# Rule: oracle OK file => TSV outcome must be 'accepted' (oxygene: 'static-ok')
+#
+STATUS  skill  file  oracle  expected  actual
+#
+AGREE	pascal-fpc-objfpc	pascal-fpc-objfpc/examples/01_class_property	OK	accepted	accepted
+AGREE	pascal-fpc-objfpc	pascal-fpc-objfpc/examples/02_generics	OK	accepted	accepted
+AGREE	pascal-fpc-objfpc	pascal-fpc-objfpc/examples/03_exceptions	OK	accepted	accepted
+AGREE	pascal-fpc-objfpc	pascal-fpc-objfpc/examples/04_strings_lists	OK	accepted	accepted
+AGREE	pascal-fpc-objfpc	pascal-fpc-objfpc/examples/05_events	OK	accepted	accepted
+AGREE	pascal-fpc-objfpc	pascal-fpc-objfpc/examples/06_environment	OK	accepted	accepted
+AGREE	pascal-fpc-objfpc	pascal-fpc-objfpc/pitfalls/p01_generic_without_specialize	OK	accepted	accepted
+AGREE	pascal-fpc-objfpc	pascal-fpc-objfpc/pitfalls/p02_method_pointer_without_at	OK	accepted	accepted
+AGREE	pascal-fpc-objfpc	pascal-fpc-objfpc/pitfalls/p03_inline_var	OK	accepted	accepted
+AGREE	pascal-fpc-delphi	pascal-fpc-delphi/examples/01_class_property	OK	accepted	accepted
+AGREE	pascal-fpc-delphi	pascal-fpc-delphi/examples/02_generics	OK	accepted	accepted
+AGREE	pascal-fpc-delphi	pascal-fpc-delphi/examples/03_exceptions	OK	accepted	accepted
+AGREE	pascal-fpc-delphi	pascal-fpc-delphi/examples/04_strings_lists	OK	accepted	accepted
+AGREE	pascal-fpc-delphi	pascal-fpc-delphi/examples/05_events	OK	accepted	accepted
+AGREE	pascal-fpc-delphi	pascal-fpc-delphi/examples/06_environment	OK	accepted	accepted
+AGREE	pascal-fpc-delphi	pascal-fpc-delphi/pitfalls/p01_generic_keyword	OK	accepted	accepted
+AGREE	pascal-fpc-delphi	pascal-fpc-delphi/pitfalls/p02_specialize_keyword	OK	accepted	accepted
+AGREE	pascal-fpc-delphi	pascal-fpc-delphi/pitfalls/p03_at_on_method_pointer	OK	accepted	accepted
+INFO	pascal-fpc-delphi	pascal-fpc-delphi/references/p04_icomparer_invisible	absent	-	compile-error
+AGREE	pascal-unleashed	pascal-unleashed/examples/01_class_property	OK	accepted	accepted
+AGREE	pascal-unleashed	pascal-unleashed/examples/02_generics	OK	accepted	accepted
+AGREE	pascal-unleashed	pascal-unleashed/examples/03_exceptions	OK	accepted	accepted
+AGREE	pascal-unleashed	pascal-unleashed/examples/04_strings_lists	OK	accepted	accepted
+AGREE	pascal-unleashed	pascal-unleashed/examples/05_events	OK	accepted	accepted
+AGREE	pascal-unleashed	pascal-unleashed/examples/06_match_tuples	OK	accepted	accepted
+AGREE	pascal-unleashed	pascal-unleashed/examples/07_async_parallel	OK	accepted	accepted
+AGREE	pascal-unleashed	pascal-unleashed/examples/08_defer	OK	accepted	accepted
+AGREE	pascal-unleashed	pascal-unleashed/examples/09_environment	OK	accepted	accepted
+AGREE	pascal-unleashed	pascal-unleashed/pitfalls/p01_generic_keyword	OK	accepted	accepted
+AGREE	pascal-unleashed	pascal-unleashed/pitfalls/p02_inline_var_with_equals	OK	accepted	accepted
+AGREE	pascal-unleashed	pascal-unleashed/pitfalls/p03_raise_in_expression	OK	accepted	accepted
+AGREE	pascal-unleashed	pascal-unleashed/pitfalls/p04_future_without_await	OK	accepted	accepted
+AGREE	pascal-unleashed	pascal-unleashed/pitfalls/p05_case_on_tuple	OK	accepted	accepted
+AGREE	pascal-unleashed	pascal-unleashed/pitfalls/p06_missing_mode	OK	accepted	accepted
+AGREE	pascal-unleashed	pascal-unleashed/pitfalls/p07_doubled_quote_in_placeholder	OK	accepted	accepted
+AGREE	pascal-delphi	pascal-delphi/examples/01_class_property	OK	accepted	accepted
+AGREE	pascal-delphi	pascal-delphi/examples/02_generics	OK	accepted	accepted
+AGREE	pascal-delphi	pascal-delphi/examples/03_exceptions	OK	accepted	accepted
+AGREE	pascal-delphi	pascal-delphi/examples/04_strings_lists	OK	accepted	accepted
+AGREE	pascal-delphi	pascal-delphi/examples/05_events	OK	accepted	accepted
+AGREE	pascal-delphi	pascal-delphi/examples/06_inline_vars	OK	accepted	accepted
+AGREE	pascal-delphi	pascal-delphi/examples/07_anonymous_methods	OK	accepted	accepted
+AGREE	pascal-delphi	pascal-delphi/pitfalls/p01_specialize_keyword	OK	accepted	accepted
+AGREE	pascal-delphi	pascal-delphi/pitfalls/p02_generic_keyword	OK	accepted	accepted
+AGREE	pascal-delphi	pascal-delphi/pitfalls/p03_inline_var_with_equals	OK	accepted	accepted
+AGREE	pascal-oxygene	pascal-oxygene/examples/01_class_property	SKIP	static-ok	static-ok
+AGREE	pascal-oxygene	pascal-oxygene/examples/02_generics	SKIP	static-ok	static-ok
+AGREE	pascal-oxygene	pascal-oxygene/examples/03_exceptions	SKIP	static-ok	static-ok
+AGREE	pascal-oxygene	pascal-oxygene/examples/04_strings_lists	SKIP	static-ok	static-ok
+AGREE	pascal-oxygene	pascal-oxygene/examples/05_events	SKIP	static-ok	static-ok
+AGREE	pascal-oxygene	pascal-oxygene/examples/06_lambdas_loops	SKIP	static-ok	static-ok
+#
+# summary per skill (AGREE / NG / INFO)
+# pascal-fpc-objfpc    9  0  0
+# pascal-fpc-delphi    9  0  1
+# pascal-unleashed     16  0  0
+# pascal-delphi        10  0  0
+# pascal-oxygene       6  0  0
+# TOTAL                50  0  1
+# verdict:
+#   PASS - every oracle-OK file is accepted (oxygene: static-ok)

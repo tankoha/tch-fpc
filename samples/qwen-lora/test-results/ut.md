@@ -98,3 +98,13 @@ When a case is run again, do not edit its row; append a new row below (the last 
 | UT-DialectVerify-115 | OK |  | 2026-11-18 | stage 3: VerifyMain same path twice → two identical lines, exit 0 |
 | UT-DialectVerify-116 | OK |  | 2026-11-18 | stage 3: VerifyMain accepted + wrong-output → 2 lines, exit 1 |
 | UT-DialectVerify-117 | OK |  | 2026-11-18 | stage 3: VerifyMain no usable compiler → skipped line, exit 0 |
+| UT-DialectVerify-133 | OK |  | 2026-11-18 | T06c: program runs inside `<out>` (cwd fix `RunLimited(ExePath, [], W, ...)`); exe reads `data.txt` by relative name from own dir → `accepted` |
+| UT-DialectVerify-134 | OK |  | 2026-11-18 | T06c: RunVerifyCLI `--help` → usage printed, returns 0 (VerifyMain True path) |
+| UT-DialectVerify-135 | OK |  | 2026-11-18 | T06c: RunVerifyCLI no args → usage, `if not VerifyMain` branch → returns 2 |
+| UT-DialectVerify-136 | OK |  | 2026-11-18 | T06c: RunVerifyCLI one file + fake fpc → `accepted` line, returns 0 |
+| UT-qlora_verify-001 | OK |  | 2026-11-18 | T06c: program `--help` → usage line, exit 0 |
+| UT-qlora_verify-002 | OK |  | 2026-11-18 | T06c: program no args → usage line, exit 2 |
+| UT-qlora_verify-003 | OK |  | 2026-11-18 | T06c: program 1 file, `QLORA_FPC`=<absolute-path fake fpc> (sh -c env form) → `accepted` line, exit code 0 |
+| UT-DialectVerify-140 | OK |  | 2026-11-18 | T06c2 BUG-001 fix: expect-error text preserves original case — `SyNtAx ErRoR` returned unchanged (fail-before: returned lowercased `syntax error`) |
+| UT-DialectVerify-141 | OK |  | 2026-11-18 | T06c2 BUG-002 fix: bare compiler name `fpc` resolved via `PATH` (`IsPathUsable` now uses SysUtils `ExeSearch` for bare names; fail-before: `skipped "compiler not found"`) |
+| UT-DialectVerify-142 | OK |  | 2026-11-18 | T06c4 BUG-003 fix: `RunLimited` resolves a bare name (no `/`) via `ExeSearch` before its cwd-prefix rebase (fail-before: rebased to `<cwd>/echo` → ENOENT `process error`, Result=False; now `echo`→`/usr/bin/echo` runs, exit 0, output `dv142-marker`) |

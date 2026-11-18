@@ -1,0 +1,16 @@
+# T06c4 BUG-003 re-run (2026-11-18), rebuilt binary, QLORA_FPC=unset QLORA_FPC_UNLEASHED=unset, cwd=<repo>/samples/qwen-lora
+# skill=pascal-fpc-objfpc dialect=objfpc env: QLORA_FPC=unset QLORA_FPC_UNLEASHED=unset
+exit=0
+lines=9
+# skill=pascal-fpc-delphi dialect=fpc-delphi env: QLORA_FPC=unset QLORA_FPC_UNLEASHED=unset
+exit=1
+lines=10
+# skill=pascal-unleashed dialect=unleashed env: QLORA_FPC=unset QLORA_FPC_UNLEASHED=unset
+exit=0
+lines=16
+# skill=pascal-delphi dialect=delphi env: QLORA_FPC=unset QLORA_FPC_UNLEASHED=unset
+exit=0
+lines=10
+# skill=pascal-oxygene dialect=oxygene env: QLORA_FPC=unset QLORA_FPC_UNLEASHED=unset
+exit=0
+lines=6

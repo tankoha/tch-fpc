@@ -1,0 +1,4 @@
+cmd: cd <repo>/samples/qwen-lora/work/ita-cases/009 && env -u QLORA_FPC -u QLORA_FPC_UNLEASHED <repo>/samples/qwen-lora/work/bin/qlora_verify --dialect oxygene sample_009.pas
+--- stdout (TSV) ---
+sample_009.pas	oxygene	static-only	static-reject	
+exit=1

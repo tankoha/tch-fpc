@@ -1,0 +1,10 @@
+$HOME/.claude/skills/polyglot-scripting/pascal-dialects/skills/pascal-fpc-delphi/examples/01_class_property.pas	fpc-delphi	compiled-run	accepted	
+$HOME/.claude/skills/polyglot-scripting/pascal-dialects/skills/pascal-fpc-delphi/examples/02_generics.pas	fpc-delphi	compiled-run	accepted	
+$HOME/.claude/skills/polyglot-scripting/pascal-dialects/skills/pascal-fpc-delphi/examples/03_exceptions.pas	fpc-delphi	compiled-run	accepted	
+$HOME/.claude/skills/polyglot-scripting/pascal-dialects/skills/pascal-fpc-delphi/examples/04_strings_lists.pas	fpc-delphi	compiled-run	accepted	
+$HOME/.claude/skills/polyglot-scripting/pascal-dialects/skills/pascal-fpc-delphi/examples/05_events.pas	fpc-delphi	compiled-run	accepted	
+$HOME/.claude/skills/polyglot-scripting/pascal-dialects/skills/pascal-fpc-delphi/examples/06_environment.pas	fpc-delphi	compiled-run	accepted	
+$HOME/.claude/skills/polyglot-scripting/pascal-dialects/skills/pascal-fpc-delphi/pitfalls/p01_generic_keyword.pas	fpc-delphi	compiled-run	accepted	
+$HOME/.claude/skills/polyglot-scripting/pascal-dialects/skills/pascal-fpc-delphi/pitfalls/p02_specialize_keyword.pas	fpc-delphi	compiled-run	accepted	
+$HOME/.claude/skills/polyglot-scripting/pascal-dialects/skills/pascal-fpc-delphi/pitfalls/p03_at_on_method_pointer.pas	fpc-delphi	compiled-run	accepted	
+$HOME/.claude/skills/polyglot-scripting/pascal-dialects/skills/pascal-fpc-delphi/references/p04_icomparer_invisible.pas	fpc-delphi	compiled-run	compile-error	p04_icomparer_invisible.pas(18,51) Error: Identifier not found "IComparer"

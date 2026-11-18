@@ -16,5 +16,16 @@ The design is $proj/../../docs/DESIGN.md (sections 8.9-8.19); read the sections 
 
 $(sed "s|{proj}|$proj|g" "$spec")"
 export HIP_VISIBLE_DEVICES=-1 ROCR_VISIBLE_DEVICES=-1
+# sdlc.bb delegate (pre_tool_call on delegate_task) puts "First read <this
+# file>" at the head of every delegated goal, so the sub-agent reads the task
+# itself instead of the main agent's summary.
+# The hook must be in ~/.hermes/shell-hooks-allowlist.json (approved once by the user).
+# It reads the task file from ~/.hermes/sdlc/current-task, not from the
+# environment: hooks may run in a resident Hermes gateway whose environment
+# is that of the run that started it. One run at a time.
+cur=${HERMES_HOME:-$HOME/.hermes}/sdlc/current-task
+mkdir -p "$(dirname "$cur")"
+printf '%s\n' "$spec" > "$cur"
+trap 'rm -f "$cur"' EXIT
 hermes chat -Q --max-turns "${TURNS:-150}" --in "$proj" -q "$prompt" < /dev/null > "$log" 2>&1 || true
 echo "$log"

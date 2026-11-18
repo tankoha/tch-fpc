@@ -70,6 +70,15 @@ type
     procedure TestUT_DialectVerify_088;
     procedure TestUT_DialectVerify_089;
     procedure TestUT_DialectVerify_132;
+    procedure TestUT_DialectVerify_133;
+    procedure TestUT_DialectVerify_134;
+    procedure TestUT_DialectVerify_135;
+    procedure TestUT_DialectVerify_136;
+    { T06c2 defect fixes: BUG-001 (case of expect-error text), BUG-002 (bare name) }
+    procedure TestUT_DialectVerify_140;
+    procedure TestUT_DialectVerify_141;
+    { T06c4 defect fix: BUG-003 (bare name not resolved in PATH by RunLimited) }
+    procedure TestUT_DialectVerify_142;
     procedure TestUT_DialectVerify_090;
     procedure TestUT_DialectVerify_091;
     procedure TestUT_DialectVerify_092;
@@ -744,6 +753,151 @@ begin
   AssertEquals('', P);
 end;
 
+procedure TTestDialectVerify.TestUT_DialectVerify_133;
+var
+  E: TEnvRec;
+  OK: Boolean;
+  W, S: string;
+begin
+  { T06c: the program must run INSIDE the fresh <out> dir. The exe reads
+    data.txt by RELATIVE name; the fake compiler writes it next to the
+    exe in <out>. With the inherited working dir (pre-fix) the relative
+    read fails (cat error in the captured output → wrong-output). }
+  S := '#!/bin/sh'#10
+    + 'fe=' + Chr(39) + Chr(39) + #10
+    + 'for a in "$@"; do case "$a" in -FE*) fe=${a#-FE};; esac; done' + #10
+    + 'printf ' + Chr(39) + 'FROM-OWN-DIR\n' + Chr(39)
+    + ' > "$fe/data.txt"' + #10
+    + 'printf ' + Chr(39) + '#!/bin/sh\ncat data.txt\necho read-ok\n'
+    + Chr(39) + ' > "$fe/s"' + #10
+    + 'chmod +x "$fe/s"' + #10
+    + 'exit 0';
+  WriteTestFile('work/ut/dv-133/s.pas', 'program s; begin end.');
+  WriteTestFile('work/ut/dv-133/s.expected',
+    'FROM-OWN-DIR'#10 + 'read-ok'#10);
+  WriteTestFile('work/ut/dv-133/fpc', S);
+  ChmodExec('work/ut/dv-133/fpc');
+  E.Fpc := 'work/ut/dv-133/fpc';
+  W := VerifyFile('work/ut/dv-133/s.pas', '', 5, E, 'work/ut/dv-133/w',
+    OK);
+  AssertTrue(OK);
+  AssertEquals('accepted', Cell(W, 4));
+end;
+
+procedure TTestDialectVerify.TestUT_DialectVerify_134;
+var
+  Args: array of string;
+  E: TEnvRec;
+  L: TStringArray;
+  EC: Integer;
+begin
+  { T06c: --help → usage printed, code 0 (VerifyMain returns True). }
+  E := ReadEnvRec('', '', '');
+  SetLength(Args, 1);
+  Args[0] := '--help';
+  AssertEquals(0, RunVerifyCLI(Args, 'work/ut/dv-134', E));
+  { stdout went to the runner log; pin its content through the same
+    VerifyMain path RunVerifyCLI calls: --help must be usage, code 0 }
+  AssertTrue(VerifyMain(Args, 'work/ut/dv-134/m', E, L, EC));
+  AssertEquals(K_USAGE, L[0]);
+  AssertEquals(0, EC);
+end;
+
+procedure TTestDialectVerify.TestUT_DialectVerify_135;
+var
+  Args: array of string;
+  E: TEnvRec;
+  L: TStringArray;
+  EC: Integer;
+begin
+  { T06c: no args → usage + the `if not VerifyMain` branch (Result := 2). }
+  E := ReadEnvRec('', '', '');
+  SetLength(Args, 0);
+  AssertEquals(2, RunVerifyCLI(Args, 'work/ut/dv-135', E));
+  AssertFalse(VerifyMain(Args, 'work/ut/dv-135/m', E, L, EC));
+  AssertEquals(2, EC);
+  AssertEquals(K_USAGE, L[0]);
+end;
+
+procedure TTestDialectVerify.TestUT_DialectVerify_136;
+var
+  Args: array of string;
+  E: TEnvRec;
+  S, P: string;
+  L: TStringArray;
+  EC: Integer;
+begin
+  { T06c: one real file + fake fpc → `accepted` line, code 0. }
+  S := GetCurrentDir + '/work/ut/dv-136/s.pas';
+  WriteTestFile('work/ut/dv-136/s.pas', 'program s; begin end.');
+  WriteTestFile('work/ut/dv-136/s.expected', 'ok'#10);
+  P := WriteFakeFpc('work/ut/dv-136/fpc', 'echo ok', '', '', 0);
+  E := ReadEnvRec(P, '', '');
+  SetLength(Args, 3);
+  Args[0] := '--dialect';
+  Args[1] := 'objfpc';
+  Args[2] := S;
+  AssertEquals(0, RunVerifyCLI(Args, 'work/ut/dv-136', E));
+  AssertTrue(VerifyMain(Args, 'work/ut/dv-136/m', E, L, EC));
+  AssertEquals(0, EC);
+  AssertTrue(Pos('accepted', L[0]) > 0);
+end;
+
+procedure TTestDialectVerify.TestUT_DialectVerify_140;
+begin
+  { 140 (T06c2, BUG-001): the pitfall text keeps its letter case — the
+    compiler-log match in VerifyFile is case-sensitive (grep -F semantics,
+    T06-facts), so a lowercased extraction misses texts with capitals.
+    Before the fix this returned the lowercased 'syntax error'. }
+  AssertEquals('SyNtAx ErRoR',
+    ExtractExpectErrorText('{ expect-error: SyNtAx ErRoR }'));
+end;
+
+procedure TTestDialectVerify.TestUT_DialectVerify_141;
+var
+  Cls: string;
+  E: TEnvRec;
+begin
+  { 141 (T06c2, BUG-002): a bare compiler name like `fpc` is resolved
+    through PATH like a shell would. The pipeline gate is IsPathUsable:
+    before the fix it demanded an existing file ./fpc, so the bare name
+    was `skipped` ("compiler not found"). Case-table input: `fpc` is in
+    $PATH (this UT suite's own runner invokes fpc by bare name). }
+  E := ReadEnvRec('', '', '/h');
+  AssertEquals('fpc', ChooseCompiler('objfpc', E, Cls));
+  AssertEquals('compiled-run', Cls);
+  AssertTrue('bare fpc in PATH must be usable', IsPathUsable('fpc'));
+  AssertTrue('bare name not in PATH must not be usable',
+    not IsPathUsable('qlora-ut-missing-bare-name'));
+end;
+
+procedure TTestDialectVerify.TestUT_DialectVerify_142;
+var
+  Out: string;
+  C: Integer;
+  T: Boolean;
+begin
+  { 142 (T06c4, BUG-003): a BARE name with no '/' is a program NAME, not a
+    path — like a shell, `RunLimited` must resolve it in PATH (SysUtils
+    ExeSearch) BEFORE its relative→absolute rebase. Before the fix the bare
+    name was rebased to <cwd>/echo (ENOENT → `process error`, Result=False);
+    after the fix ExeSearch resolves it and it runs. A relative exe WITH '/'
+    is unchanged (cwd prefix: 027/028).
+    `echo` is the exemplar: guaranteed on PATH (028 already runs
+    /usr/bin/echo; this suite's runner invokes fpc by bare name) yet NOT
+    present in the working directory — so it exercises the ExeSearch branch,
+    not the cwd-file or cwd-prefix fallbacks. }
+  AssertFalse('echo: a bare name must NOT exist in the current dir',
+    FileExists('echo'));
+  Out := '';
+  C := -1;
+  T := False;
+  AssertTrue('bare name resolvable in PATH must run (BUG-003): ' + Out,
+    RunLimited('echo', ['dv142-marker'], '', 5000, Out, C, T));
+  AssertEquals(0, C);
+  AssertEquals('dv142-marker', Trim(Out));
+end;
+
 procedure TTestDialectVerify.TestUT_DialectVerify_089;
 var
   L: string;
@@ -1014,8 +1168,11 @@ begin
   WriteTestFile('work/ut/dv-106/db.pas', 'program b; begin end.');
   WriteTestFile('work/ut/dv-106/da.expected', 'ok'#10);
   WriteTestFile('work/ut/dv-106/db.expected', 'ok'#10);
+  { T06c: the exe now runs with cwd=<out> (a fresh out dir), so its log
+    target must be ABSOLUTE, otherwise it would land inside <out> }
   WriteFakeFpc('work/ut/dv-106/fpu',
-    'echo ok'#10 + 'echo "$0" >> work/ut/dv-106/paths.log', '', '', 0);
+    'echo ok'#10 + 'echo "$0" >> '
+    + QuotedStr(GetCurrentDir + '/work/ut/dv-106/paths.log'), '', '', 0);
   En.FpcUnleashed := 'work/ut/dv-106/fpu';
   DeleteFile('work/ut/dv-106/paths.log');
   W := VerifyFile('work/ut/dv-106/da.pas', 'delphi', 5, En,

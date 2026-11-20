@@ -33,6 +33,10 @@ re-think.
   that read. Read a file before overwriting it.
 - When a hook blocks, do what its reason says. Do not read the hooks'
   sources (`~/.hermes/agent-hooks/`).
+- Do only the step you were given. When a gate or check fails because a
+  later step (another delegation or task file) is not done yet, report it and
+  stop; do not do that step (T01a: a sub-agent asked for UT case tables ran
+  gate ut, then wrote the units and tests for 1.5 hours).
 
 ## Owners
 
@@ -71,6 +75,17 @@ of the task file, not the whole task.
 When a task file is given (`tasks/<Txx>.md`), a hook puts "First read <task
 file>" at the head of every delegated goal. Keep your own goal short and do
 not restate the task file's rules in other words.
+
+After each delegation returns, run `~/.hermes/agent-hooks/sdlc.bb review <project root>`
+(terminal, absolute path) and compare its numbers and changed files with the
+sub-agent's report. Until you do, a hook blocks the next `delegate_task` and
+any write to `test-results/` or `docs/defects.md`. A run may use at most 4
+delegations; plan the steps so they fit.
+
+Before writing a result or defect row, read the output files it cites
+(`.out`, `.err`, `.diff`) with `read_file` and copy from them. Never write a
+message, a count or a cause you have not read (T01c recorded error messages
+the program never printed).
 
 ## Updating the design documents
 

@@ -41,6 +41,8 @@ done
 cur=${HERMES_HOME:-$HOME/.hermes}/sdlc/current-task
 mkdir -p "$(dirname "$cur")"
 printf '%s\n' "$spec" > "$cur"
+# A review left pending by an earlier, interrupted run does not carry over.
+rm -f "$(dirname "$cur")/review-pending.tsv"
 trap 'rm -f "$cur"' EXIT
 # Toolsets: no code_execution (execute_code runs Python, which this project
 # forbids; Hermes refused it 21 times in T06 and each refusal cost a re-think).

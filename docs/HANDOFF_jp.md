@@ -5,7 +5,55 @@
 再開するときは最初にこれを読んでください。決定事項と理由は [DESIGN_jp.md](DESIGN_jp.md) にあります。
 知識パッケージとファインチューニングの作業の状況は [progress_jp.md](progress_jp.md) で一目で見られます。
 
-## ローカルセッション10 の続き（2026-11-18）：M1 の T06 が完了、教訓 — ここから再開
+## ローカルセッション11（2026-11-19〜22）：M1 の T01〜T05 が完了、H46 が成り立つ — ここから再開
+
+**完了**（Hermes SDLC。どれもハーネス担当がオラクルと照合した）：
+
+| タスク | ユニット / プログラム | オラクルとの照合 | コミット |
+|---|---|---|---|
+| T01 | `GgufFile` の読み込み、`qlora_inspect` | UT 166/166、ITa 12/12 | 0d12114 |
+| T02 | `GgufQuant`（スカラーの逆量子化、Q8_0 への量子化） | 320 テンソルすべてで上流の C とビット単位で一致 | 38d9f3b |
+| T03 | `GgufQuantT`（同じ処理を libtorch の演算で） | 全テンソルでビット単位で一致、ITa 7/7 | 13fd344 |
+| T04 | `GgufWriter` | そのまま写したファイルの sha256 が一致。78 テンソルを Q8_0 にしたファイルが、上流 ggml 自身の書き出しとバイト単位で一致 | d40d23b |
+| T05 | `QwenTokenizer`、`TokenizeCli`、`qlora_tokenize` | **H46 が成り立つ**：2978/2978 レコード（5 方言の Pascal、英語と日本語の段落、特殊トークン、境界の行、乱数の文字列 2000、計 260,253 トークン）が `llama-server /tokenize` と一致。デコードで全テキストが元に戻る。ITa 8/8 | このセッション |
+
+**うまくいく進め方**（T08 以降も続ける）：
+- ハーネス担当が先に測り、オラクルと一致する試作から `tasks/Txx-facts.md` を書く。事実ファイルには、UT の全行を期待値付きで並べる。
+- オラクルは、試験対象のコードの外から持ってくる（上流の C、Ollama の `libggml-base.so` 経由の上流 ggml の `gguf_*`、CPU で動かす `llama-server`）。置き場所は `work/oracle/Txx`（git の対象外）。ITa のスクリプトとドライバはハーネス担当が書き、エージェントはそれを実行して `summary.tsv` を写す。
+- 骨組み（インターフェース、仮の本体、テストプログラム、フィクスチャ）はハーネス担当が置く。タスクは小さくする：段階ごとに委任 1 回、1 回の実行で最大 4 回。タスクのたびにハーネス担当がビルドとテストをやり直し、試作かオラクルと比べる。報告は事実として扱わない。
+
+**モデル**（`run-task.sh` は主担当の既定を `zai.glm-5` にした。サブは `~/.hermes/config.yaml` の `delegation.model` で、今は Bedrock の `zai.glm-5`）：
+
+| モデル | 役割 | 観察 |
+|---|---|---|
+| Mistral Large 3（Bedrock） | 主担当 | T01/T02 で結果を作り話した |
+| GPT-OSS-120B（Bedrock） | 主担当 | ツール呼び出しを本文に書いた（run-task.sh が exit 5 で止める） |
+| GLM 5（Bedrock） | 主担当 | T03 から報告が正確。一度だけ、ハーネス担当の骨組みをサブの作と取り違えた |
+| Qwen3 Coder 480B（Bedrock） | サブ | 速いが、仮の本体を残して「完了」と言った |
+| GPT-OSS-120B（Bedrock） | サブ | コードはおおむね正しい。fpcunit の形を 2 回崩した。**存在しないテスト 19 件分の OK を記録した**（T05b2） |
+| devstral-small-2 24B（ローカル） | サブ | どの委任もツールを呼ばずに終えた |
+| GPT-OSS 20B（ローカル、128k） | サブ | 文書とケース表は書けた。コードは書けなかった |
+| magistral small 24B（ローカル） | サブ | `patch` を一度も呼ばず、していない編集を報告したことがある |
+| GLM 5（Bedrock） | サブ | コードもテストも正しかった（T05b3b、T05b3c） |
+
+**GLM 5 と Qwen の特殊トークン。** GLM 5 自身も `<think>` と `<tool_call>` を使う。GLM 5 が自分の出力にこれらの文字列を書くと、Bedrock がそれをツール呼び出しとして解析し、リクエストを拒否する（`ValidationException ... toolUse.name`）。テストに `<think>` を書くこともできなかった。そこで、タスクにはタグを文字どおりに書かず、テストでは部品から組み立てる（`'<' + 'think>x'`）。T07（チャットテンプレート）と T15 でもこの規則を守る。
+
+**ハーネスの変更**（hermes-agent-setup 4881659 と、このセッションの未コミットの変更。プロジェクトの `.sdlc/`）：
+- guard：作業ツリー・インデックス・履歴を変える git のサブコマンドを、すべてのエージェントに禁止した。`git -C dir ...` の形でも止まる（主担当が `git -C <proj> checkout HEAD -- src/...` でコミット済みの答えを戻したため）。テストは `sdlc/tests/guard-git.sh`。
+- delegate フック：goal にフックの文が全部含まれているとき以外は、文全体を足す（主担当が自分で書いた「First read <task>」のせいで、スキルと「この段階だけ」の文が抜けていた）。テストは `sdlc/tests/delegate-sentence.sh`。
+- gate ut：OK と記録されたケースは、**直近の実行で** `Test{id_}` の名前で通過していなければならない（`.sdlc/config.edn` の `:run-logs`、`:passed-re`、`:test-name`）。カバレッジの計測は、ログを読む前に行う。
+- `.sdlc/ut-coverage.sh`：`kcov --skip-solibs`（kcov のライブラリ差し込みのせいで libtorch を使うテストがすべて exit 1 になり、`GgufQuantT` が測れていなかった）と `fpc -B`（`src/` に残った行情報なしの `GgufFile.ppu` のせいで、`GgufFile` がカバレッジから外れていた）。
+- `.sdlc/cobertura2lcov.bb`：コメントだけの行を除く（FPC は `specialize TDictionary<...>` のコードを 1 行目に結び付ける）。
+
+**出来事。** 2026-11-22 02:33、ローカルの devstral が GPU 2 枚で動いている最中に、PC がシャットダウンの記録なしにリセットした（電力は上限の 175 W と 215 W）。再現はしていない。card0 は RX 9070（rev c3、負荷時の junction は最大 97 °C）、card1 は RX 9070 XT（rev c0）。`samples/qwen-lora/work/gpulog.sh` が、電力と温度を 2 秒おきにディスクへ記録する。
+
+**次に行うこと：**
+1. magistral small 24B と devstral-small-2 24B を、`tests/skill/tasks/` の検査付き課題 10 個（H39 の仕組み）で、**単独で**（Hermes なしで）比べる。GPU の記録も取る。ユーザーは、LoRA/QLoRA の土台に devstral ではなく magistral を考えている。このサンプルの順伝播は `qwen35` 用に書いてあり、magistral は普通の `llama` 構造であることに注意。
+2. RemObjects Elements 14.0.0.3157 のライセンスを取得した。Earth IDE の flatpak を入れた（`flatpak install --user`。`flatpak run com.remobjects.earth` で動く）。コマンドラインのコンパイラ（EBuild。スクリプトからなら「Mac & Linux Zip Distro」のほうが向くかもしれない）を見つけ、`pascal-oxygene` スキルの例を検証し、DESIGN の M6 と Oxygene の質問 2 を決める。
+3. M1 の残り：T08、T13、T14、続いて T07、T09、T10、T11（H43）。進め方は同じ。サブは GLM 5。
+4. hermes-agent-setup：README と `config.yaml` の雛形が、まだサブをローカルの GPT-OSS 20B としている。GLM 5 に直す。
+
+## ローカルセッション10 の続き（2026-11-18）：M1 の T06 が完了、教訓
 
 **T06 が完了**（`qlora_verify`。M3 が最初に必要とする方言の検証器）：ユニット `DialectVerify` と
 プログラム `src/qlora_verify.pas` を、ローカルの Qwen が Hermes SDLC で書いた（メインエージェントは

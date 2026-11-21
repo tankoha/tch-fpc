@@ -7,7 +7,7 @@ The detailed log and the next steps are in [HANDOFF.md](HANDOFF.md);
 decisions and numbers in [DESIGN.md](DESIGN.md). Update this page at the
 end of every session, together with HANDOFF.
 
-Last updated: 2026-11-18, local session 10 continued (M1 T06 done; lessons in HANDOFF).
+Last updated: 2026-11-22, local session 11 (M1 T01–T06 done, H46 holds; models and harness lessons in HANDOFF).
 
 ## Goals
 
@@ -36,7 +36,7 @@ Last updated: 2026-11-18, local session 10 continued (M1 T06 done; lessons in HA
 | Theme B detailed design (milestones, modules, LoRA, data spec, evaluation) | **done** (design session 10, 2026-11-17); questions answered 2026-11-17 except Oxygene (2) | DESIGN 8.9–8.19, UML 10, HANDOFF design session 10 |
 | Rehearsal model (a small `qwen35` GGUF, Q4_K_M) | **downloaded 2026-11-17**: Qwen3.5 0.8B Q4_K_M (Unsloth) + mmproj BF16 in `build/models/`, sha256 verified; has Q5_K/Q8_0, tied head, no MTP | DESIGN 8.11, HANDOFF question 1 |
 | M0 preconditions (C4, rehearsal model, SDLC skeleton, H50) | **done** (local session 10) | HANDOFF local session 10 |
-| M1 read and reproduce (T01–T11; H46, H43 on the rehearsal model) | **in progress**: T06 (verifier) done 2026-11-18, agrees with the oracle; about 20 h per task, schedule to be re-measured after T05 | DESIGN 8.18, HANDOFF 2026-11-18 |
+| M1 read and reproduce (T01–T11; H46, H43 on the rehearsal model) | **in progress**: T01–T06 done (2026-11-22), each agrees with its oracle; with Bedrock models (main and sub GLM 5) a task takes 1–3 h; left T07–T11, T13, T14 | DESIGN 8.18, HANDOFF local session 11 |
 | M2 train and deploy in small (T12–T20; H47), M2g GPU smoke | not started | DESIGN 8.18 |
 | M3 data set v1, evaluation tasks, baseline evaluation | not started | DESIGN 8.16, 8.17 |
 | M4 27B run, M5 merge / H45 / evaluation | not started (by the user; Qwen is down during M4) | DESIGN 8.11 |
@@ -54,7 +54,7 @@ Last updated: 2026-11-18, local session 10 continued (M1 T06 done; lessons in HA
 | H43 | the Pascal forward matches the running model's log-probabilities | open; rehearsal model at M1 (T11), 27B at M4 |
 | H44 | the bundled `llama-server --lora` applies an adapter to `qwen35` | off the plan (design session 10); diagnostic only |
 | H45 | Ollama imports and runs a merged GGUF with Q8_0 tensors | open; required (C1 = D3), at M5 |
-| H46 | a Pascal BPE tokenizer matches `llama-server /tokenize` | open; M1 (T05) |
+| H46 | a Pascal BPE tokenizer matches `llama-server /tokenize` | **holds** (T05): 2978/2978 records, 260 253 tokens, incl. 2000 random strings |
 | H47 | the bundled `llama-server` reads a merged rehearsal GGUF and matches the Pascal forward with the adapter | open; M2 (T18) |
 | H48 | at least 40 % of the generator's samples pass the filter, under 20 % near-duplicates | open; M3 |
 | H49 | generation speed with the MTP draft stays at 70 % or more after the merge | open; M5 |

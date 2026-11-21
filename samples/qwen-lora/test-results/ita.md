@@ -68,3 +68,11 @@ When a case is run again, do not edit its row; append a new row below (the last 
 | ITa-T04-004 | OK | - | 2026-11-22 | planned layout after retyping equals upstream: diff 0, 322/322 lines |
 | ITa-T04-005 | OK | - | 2026-11-22 | retyped file: sha256 and size: diff 0, 1/1 lines |
 | ITa-T04-006 | OK | - | 2026-11-22 | upstream reads the retyped file back with that layout: diff 0, 322/322 lines |
+| ITa-T05-001 | OK | - | 2026-11-22 | token ids equal /tokenize: pas records: diff 0, 75/75 lines |
+| ITa-T05-002 | OK | - | 2026-11-22 | token ids equal /tokenize: en records: diff 0, 402/402 lines |
+| ITa-T05-003 | OK | - | 2026-11-22 | token ids equal /tokenize: ja records: diff 0, 402/402 lines |
+| ITa-T05-004 | OK | - | 2026-11-22 | token ids equal /tokenize: sp records: diff 0, 68/68 lines |
+| ITa-T05-005 | OK | - | 2026-11-22 | token ids equal /tokenize: edge records: diff 0, 31/31 lines |
+| ITa-T05-006 | OK | - | 2026-11-22 | token ids equal /tokenize: fuzz records: diff 0, 2000/2000 lines |
+| ITa-T05-007 | OK | - | 2026-11-22 | decode of encode gives the text back: diff 0, 2978/2978 lines |
+| ITa-T05-008 | OK | - | 2026-11-22 | plain mode: one file's ids equal /tokenize: diff 0, 1/1 lines |

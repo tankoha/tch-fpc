@@ -10,4 +10,10 @@
  ;; interpreters the agents may not start from terminal (AGENTS.md: no Python, no Node.js)
  :forbidden-commands "python[0-9.]*|node|nodejs"
  ;; skills the sdlc.bb delegate hook tells every sub-agent to load first (the Pascal guard blocks writing without them)
- :delegate-skills ["pascal-fpc-objfpc" "tch-fpc"]}
+ :delegate-skills ["pascal-fpc-objfpc" "tch-fpc"]
+ ;; every UT case recorded OK must have passed in the last run (.sdlc/ut-coverage.sh writes
+ ;; work/ut/<test>.run.log, fpcunit's plain format: "  00.001  TestUT_X_NNN" for a passed test).
+ ;; In T05b2 a sub-agent recorded 19 OK rows for tests that did not exist yet.
+ :run-logs  {"ut" "work/ut/*.run.log"}
+ :passed-re "(?m)^\\s*\\d+\\.\\d+\\s+(Test\\w+)\\s*$"
+ :test-name "Test{id_}"}

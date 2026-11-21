@@ -259,4 +259,86 @@ When a case is run again, do not edit its row; append a new row below (the last 
 | UT-GgufQuantT-108 | OK |  | 2026-11-21 | |
 | UT-GgufQuantT-023 | OK |  | 2026-11-21 | T03b3: Count not a multiple (q4_K) — EGgufError raised as expected |
 | UT-GgufQuantT-024 | OK |  | 2026-11-21 | T03b3: Count not a multiple (q6_K) — EGgufError raised as expected |
-| UT-GgufQuantT-109 | OK |  | 2026-11-21 | T03b3: AX not 1-D — EGgufError raised as expected
+| UT-GgufQuantT-109 | OK |  | 2026-11-21 | T03b3: AX not 1-D — EGgufError raised as expected |
+| UT-QwenTokenizer-001 | OK |  | 2026-11-22 | T05b1b: ByteToUnicode of bytes 65,32,0,10,127,160,173,233,255 |
+| UT-QwenTokenizer-002 | OK |  | 2026-11-22 | T05b1b: NewTinyTokenizer VocabSize 274, EosId 267 |
+| UT-QwenTokenizer-003 | OK |  | 2026-11-22 | T05b1b: CreateFromVocab with 273 types → error |
+| UT-QwenTokenizer-004 | OK |  | 2026-11-22 | T05b1b: eos -1 → error |
+| UT-QwenTokenizer-005 | OK |  | 2026-11-22 | T05b1b: eos 274 → error |
+| UT-QwenTokenizer-006 | OK |  | 2026-11-22 | T05b1b: token 0 replaced → error |
+| UT-QwenTokenizer-007 | OK |  | 2026-11-22 | T05b1b: PreTokenize 'hello world' |
+| UT-QwenTokenizer-008 | OK |  | 2026-11-22 | T05b1b: PreTokenize contractions |
+| UT-QwenTokenizer-009 | OK |  | 2026-11-22 | T05b1b: PreTokenize quote patterns |
+| UT-QwenTokenizer-010 | OK |  | 2026-11-22 | T05b1b: PreTokenize digits |
+| UT-QwenTokenizer-011 | OK |  | 2026-11-22 | T05b1b: PreTokenize spaces |
+| UT-QwenTokenizer-012 | OK |  | 2026-11-22 | T05b1b: PreTokenize trailing spaces |
+| UT-QwenTokenizer-013 | OK |  | 2026-11-22 | T05b1b: PreTokenize newlines |
+| UT-QwenTokenizer-014 | OK |  | 2026-11-22 | T05b1b: PreTokenize leading spaces |
+| UT-QwenTokenizer-015 | OK |  | 2026-11-22 | T05b1b: PreTokenize tabs |
+| UT-QwenTokenizer-016 | OK |  | 2026-11-22 | T05b1b: PreTokenize punctuation |
+| UT-QwenTokenizer-017 | OK |  | 2026-11-22 | T05b1b: PreTokenize leading punctuation |
+| UT-QwenTokenizer-018 | OK |  | 2026-11-22 | T05b1b: PreTokenize punctuation-newlines |
+| UT-QwenTokenizer-019 | OK |  | 2026-11-22 | T05b1b: PreTokenize UTF-8 é |
+| UT-QwenTokenizer-020 | OK |  | 2026-11-22 | T05b1b: PreTokenize code with punctuation |
+| UT-QwenTokenizer-021 | OK |  | 2026-11-22 | T05b1b: PreTokenize Japanese |
+| UT-QwenTokenizer-022 | OK |  | 2026-11-22 | T05b1b: PreTokenize nbsp and ideographic space |
+| UT-QwenTokenizer-023 | OK |  | 2026-11-22 | T05b1b: PreTokenize emoji |
+| UT-QwenTokenizer-024 | OK |  | 2026-11-22 | T05b1b: PreTokenize empty |
+| UT-QwenTokenizer-025 | OK |  | 2026-11-22 | T05b1b: invalid UTF-8 #$FF |
+| UT-QwenTokenizer-026 | OK |  | 2026-11-22 | T05b1b: invalid UTF-8 truncated 2-byte |
+| UT-QwenTokenizer-027 | OK |  | 2026-11-22 | T05b1b: invalid UTF-8 bad continuation |
+| UT-QwenTokenizer-028 | OK |  | 2026-11-22 | T05b1b: invalid UTF-8 overlong C0 |
+| UT-QwenTokenizer-029 | OK |  | 2026-11-22 | T05b1b: invalid UTF-8 out-of-range F5 |
+| UT-QwenTokenizer-101 | OK |  | 2026-11-21 | 
+| UT-QwenTokenizer-102 | OK |  | 2026-11-21 | 
+| UT-QwenTokenizer-103 | OK |  | 2026-11-21 | 
+| UT-QwenTokenizer-104 | OK |  | 2026-11-21 | 
+| UT-QwenTokenizer-105 | OK |  | 2026-11-21 | 
+| UT-QwenTokenizer-106 | OK |  | 2026-11-21 | 
+| UT-QwenTokenizer-107 | OK |  | 2026-11-21 | 
+| UT-QwenTokenizer-108 | OK |  | 2026-11-21 | 
+| UT-QwenTokenizer-109 | OK |  | 2026-11-21 | 
+| UT-QwenTokenizer-110 | OK |  | 2026-11-21 | 
+| UT-QwenTokenizer-111 | OK |  | 2026-11-21 | 
+| UT-QwenTokenizer-112 | OK |  | 2026-11-21 | 
+| UT-QwenTokenizer-113 | OK |  | 2026-11-21 | 
+| UT-QwenTokenizer-114 | OK |  | 2026-11-21 | 
+| UT-QwenTokenizer-115 | OK |  | 2026-11-21 | 
+| UT-QwenTokenizer-116 | OK |  | 2026-11-21 | 
+| UT-QwenTokenizer-117 | OK |  | 2026-11-21 | 
+| UT-QwenTokenizer-118 | OK |  | 2026-11-21 | 
+| UT-QwenTokenizer-119 | OK |  | 2026-11-21 | 
+| UT-QwenTokenizer-120 | OK |  | 2026-11-21 | 
+| UT-QwenTokenizer-121 | OK |  | 2026-11-21 | 
+| UT-QwenTokenizer-122 | OK |  | 2026-11-21 | 
+| UT-QwenTokenizer-123 | OK |  | 2026-11-21 | 
+| UT-QwenTokenizer-124 | OK |  | 2026-11-21 | 
+| UT-QwenTokenizer-125 | OK |  | 2026-11-21 | 
+| UT-QwenTokenizer-126 | OK |  | 2026-11-21 | 
+| UT-QwenTokenizer-127 | OK |  | 2026-11-21 |
+| UT-QwenTokenizer-030 | OK |  | 2026-11-21 |
+| UT-QwenTokenizer-128 | OK |  | 2026-11-21 |
+| UT-QwenTokenizer-129 | OK |  | 2026-11-21 |
+| UT-QwenTokenizer-130 | OK |  | 2026-11-21 |
+| UT-QwenTokenizer-131 | OK |  | 2026-11-21 |
+| UT-QwenTokenizer-132 | OK |  | 2026-11-22 |
+| UT-TokenizeCli-001 | OK |  | 2026-11-22 |
+| UT-TokenizeCli-002 | OK |  | 2026-11-22 |
+| UT-TokenizeCli-003 | OK |  | 2026-11-22 |
+| UT-TokenizeCli-004 | OK |  | 2026-11-22 |
+| UT-TokenizeCli-005 | OK |  | 2026-11-22 |
+| UT-TokenizeCli-006 | OK |  | 2026-11-22 |
+| UT-TokenizeCli-007 | OK |  | 2026-11-22 |
+| UT-TokenizeCli-008 | OK |  | 2026-11-22 |
+| UT-TokenizeCli-009 | OK |  | 2026-11-22 |
+| UT-TokenizeCli-010 | OK |  | 2026-11-22 |
+| UT-TokenizeCli-011 | OK |  | 2026-11-22 |
+| UT-TokenizeCli-012 | OK |  | 2026-11-22 |
+| UT-TokenizeCli-013 | OK |  | 2026-11-22 |
+| UT-TokenizeCli-014 | OK |  | 2026-11-22 |
+| UT-TokenizeCli-015 | OK |  | 2026-11-22 |
+| UT-TokenizeCli-016 | OK |  | 2026-11-22 |
+| UT-TokenizeCli-017 | OK |  | 2026-11-22 |
+| UT-TokenizeCli-018 | OK |  | 2026-11-22 |
+| UT-TokenizeCli-019 | OK |  | 2026-11-22 |
+| UT-TokenizeCli-020 | OK |  | 2026-11-22 |

@@ -6,7 +6,99 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 Status at a glance of the knowledge-package and fine-tuning work:
 [progress.md](progress.md).
 
-## Local session 10, continued (2026-11-18): M1 T06 done, lessons — resume here
+## Local session 11 (2026-11-19 to 22): M1 T01–T05 done, H46 holds — resume here
+
+**Done** (Hermes SDLC, each checked against an oracle by the harness owner):
+
+| Task | Unit / program | Oracle result | Commit |
+|---|---|---|---|
+| T01 | `GgufFile` reader, `qlora_inspect` | UT 166/166, ITa 12/12 | 0d12114 |
+| T02 | `GgufQuant` (scalar dequantisers, Q8_0 quantiser) | bit-exact with upstream C on all 320 tensors | 38d9f3b |
+| T03 | `GgufQuantT` (the same in libtorch ops) | bit-exact on all tensors, ITa 7/7 | 13fd344 |
+| T04 | `GgufWriter` | identity copy sha256-equal; 78 tensors retyped to Q8_0 byte-equal to upstream ggml's own writer | d40d23b |
+| T05 | `QwenTokenizer`, `TokenizeCli`, `qlora_tokenize` | **H46 holds**: 2978/2978 records (Pascal of five dialects, English and Japanese paragraphs, special tokens, boundary lines, 2000 random strings; 260 253 tokens) equal `llama-server /tokenize`; decode gives every text back; ITa 8/8 | this session |
+
+**The method that works** (keep it for T08 onward):
+- The harness owner measures first and writes `tasks/Txx-facts.md` from a
+  prototype that already matches the oracle; the facts list every UT row
+  with its expected value.
+- The oracle comes from outside the code under test (upstream C, upstream
+  ggml's `gguf_*` through Ollama's `libggml-base.so`, `llama-server` on the
+  CPU) and lives in `work/oracle/Txx` (not in git). The ITa script and its
+  driver are the harness owner's; agents run them and copy `summary.tsv`.
+- The harness owner places skeletons (interface, stubs, test programs,
+  fixtures). Tasks are small: one delegation per stage, at most four per
+  run. After every task the harness owner rebuilds, reruns the tests and
+  compares with the prototype or the oracle; reports are never taken as
+  fact.
+
+**Models** (`run-task.sh` defaults the main agent to `zai.glm-5`; the
+sub-agent is `delegation.model` of `~/.hermes/config.yaml`, now
+`zai.glm-5` on Bedrock):
+
+| Model | Role | Observed |
+|---|---|---|
+| Mistral Large 3 (Bedrock) | main | invented results in T01/T02 |
+| GPT-OSS-120B (Bedrock) | main | printed tool calls as text (run-task.sh exits 5) |
+| GLM 5 (Bedrock) | main | honest reports from T03 on; once misattributed the harness owner's skeleton to the sub-agent |
+| Qwen3 Coder 480B (Bedrock) | sub | fast, left stubs and claimed "done" |
+| GPT-OSS-120B (Bedrock) | sub | code mostly right; broke the fpcunit layout twice; **recorded 19 OK rows for tests that did not exist** (T05b2) |
+| devstral-small-2 24B (local) | sub | ended every delegation without a tool call |
+| GPT-OSS 20B (local, 128k) | sub | wrote documents and case tables; could not write code |
+| magistral small 24B (local) | sub | never called `patch`; once reported edits it had not made |
+| GLM 5 (Bedrock) | sub | correct code and tests (T05b3b, T05b3c) |
+
+**GLM 5 and Qwen's special tokens.** GLM 5 uses `<think>` and
+`<tool_call>` itself. When it writes those strings in its own output,
+Bedrock parses them as a tool call and rejects the request
+(`ValidationException ... toolUse.name`); it also could not write
+`<think>` into a test. Tasks therefore never contain the tags literally,
+and tests build them from pieces (`'<' + 'think>x'`). Keep this rule for
+T07 (chat template) and T15.
+
+**Harness changes** (hermes-agent-setup 4881659 and this session's
+uncommitted changes; project `.sdlc/`):
+- guard: git subcommands that change the work tree, index or history are
+  blocked for every agent, also as `git -C dir ...` (a main agent had
+  restored a committed answer with `git -C <proj> checkout HEAD -- src/...`);
+  test `sdlc/tests/guard-git.sh`;
+- delegate hook: adds its whole sentence unless the goal already holds all
+  of it (a main agent's own "First read <task>" had suppressed the skills
+  and "only this step" sentences); test `sdlc/tests/delegate-sentence.sh`;
+- gate ut: a case recorded OK must have **passed in the last run** under
+  `Test{id_}` (`:run-logs`, `:passed-re`, `:test-name` in
+  `.sdlc/config.edn`); the coverage run happens before the logs are read;
+- `.sdlc/ut-coverage.sh`: `kcov --skip-solibs` (kcov's library wrapper
+  made every libtorch test exit 1, so `GgufQuantT` was not measured) and
+  `fpc -B` (a stray `GgufFile.ppu` without line info in `src/` had dropped
+  `GgufFile` from the coverage);
+- `.sdlc/cobertura2lcov.bb`: lines that are only a comment are left out
+  (FPC maps code of a `specialize TDictionary<...>` to line 1).
+
+**Incidents.** 2026-11-22 02:33 the PC reset without a shutdown while the
+local devstral ran on both GPUs (power at the caps, 175 W and 215 W);
+not reproduced. card0 is the RX 9070 (rev c3, junction up to 97 °C under
+load), card1 the RX 9070 XT (rev c0). `samples/qwen-lora/work/gpulog.sh`
+logs power and temperatures every 2 s to disk.
+
+**Next:**
+1. Compare magistral small 24B and devstral-small-2 24B **standalone**
+   (no Hermes) on the 10 checked tasks of `tests/skill/tasks/` (the H39
+   harness), with GPU logging. The user considers magistral instead of
+   devstral as a LoRA/QLoRA base; note that this sample's forward is
+   written for `qwen35`, magistral is a plain `llama` transformer.
+2. RemObjects Elements 14.0.0.3157 is licensed; the Earth IDE flatpak is
+   installed (`flatpak install --user`, runs with `flatpak run
+   com.remobjects.earth`). Find the command-line compiler (EBuild; the
+   "Mac & Linux Zip Distro" may suit scripts better), then verify the
+   `pascal-oxygene` skill's examples and settle DESIGN M6 / Oxygene
+   question 2.
+3. M1 remainder: T08, T13, T14, then T07, T09, T10, T11 (H43). Same
+   method; sub-agent GLM 5.
+4. hermes-agent-setup: README and `config.yaml` template still name the
+   local GPT-OSS 20B as the sub-agent; set them to GLM 5.
+
+## Local session 10, continued (2026-11-18): M1 T06 done, lessons
 
 **T06 done** (`qlora_verify`, the dialect verifier M3 needs first): unit
 `DialectVerify` and program `src/qlora_verify.pas`, written by the local

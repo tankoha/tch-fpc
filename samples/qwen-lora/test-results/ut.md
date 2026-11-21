@@ -170,3 +170,33 @@ When a case is run again, do not edit its row; append a new row below (the last 
 | UT-qlora_inspect-002 | OK |  | 2026-11-21 | T01c: binary, valid GGUF, relative path, no flags → exit 0, full stdout block, stderr empty (wrapper's AOut loop) |
 | UT-qlora_inspect-003 | OK |  | 2026-11-21 | T01c: binary, --kv, absolute path with uppercase `.GGUF` ext, mixed-case keys → exit 0, kv lines uint8/uint32 |
 | UT-GgufFile-049 | OK |  | 2026-11-21 | T01c2 (BUG-005): f32 [4] at offset 0 (16 B needed), only 15 of the 16 data bytes written (file = 79 bytes, TEnd = 64+0+16 = 80) → EGgufError extent check naming tensor 'xt' at position 24 and quoting the real file size 79. NG before the Destroy removal: the message said "the file is 0 bytes" (quoted-size assertion failed) |
+| UT-GgufQuant-001 | OK |  | 2026-11-21 | T02b1a: Fp16ToSingle finite $0000/$8000/$3C00/$C000/$7BFF → bits $00000000/$80000000/$3F800000/$C0000000/$477FE000, 6 assertions; GgufQuant_test 10 tests, 0 errors, 0 failures |
+| UT-GgufQuant-002 | OK |  | 2026-11-21 | T02b1a: Fp16ToSingle $7C00/$FC00 → $7F800000/$FF800000, $7E00 → qNaN $7FC00000, $7C01 → sNaN $7FC02000, bit-exact |
+| UT-GgufQuant-003 | OK |  | 2026-11-21 | T02b1a: Fp16ToSingle subnormals $0001→2^-24, $03FF→1023*2^-24, $8001→-(2^-24), bit-exact |
+| UT-GgufQuant-004 | OK |  | 2026-11-21 | T02b1a: SingleToFp16 1.0/-2.0/65504/+0/-0 → $3C00/$C000/$7BFF/$0000/$8000, bit-exact |
+| UT-GgufQuant-005 | OK |  | 2026-11-21 | T02b1a: SingleToFp16 +inf/-inf → $7C00/$FC00; ±qNaN stay quiet NaN, sign preserved |
+| UT-GgufQuant-006 | OK |  | 2026-11-21 | T02b1a: SingleToFp16 ties 1+2^-11 → $3C00, 1+3*2^-11 → $3C02 (tie-to-even) |
+| UT-GgufQuant-007 | OK |  | 2026-11-21 | T02b1a: SingleToFp16 65519 → $7BFF (max finite), 65520 → $7C00 (tie to +inf), bit-exact |
+| UT-GgufQuant-008 | OK |  | 2026-11-21 | T02b1a: SingleToFp16 2^-25 → $0000 (tie, to even), 2^-25+2^-35 → $0001 (above tie, up), bit-exact |
+| UT-GgufQuant-009 | OK |  | 2026-11-21 | T02b1a: Bf16ToSingle $3F80/$C000/$7F80 → $3F800000/$C0000000/$7F800000, bit-exact |
+| UT-GgufQuant-010 | OK |  | 2026-11-21 | T02b1a: RoundHalfAway 0.5→1, -0.5→-1, 1.5→2, 2.5→3, -2.5→-3, 0.49999997→0, 126.5→127, -0.0→-0.0 (sign preserved), bit-exact |
+| UT-GgufQuant-011 | OK |  | 2026-11-21 | T02b1b: DequantizeRow(0) 4-element f32 block, 16 input bytes `00 00 C0 3F | 00 00 12 C0 | 00 00 00 3F | 00 00 00 80` → bits $3FC00000/$C0120000/$3F000000/$80000000 (1.5, −2.28125, 0.5, −0.0), bit-exact; GgufQuant_test 26 tests, 0 errors, 0 failures |
+| UT-GgufQuant-012 | OK |  | 2026-11-21 | T02b1b: DequantizeRow(1) 8-element f16 block $0000/$8000/$3C00/$C000/$7C00/$FC00/$7BFF/$7E00 → $00000000/$80000000/$3F800000/$C0000000/$7F800000/$FF800000/$477FE000/$7FC00000, bit-exact |
+| UT-GgufQuant-013 | OK |  | 2026-11-21 | T02b1b: DequantizeRow(30) 8-element bf16 block $3F80/$C000/$4000/$3F00/$BF80/$7F80/$FF80/$7F7F → 1.0/−2.0/2.0/0.5/−0.5/+inf/−inf/qNaN, qNaN bits $7F7F0000, bit-exact |
+| UT-GgufQuant-014 | OK |  | 2026-11-21 | T02b1b: DequantizeRow(8) one 34-byte q8_0 block (d=$3C00; qs = 127, 127, 0, 5, −5, 8, −8, −106, 96, 23×0) → 32 exact fp32, el0/el1 = 127 ($42FE0000), el7 = −106 ($C2D40000), el8 = 96 ($42C00000), rest 0; byte length asserted 34 |
+| UT-GgufQuant-015 | OK |  | 2026-11-21 | T02b1b: DequantizeRow(8) two 34-byte blocks, 68 bytes: block A d=$3C00 qs[0]=127 qs[1]=−1, block B d=$4000 qs[0]=1 qs[1]=−3 → el0=127, el1=−1, el32=2.0 ($40000000), el33=−6.0 ($C0C00000), all other 58 elements 0, bit-exact |
+| UT-GgufQuant-016 | OK |  | 2026-11-21 | T02b1b: DequantizeRow(2, …) → EGgufError, message contains "unsupported tensor type 2" (class + text asserted) |
+| UT-GgufQuant-017 | OK |  | 2026-11-21 | T02b1b: DequantizeRow(8, count 33) → EGgufError, message names q8_0 and the count 33 (text asserted) |
+| UT-GgufQuant-018 | OK |  | 2026-11-21 | T02b1b: DequantizeBytes(8, valid 34 B, 32) → 32 elements, el0 = 127 ($42FE0000), el31 = 0; 33-byte array → EGgufError naming 33 and 34 (text asserted) |
+| UT-GgufQuant-019 | OK |  | 2026-11-21 | T02b1b: QuantizeRowQ8_0 x = (127, −3, 2, 0×29) → d bytes 00 3C ($3C00), q bytes 7F FD 02 and 29×00, byte-exact |
+| UT-GgufQuant-020 | OK |  | 2026-11-21 | T02b1b: QuantizeRowQ8_0 all-zero block → d = $0000 (00 00), all 32 q = 0, byte-exact |
+| UT-GgufQuant-021 | OK |  | 2026-11-21 | T02b1b: QuantizeRowQ8_0 x = (0.5, −0.5, 127, 0×29), Amax = 127 → d = $3C00; q = 1, −1, 127 (halves round away from zero), rest 0, byte-exact |
+| UT-GgufQuant-022 | OK |  | 2026-11-21 | T02b1b: QuantizeRowQ8_0 x = 1e-40 ×32 (Amax ≤ 2^-128) → d = $0000, all q = 0, no floating-point exception |
+| UT-GgufQuant-023 | OK |  | 2026-11-21 | T02b1b: QuantizeRowQ8_0 one element +inf → EGgufError; one element NaN ($7FC00000) → EGgufError (class asserted) |
+| UT-GgufQuant-024 | OK |  | 2026-11-21 | T02b1b: round-trip QuantizeRowQ8_0∘DequantizeRow on varied block x = (0.25, −0.75, 127, 5, −5, 0.125, 0×26), D = 1.0: all 32 |y − x| ≤ D/2 + 1 ulp; exact bits el0=+0.0, el1=−1.0 ($BF800000), el2=127 ($42FE0000), el3=5, el4=−5, el5=+0.0 |
+| UT-GgufQuant-025 | OK |  | 2026-11-21 | T02b1b: QuantizeQ8_0 32×127.0 → 34 bytes, d = $3C00, all 32 q = 127; Length 33 → EGgufError naming the length 33 (text asserted) |
+| UT-GgufQuant-026 | OK |  | 2026-11-21 | T02b1b: SingleToFp16 overflow 65536.0 → $7C00, 1.0e10 → $7C00, −1.0e10 → $FC00 (signed infinities), bit-exact |
+| UT-GgufQuant-027 | OK |  | 2026-11-21 | T02b1c (BUG-006): QuantizeRowQ8_0 x = (1.5, −1.25, 0×30), Amax = 1.5 → d = $220C (bytes 0C 22), q[0] = 127, q[1] = −106 (byte $96), remaining 30 bytes 00, byte-exact; fail-before: EGgufError "a non-finite input" on the finite values (Q8_0NonFinite exponent mask $7F → $FF) |
+| UT-GgufQuant-101 | OK |  | 2026-11-21 | T02b2: DequantizeRow(12, 144-byte q4_K block, 256 elements) → all 256 outputs bit-exact (D = 1.0, Mn = 0.5; groups Is = 0..7 covering ScaleMin J < 4 and the J >= 4 high-bit branch; positive and negative min-side results) |
+| UT-GgufQuant-102 | OK |  | 2026-11-21 | T02b2: DequantizeRow(13, 176-byte q5_K block, 256 elements) → all 256 outputs bit-exact (qh FF 55 AA 00 sets the U1 = 4^g / U2 = 2·U1 high bit in each of the four groups and leaves it clear for other L) |
+| UT-GgufQuant-103 | OK |  | 2026-11-21 | T02b2: DequantizeRow(14, 210-byte q6_K block, 256 elements) → all 256 outputs bit-exact (Q1..Q4 all non-trivial, 18 / 20 / −31 / −29 at el0 / el32 / el64 / el96; all 16 int8 scales exercised, incl. negative SC[0] = −2) |

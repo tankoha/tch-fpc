@@ -48,3 +48,10 @@ When a case is run again, do not edit its row; append a new row below (the last 
 | ITa-T01-002 | OK | | 2026-11-21 | Re-run by the harness owner: the type lines of the output equal those of summary.txt (the T01c comparison used `grep '^type\t'`, which matches nothing, so both sides were empty) |
 | ITa-T01-007 | OK | | 2026-11-21 | T01c2 re-run by the harness owner (own build after the BUG-005 fix): exit 1, stdout empty, stderr `error: gguf: bad magic at position 0 (expected "GGUF")` |
 | ITa-T01-008 | OK | BUG-005 | 2026-11-21 | T01c2 re-run by the harness owner (the model cut short by one byte): exit 1, stdout empty, stderr `error: gguf: tensor "blk.23.post_attention_norm.weight" at position 10961854 ends at 532517120, but the file is 532517119 bytes`. The T01c2 run itself tested a UT file, not the model |
+| ITa-T02-001 | OK | - | 2026-11-21 | dequantise f32: diff 0, 133/133 lines |
+| ITa-T02-002 | OK | - | 2026-11-21 | dequantise q8_0: diff 0, 36/36 lines |
+| ITa-T02-003 | OK | - | 2026-11-21 | dequantise q4_K: diff 0, 98/98 lines |
+| ITa-T02-004 | OK | - | 2026-11-21 | dequantise q5_K: diff 0, 36/36 lines |
+| ITa-T02-005 | OK | - | 2026-11-21 | dequantise q6_K: diff 0, 17/17 lines |
+| ITa-T02-006 | OK | - | 2026-11-21 | dequantise, then quantise to Q8_0: diff 0, 284/284 lines |
+| ITa-T02-007 | OK | - | 2026-11-21 | q8_0 re-quantised equals its bytes in the file: diff 0, 36/36 lines |

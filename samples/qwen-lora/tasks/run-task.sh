@@ -31,6 +31,12 @@ for gw in $(pgrep -f 'hermes_cli.main.* gateway run' || true); do
     fi
   done
 done
+# Bedrock (the main agent) needs a live `aws login` session; T01b1 lost a run
+# to an expired one. The identity printed is discarded.
+if ! aws sts get-caller-identity > /dev/null 2>&1; then
+  echo "AWS session expired or missing: run 'aws login', then retry." >&2
+  exit 4
+fi
 # sdlc.bb delegate (pre_tool_call on delegate_task) puts "First read <this
 # file>" at the head of every delegated goal, so the sub-agent reads the task
 # itself instead of the main agent's summary.

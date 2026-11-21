@@ -2,8 +2,8 @@
 
 （[AGENTS.md](AGENTS.md) の日本語訳です。内容が食い違う場合は英語版が正です。）
 
-このプロジェクトは工程と担当モデルを分けて開発する。メインエージェント (Mistral Large 3) と
-サブエージェント (Qwen3.8、`delegate_task` で起動) の両方がこの規約に従う。
+このプロジェクトは工程と担当モデルを分けて開発する。メインエージェント (Bedrock の GPT-OSS-120B。T02 までは Mistral Large 3) と
+サブエージェント (Bedrock の Qwen3 Coder 480B、`delegate_task` で起動。T02 まではローカルの Qwen3.8) の両方がこの規約に従う。
 規約の一部はシェルフック (`sdlc.bb`) が機械的に強制する。フックにブロックされたら、
 回避せずにブロック理由に従うこと。
 
@@ -32,12 +32,12 @@
 
 | 工程 | 担当 | 成果物 |
 |---|---|---|
-| 外部設計 | メイン (Mistral) | `docs/external-design/`、`docs/system-flow/` |
-| ITa / ITb / ST テストケース作成 | メイン (Mistral) | `tests/ita/cases/`、`tests/itb/cases/`、`tests/st/cases/` |
-| 詳細設計 | サブ (Qwen) | `docs/detailed-design/`、`docs/program-flow/` |
-| UT ケース作成・実装・UT 実施 | サブ (Qwen) | `tests/ut/`、`src/`、`test-results/ut.md` |
-| ITa / ITb 実施 | サブ (Qwen) | `test-results/ita.md`、`test-results/itb.md` |
-| ITa / ITb の NG 判定の確定・原因の切り分け | メイン (Mistral) | `docs/defects.md` |
+| 外部設計 | メイン (GPT-OSS) | `docs/external-design/`、`docs/system-flow/` |
+| ITa / ITb / ST テストケース作成 | メイン (GPT-OSS) | `tests/ita/cases/`、`tests/itb/cases/`、`tests/st/cases/` |
+| 詳細設計 | サブ (Qwen Coder) | `docs/detailed-design/`、`docs/program-flow/` |
+| UT ケース作成・実装・UT 実施 | サブ (Qwen Coder) | `tests/ut/`、`src/`、`test-results/ut.md` |
+| ITa / ITb 実施 | サブ (Qwen Coder) | `test-results/ita.md`、`test-results/itb.md` |
+| ITa / ITb の NG 判定の確定・原因の切り分け | メイン (GPT-OSS) | `docs/defects.md` |
 
 - メインは詳細設計以降 (`src/`、`docs/detailed-design/`、`docs/program-flow/`、`tests/ut/`) を
   自分で書かない。必ず `delegate_task` で委任する。
@@ -54,8 +54,8 @@
 - そのタスクの元になる `../../docs/DESIGN.md` の節
 - 完了条件 (どの成果物をどう更新したら完了か)
 
-1 回の委任は 1 ユニットか 1 プログラムに絞る。サブのコンテキストは 128k だが、長い思考で
-埋まる。1 回の委任はタスクファイルの 1 段階にとどめ、タスク全体を渡さない。
+1 回の委任は 1 ユニットか 1 プログラムに絞る。1 回の委任はタスクファイルの 1 段階にとどめ、タスク全体を渡さない。小さな段階は数分で
+終わるが、タスク全体は何時間かけても終わらなかった。
 
 タスクファイル (`tasks/<Txx>.md`) があるとき、フックが委任の goal の先頭に「まず <タスク
 ファイル> を読む」を足す。メイン自身の goal は短くし、タスクファイルの規則を言い換えて書き直さない。
@@ -86,6 +86,11 @@
 - UT のケースは、文字列・名前・パスの入力ごとに、大文字と小文字 (文字どおりに比べる文字列を
   含む)、環境変数やオプションが未設定のときの既定値、絶対パスに加えて裸の名前と相対パス、を
   扱う。行カバレッジ 100% ではこれらは分からない。
+- 書いたばかりのテストが NG のときは、まずその期待値を事実ファイルとケース表に照らす。T02 では、
+  コードではなくテストが誤っていた (126.5 は 127.0 = $42FE0000 に丸まるのに、テストは $42FD0000 だった)。
+  確かめていない原因 (環境、メモリ破壊、精度) は書かない。出力が示すことと「切り分け待ち」を記録する。
+- 数値のケースの期待値は、ケース表に 16 進のビット列 (`$42FE0000`) で書き、テストはそれを写す。
+  テストの中で手で換算しない。
 - テストが OK にならない場合は報告する。可能であれば事象と原因を `docs/defects.md` に記録し、
   結果表の不具合 ID 欄にその ID を書く。書式はスキル `sdlc-defect-record` に従う。
 

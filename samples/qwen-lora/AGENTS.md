@@ -3,7 +3,8 @@
 Japanese version: [AGENTS_jp.md](AGENTS_jp.md). English is canonical.
 
 This project is developed with phases and owners kept apart. The main agent
-(Mistral Large 3) and the sub-agent (Qwen3.8, started with `delegate_task`)
+(GPT-OSS-120B on Bedrock; Mistral Large 3 until T02) and the sub-agent (Qwen3
+Coder 480B on Bedrock, started with `delegate_task`; the local Qwen3.8 until T02)
 both follow these rules. Part of them is enforced by a shell hook
 (`sdlc.bb`). When the hook blocks you, do what the reason says; do not work
 around it.
@@ -42,12 +43,12 @@ re-think.
 
 | Phase | Owner | Output |
 |---|---|---|
-| External design | main (Mistral) | `docs/external-design/`, `docs/system-flow/` |
-| ITa / ITb / ST test cases | main (Mistral) | `tests/ita/cases/`, `tests/itb/cases/`, `tests/st/cases/` |
-| Detailed design | sub (Qwen) | `docs/detailed-design/`, `docs/program-flow/` |
-| UT cases, implementation, UT run | sub (Qwen) | `tests/ut/`, `src/`, `test-results/ut.md` |
-| ITa / ITb run | sub (Qwen) | `test-results/ita.md`, `test-results/itb.md` |
-| Confirming ITa / ITb NG results, isolating the cause | main (Mistral) | `docs/defects.md` |
+| External design | main (GPT-OSS) | `docs/external-design/`, `docs/system-flow/` |
+| ITa / ITb / ST test cases | main (GPT-OSS) | `tests/ita/cases/`, `tests/itb/cases/`, `tests/st/cases/` |
+| Detailed design | sub (Qwen Coder) | `docs/detailed-design/`, `docs/program-flow/` |
+| UT cases, implementation, UT run | sub (Qwen Coder) | `tests/ut/`, `src/`, `test-results/ut.md` |
+| ITa / ITb run | sub (Qwen Coder) | `test-results/ita.md`, `test-results/itb.md` |
+| Confirming ITa / ITb NG results, isolating the cause | main (GPT-OSS) | `docs/defects.md` |
 
 - The main agent does not write anything from detailed design on (`src/`,
   `docs/detailed-design/`, `docs/program-flow/`, `tests/ut/`) itself. It
@@ -68,9 +69,8 @@ The sub-agent knows nothing of the parent's conversation. `goal` and
 - the sections of `../../docs/DESIGN.md` the task is built from
 - the completion condition (which outputs, updated how)
 
-One delegation covers one unit or one program. The sub-agent's context is
-128k tokens, and its long thinking fills it: keep each delegation to a step
-of the task file, not the whole task.
+One delegation covers one unit or one program. Keep each delegation to a step of the task file, not the whole task: small
+steps finish in minutes, a whole task did not finish in hours.
 
 When a task file is given (`tasks/<Txx>.md`), a hook puts "First read <task
 file>" at the head of every delegated goal. Keep your own goal short and do
@@ -109,6 +109,14 @@ the program never printed).
   (and texts compared literally), the default when an environment variable
   or option is not set, and a bare name or relative path as well as an
   absolute one. Line coverage of 100 % does not show these.
+- When a test you have just written fails, first compare its expected value
+  with the facts and the case table: in T02 the test, not the code, was
+  wrong (126.5 rounds to 127.0 = $42FE0000; the test said $42FD0000).
+  Never record a cause you have not shown (environment, memory corruption,
+  precision): record what the output shows and "切り分け待ち" (to be isolated).
+- Expected values of numeric cases are written in the case table as hex
+  bits (`$42FE0000`), and the test copies them; do not convert by hand in
+  the test.
 - A test that does not pass is reported. If possible, record symptom and
   cause in `docs/defects.md` and put the ID in the result table's Defect ID
   column. Format: skill `sdlc-defect-record`.

@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 # Hand one task of DESIGN 8.18 to the Hermes SDLC process (main agent
-# Mistral, sub-agent Qwen) and keep the transcript.
+# GPT-OSS-120B on Bedrock, sub-agent Qwen3 Coder 480B on Bedrock: delegation.*
+# of ~/.hermes/config.yaml) and keep the transcript.
 # Usage: tasks/run-task.sh <Txx>      (reads tasks/<Txx>.md)
 #   TURNS  max turns of the main agent (default 150)
+#   MAIN_MODEL  main agent model id (default openai.gpt-oss-120b-1:0; "config"
+#               uses model.default of ~/.hermes/config.yaml)
+#   MAIN_PROVIDER  its provider (default bedrock)
 # Output: work/tasks/<Txx>-<time>.txt; then run the oracle of the task by hand.
 set -euo pipefail
 proj=$(cd "$(dirname "$0")/.." && pwd)
@@ -53,5 +57,15 @@ trap 'rm -f "$cur"' EXIT
 # Toolsets: no code_execution (execute_code runs Python, which this project
 # forbids; Hermes refused it 21 times in T06 and each refusal cost a re-think).
 # Sub-agents never get tools the main agent lacks.
-hermes chat -Q -t terminal,file,skills,todo,delegation --max-turns "${TURNS:-150}" --in "$proj" -q "$prompt" < /dev/null > "$log" 2>&1 || true
+main_args=()
+main_model=${MAIN_MODEL:-openai.gpt-oss-120b-1:0}
+[ "$main_model" != config ] && main_args=(-m "$main_model" --provider "${MAIN_PROVIDER:-bedrock}")
+hermes chat -Q "${main_args[@]}" -t terminal,file,skills,todo,delegation --max-turns "${TURNS:-150}" --in "$proj" -q "$prompt" < /dev/null > "$log" 2>&1 || true
 echo "$log"
+# On Bedrock both GPT-OSS and Mistral sometimes print a tool call as text
+# (`to=functions.x`, `<|message|>`, `delegate_task{`) instead of making it;
+# the run then ends early. Say so, so the run is not taken as finished.
+if grep -qE 'to=functions\.|<\|message\|>|(delegate_task|write_file|patch|terminal|read_file|search_files)\{"' "$log"; then
+  echo "WARNING: the transcript ends with a tool call printed as text; the run stopped early. Re-run the task." >&2
+  exit 5
+fi

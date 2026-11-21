@@ -4,6 +4,8 @@
 # kcov (lines of src/ only), merges the runs and writes coverage/lcov.info.
 # Test failures do not stop the measurement; they are recorded in
 # test-results/ut.md. A build failure exits non-zero.
+# --skip-solibs: the units of src/ are linked statically; tracing shared
+# libraries (kcov's LD_PRELOAD wrapper) makes tests that load libtorch exit 1.
 #   TCH_LIBTCH  libtch build directory (default: ../../build/libtch, else
 #               ../../build/libtch-rocm)
 set -euo pipefail
@@ -22,7 +24,7 @@ for t in tests/ut/*_test.pas; do
   fpc -Mobjfpc -Sh -gl -gw -O- -vew -l- -Fu"$proj/src" -Fu"$root/src" -Fu"$proj/tests/ut" \
     -FU"$work/units" -Fl"$lib" -k-rpath="$lib" "$t" -o"$work/bin/$name" \
     > "$work/$name.build.log" 2>&1 || { cat "$work/$name.build.log"; exit 1; }
-  kcov --include-path="$proj/src" "$work/kcov/$name" "$work/bin/$name" --all --format=plain \
+  kcov --skip-solibs --include-path="$proj/src" "$work/kcov/$name" "$work/bin/$name" --all --format=plain \
     > "$work/$name.run.log" 2>&1 || echo "$name: tests failed (see work/ut/$name.run.log)"
   runs+=("$work/kcov/$name")
 done

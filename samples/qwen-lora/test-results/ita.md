@@ -55,3 +55,10 @@ When a case is run again, do not edit its row; append a new row below (the last 
 | ITa-T02-005 | OK | - | 2026-11-21 | dequantise q6_K: diff 0, 17/17 lines |
 | ITa-T02-006 | OK | - | 2026-11-21 | dequantise, then quantise to Q8_0: diff 0, 284/284 lines |
 | ITa-T02-007 | OK | - | 2026-11-21 | q8_0 re-quantised equals its bytes in the file: diff 0, 36/36 lines |
+| ITa-T03-001 | OK | - | 2026-11-21 | dequantise f32: diff 0, 133/133 lines |
+| ITa-T03-002 | OK | - | 2026-11-21 | dequantise q8_0: diff 0, 36/36 lines |
+| ITa-T03-003 | OK | - | 2026-11-21 | dequantise q4_K: diff 0, 98/98 lines |
+| ITa-T03-004 | OK | - | 2026-11-21 | dequantise q5_K: diff 0, 36/36 lines |
+| ITa-T03-005 | OK | - | 2026-11-21 | dequantise q6_K: diff 0, 17/17 lines |
+| ITa-T03-006 | OK | - | 2026-11-21 | dequantise, then quantise to Q8_0: diff 0, 284/284 lines |
+| ITa-T03-007 | OK | - | 2026-11-21 | q8_0 re-quantised equals its bytes in the file: diff 0, 36/36 lines |

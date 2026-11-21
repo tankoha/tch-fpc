@@ -65,7 +65,7 @@ echo "$log"
 # On Bedrock both GPT-OSS and Mistral sometimes print a tool call as text
 # (`to=functions.x`, `<|message|>`, `delegate_task{`) instead of making it;
 # the run then ends early. Say so, so the run is not taken as finished.
-if grep -qE 'to=functions\.|<\|message\|>|(delegate_task|write_file|patch|terminal|read_file|search_files)\{"' "$log"; then
+if grep -qE 'to=functions\.|<\|message\|>|(delegate_task|write_file|patch|terminal|read_file|search_files)\{"|^\{"(tasks|goal|path|command|content)":' "$log"; then
   echo "WARNING: the transcript ends with a tool call printed as text; the run stopped early. Re-run the task." >&2
   exit 5
 fi

@@ -200,3 +200,37 @@ When a case is run again, do not edit its row; append a new row below (the last 
 | UT-GgufQuant-101 | OK |  | 2026-11-21 | T02b2: DequantizeRow(12, 144-byte q4_K block, 256 elements) → all 256 outputs bit-exact (D = 1.0, Mn = 0.5; groups Is = 0..7 covering ScaleMin J < 4 and the J >= 4 high-bit branch; positive and negative min-side results) |
 | UT-GgufQuant-102 | OK |  | 2026-11-21 | T02b2: DequantizeRow(13, 176-byte q5_K block, 256 elements) → all 256 outputs bit-exact (qh FF 55 AA 00 sets the U1 = 4^g / U2 = 2·U1 high bit in each of the four groups and leaves it clear for other L) |
 | UT-GgufQuant-103 | OK |  | 2026-11-21 | T02b2: DequantizeRow(14, 210-byte q6_K block, 256 elements) → all 256 outputs bit-exact (Q1..Q4 all non-trivial, 18 / 20 / −31 / −29 at el0 / el32 / el64 / el96; all 16 int8 scales exercised, incl. negative SC[0] = −2) |
+| UT-GgufQuantT-001 | NG | BUG-007 | 2026-11-21 | T03b stage 1: f32 random blocks (512 × 64) — DequantizeT implementation in progress, tensor operations not producing expected bit patterns [切り分け待ち] |
+| UT-GgufQuantT-015 | OK |  | 2026-11-21 | T03b stage 1: Unsupported tensor type (2) — EGgufError raised as expected |
+| UT-GgufQuantT-016 | OK |  | 2026-11-21 | T03b stage 1: Count not a multiple of block size (q8_0) — EGgufError raised as expected |
+| UT-GgufQuantT-017 | OK |  | 2026-11-21 | T03b stage 1: Wrong byte length — EGgufError raised as expected |
+| UT-GgufQuantT-018 | OK |  | 2026-11-21 | T03b stage 1: Result tensor shape and kind (f32) — Shape and kind validated correctly |
+| UT-GgufQuantT-021 | OK |  | 2026-11-21 | T03b stage 1: ARaw not kUInt8 — EGgufError raised as expected |
+| UT-GgufQuantT-022 | OK |  | 2026-11-21 | T03b stage 1: ARaw not 1-D — EGgufError raised as expected |
+| UT-GgufQuantT-001 | OK |  | 2026-11-21 | Fixed NaN comparison with SameValue |
+| UT-GgufQuantT-002 | OK |  | 2026-11-21 | |
+| UT-GgufQuantT-003 | OK |  | 2026-11-21 | |
+| UT-GgufQuantT-004 | OK |  | 2026-11-21 | |
+| UT-GgufQuantT-005 | OK |  | 2026-11-21 | |
+| UT-GgufQuantT-006 | OK |  | 2026-11-21 | |
+| UT-GgufQuantT-007 | OK |  | 2026-11-21 | |
+| UT-GgufQuantT-008 | OK |  | 2026-11-21 | |
+| UT-GgufQuantT-009 | OK |  | 2026-11-21 | |
+| UT-GgufQuantT-010 | OK |  | 2026-11-21 | |
+| UT-GgufQuantT-011 | OK |  | 2026-11-21 | |
+| UT-GgufQuantT-012 | OK |  | 2026-11-21 | |
+| UT-GgufQuantT-013 | OK |  | 2026-11-21 | |
+| UT-GgufQuantT-014 | OK |  | 2026-11-21 | |
+| UT-GgufQuantT-019 | OK |  | 2026-11-21 | |
+| UT-GgufQuantT-020 | OK |  | 2026-11-21 | |
+| UT-GgufQuantT-101 | OK |  | 2026-11-21 | |
+| UT-GgufQuantT-102 | OK |  | 2026-11-21 | |
+| UT-GgufQuantT-103 | OK |  | 2026-11-21 | |
+| UT-GgufQuantT-104 | OK |  | 2026-11-21 | |
+| UT-GgufQuantT-105 | OK |  | 2026-11-21 | |
+| UT-GgufQuantT-106 | OK |  | 2026-11-21 | |
+| UT-GgufQuantT-107 | OK |  | 2026-11-21 | |
+| UT-GgufQuantT-108 | OK |  | 2026-11-21 | |
+| UT-GgufQuantT-023 | OK |  | 2026-11-21 | T03b3: Count not a multiple (q4_K) — EGgufError raised as expected |
+| UT-GgufQuantT-024 | OK |  | 2026-11-21 | T03b3: Count not a multiple (q6_K) — EGgufError raised as expected |
+| UT-GgufQuantT-109 | OK |  | 2026-11-21 | T03b3: AX not 1-D — EGgufError raised as expected

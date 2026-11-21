@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Hand one task of DESIGN 8.18 to the Hermes SDLC process (main agent
-# GPT-OSS-120B on Bedrock, sub-agent Qwen3 Coder 480B on Bedrock: delegation.*
-# of ~/.hermes/config.yaml) and keep the transcript.
+# GLM 5 on Bedrock; the sub-agent is delegation.* of ~/.hermes/config.yaml,
+# since 2026-11-22 GPT-OSS 20B on the local Ollama) and keep the transcript.
 # Usage: tasks/run-task.sh <Txx>      (reads tasks/<Txx>.md)
 #   TURNS  max turns of the main agent (default 150)
-#   MAIN_MODEL  main agent model id (default openai.gpt-oss-120b-1:0; "config"
-#               uses model.default of ~/.hermes/config.yaml)
+#   MAIN_MODEL  main agent model id (default zai.glm-5: from T03 on it reported
+#               honestly, while GPT-OSS-120B and Mistral leaked tool calls as
+#               text; "config" uses model.default of ~/.hermes/config.yaml)
 #   MAIN_PROVIDER  its provider (default bedrock)
 # Output: work/tasks/<Txx>-<time>.txt; then run the oracle of the task by hand.
 set -euo pipefail
@@ -58,7 +59,7 @@ trap 'rm -f "$cur"' EXIT
 # forbids; Hermes refused it 21 times in T06 and each refusal cost a re-think).
 # Sub-agents never get tools the main agent lacks.
 main_args=()
-main_model=${MAIN_MODEL:-openai.gpt-oss-120b-1:0}
+main_model=${MAIN_MODEL:-zai.glm-5}
 [ "$main_model" != config ] && main_args=(-m "$main_model" --provider "${MAIN_PROVIDER:-bedrock}")
 hermes chat -Q "${main_args[@]}" -t terminal,file,skills,todo,delegation --max-turns "${TURNS:-150}" --in "$proj" -q "$prompt" < /dev/null > "$log" 2>&1 || true
 echo "$log"

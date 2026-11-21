@@ -166,6 +166,32 @@ When a case is run again, do not edit its row; append a new row below (the last 
 | UT-InspectCli-009 | OK |  | 2026-11-21 | T01c: bad-magic file → rc 1, `error: gguf: bad magic at position 0 (expected "GGUF")` on stderr, stdout empty |
 | UT-InspectCli-010 | OK |  | 2026-11-21 | T01c: one trailing byte after the data section → all lines on stdout, rc 1, `error: data ends at …` on stderr |
 | UT-InspectCli-011 | OK |  | 2026-11-21 | T01c: n_tensors 0, file size = data offset → rc 0, data_end = data_offset, no type lines |
+| UT-GgufWriter-001 | OK |  | 2026-11-21 | Create, align-32 source |
+| UT-GgufWriter-002 | OK |  | 2026-11-21 | Create, align-64 source |
+| UT-GgufWriter-003 | OK |  | 2026-11-21 | Create, source without tensors |
+| UT-GgufWriter-004 | OK |  | 2026-11-21 | w → Q8_0 |
+| UT-GgufWriter-005 | OK |  | 2026-11-21 | w → Q8_0, then w → q4_K |
+| UT-GgufWriter-006 | OK |  | 2026-11-21 | a → f16 |
+| UT-GgufWriter-007 | OK |  | 2026-11-21 | unknown name `x` |
+| UT-GgufWriter-008 | OK |  | 2026-11-21 | name `W` (upper case) |
+| UT-GgufWriter-009 | OK |  | 2026-11-21 | b → Q8_0 |
+| UT-GgufWriter-010 | OK |  | 2026-11-21 | w → type 99 |
+| UT-GgufWriter-101 | OK |  | 2026-11-21 | 
+| UT-GgufWriter-102 | OK |  | 2026-11-21 | 
+| UT-GgufWriter-103 | OK |  | 2026-11-21 | 
+| UT-GgufWriter-104 | OK |  | 2026-11-21 | 
+| UT-GgufWriter-105 | OK |  | 2026-11-21 | 
+| UT-GgufWriter-106 | OK |  | 2026-11-21 | 
+| UT-GgufWriter-107 | OK |  | 2026-11-21 | 
+| UT-GgufWriter-108 | OK |  | 2026-11-21 | 
+| UT-GgufWriter-109 | OK |  | 2026-11-21 | 
+| UT-GgufWriter-110 | OK |  | 2026-11-21 | 
+| UT-GgufWriter-111 | OK |  | 2026-11-21 | 
+| UT-GgufWriter-112 | OK |  | 2026-11-21 | 
+| UT-GgufWriter-113 | OK |  | 2026-11-21 | 
+| UT-GgufWriter-114 | OK |  | 2026-11-21 | 
+| UT-GgufWriter-115 | OK |  | 2026-11-21 |
+| UT-GgufWriter-116 | OK |  | 2026-11-21 |
 | UT-qlora_inspect-001 | OK |  | 2026-11-21 | T01c: binary with no args → exit 2, usage on stderr, stdout empty (wrapper's AErr loop) |
 | UT-qlora_inspect-002 | OK |  | 2026-11-21 | T01c: binary, valid GGUF, relative path, no flags → exit 0, full stdout block, stderr empty (wrapper's AOut loop) |
 | UT-qlora_inspect-003 | OK |  | 2026-11-21 | T01c: binary, --kv, absolute path with uppercase `.GGUF` ext, mixed-case keys → exit 0, kv lines uint8/uint32 |

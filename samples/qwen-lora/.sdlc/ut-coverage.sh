@@ -6,6 +6,8 @@
 # test-results/ut.md. A build failure exits non-zero.
 # --skip-solibs: the units of src/ are linked statically; tracing shared
 # libraries (kcov's LD_PRELOAD wrapper) makes tests that load libtorch exit 1.
+# -B: rebuild every unit with line info; a stray .ppu next to a source
+# (compiled without -gl) would otherwise drop that unit from the coverage.
 #   TCH_LIBTCH  libtch build directory (default: ../../build/libtch, else
 #               ../../build/libtch-rocm)
 set -euo pipefail
@@ -21,7 +23,7 @@ mkdir -p "$work/units" "$work/bin" "$work/kcov" coverage
 runs=()
 for t in tests/ut/*_test.pas; do
   name=$(basename "$t" .pas)
-  fpc -Mobjfpc -Sh -gl -gw -O- -vew -l- -Fu"$proj/src" -Fu"$root/src" -Fu"$proj/tests/ut" \
+  fpc -B -Mobjfpc -Sh -gl -gw -O- -vew -l- -Fu"$proj/src" -Fu"$root/src" -Fu"$proj/tests/ut" \
     -FU"$work/units" -Fl"$lib" -k-rpath="$lib" "$t" -o"$work/bin/$name" \
     > "$work/$name.build.log" 2>&1 || { cat "$work/$name.build.log"; exit 1; }
   kcov --skip-solibs --include-path="$proj/src" "$work/kcov/$name" "$work/bin/$name" --all --format=plain \

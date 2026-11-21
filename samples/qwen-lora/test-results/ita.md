@@ -62,3 +62,9 @@ When a case is run again, do not edit its row; append a new row below (the last 
 | ITa-T03-005 | OK | - | 2026-11-21 | dequantise q6_K: diff 0, 17/17 lines |
 | ITa-T03-006 | OK | - | 2026-11-21 | dequantise, then quantise to Q8_0: diff 0, 284/284 lines |
 | ITa-T03-007 | OK | - | 2026-11-21 | q8_0 re-quantised equals its bytes in the file: diff 0, 36/36 lines |
+| ITa-T04-001 | OK | - | 2026-11-22 | identity copy of the model: sha256 and size: diff 0, 1/1 lines |
+| ITa-T04-002 | OK | - | 2026-11-22 | planned layout of the copy equals upstream: diff 0, 322/322 lines |
+| ITa-T04-003 | OK | - | 2026-11-22 | identity copy of the projector: sha256 and size: diff 0, 1/1 lines |
+| ITa-T04-004 | OK | - | 2026-11-22 | planned layout after retyping equals upstream: diff 0, 322/322 lines |
+| ITa-T04-005 | OK | - | 2026-11-22 | retyped file: sha256 and size: diff 0, 1/1 lines |
+| ITa-T04-006 | OK | - | 2026-11-22 | upstream reads the retyped file back with that layout: diff 0, 322/322 lines |

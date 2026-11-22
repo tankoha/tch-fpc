@@ -6,7 +6,33 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 Status at a glance of the knowledge-package and fine-tuning work:
 [progress.md](progress.md).
 
-## Local session 13 (2026-11-23): T11 prepared, H43 measured with the prototype — resume here
+## Local session 14 (2026-11-23): T11 done, H43 holds with the agents' code, M1 complete — resume here
+
+**T11 done** (T11a, T11b1–T11b3, T11c through `tasks/run-task.sh`, about
+4 h including the stop below). Each step checked: rebuilt with `-Cr`; the
+implementation of `src/QwenModel.pas` and `src/LogprobsCli.pas` equals the
+prototype in `work/proto/T11/`; UT 26 + 17 rows OK; gate 559/559, line
+coverage 100 % (2600/2600). ITa rerun by the harness owner: ITa-T11-001 0,
+002 1.3e-3, 003 1.4e-3, 004 0 (limits 0, 0.02, 0.02, 0); `T11-run.sh gpu`
+(ITa-T11-101, `--split 12` over cuda:0 / cuda:1 against the CPU) 1.1e-4
+(limit 1e-3). **H43 holds on the rehearsal model with the agents' code.**
+
+**T11a overran its scope.** In the second delegation (the UT case tables,
+no code) the local Qwen sub-agent went on to implement both units and their
+tests (the work of T11b1–T11b3) and spent about 1 h on a hang in its own
+`LogprobsCli_test`, with probe programs in `work/`. Stopped after 2.5 h: the
+code, the tests and `test-results/ut.md` were reverted, the documents and
+case tables kept (checked against the facts), then T11b1–T11b3 ran as
+planned; the hang did not recur (the agents' LogprobsCli UT runs in 5 s).
+Also one rejection by the output contract validator in the first
+delegation, and a resident gateway left by the stopped run had to be
+stopped before T11c. Suggestion for later task files: a delegation with the
+skill `sdlc-ut-tdd` that must not write code says so in the delegation text
+itself ("no source code; stop after the tables"), not only in the task.
+
+**Next:** M2 (T12, T15–T20; H47) and the M4 question of local session 13.
+
+## Local session 13 (2026-11-23): T11 prepared, H43 measured with the prototype
 
 **H43 measured** (DESIGN 8.11 "H43 in detail"; prototype of `QwenModel`
 in `samples/qwen-lora/work/proto/T11/`, git-ignored). Reference: the
@@ -78,7 +104,7 @@ time), with `llama-server` on the Q4_K_M file only as a coarse check
 The gate with the skeletons: 516/516 earlier cases OK; only the two new
 units and their empty test classes are open, as for T10 before T10b1.
 
-**Next:** `tasks/run-task.sh T11a`, then `T11b1`, `T11b2`, `T11b3` (check
+**Next (done, local session 14 above):** `tasks/run-task.sh T11a`, then `T11b1`, `T11b2`, `T11b3` (check
 each: rebuild with `-Cr`, compare the code with `work/proto/T11/`, run the
 gate), then `QLORA_MODEL=<rehearsal GGUF> tasks/run-task.sh T11c` (stop a
 resident Hermes gateway started without `QLORA_MODEL` first) and

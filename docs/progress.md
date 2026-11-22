@@ -7,7 +7,7 @@ The detailed log and the next steps are in [HANDOFF.md](HANDOFF.md);
 decisions and numbers in [DESIGN.md](DESIGN.md). Update this page at the
 end of every session, together with HANDOFF.
 
-Last updated: 2026-11-23, local session 13 (T11 prepared: facts, skeletons, fixtures, ITa; H43 measured with the prototype: 1.3e-3 and top-1 24/24 against llama-server on an F32 copy with an f32 KV cache, while llama-server on the Q4_K_M file itself is off by up to 1.8; resume at T11a). Before: local session 12 (local models compared on H39; Oxygene verified; T07–T10, T13, T14 done).
+Last updated: 2026-11-23, local session 14 (T11 done: UT 559/559 and 100 % line coverage, ITa 0 / 1.3e-3 / 1.4e-3 / 0 and GPU split 1.1e-4; H43 holds with the agents' code; M1 complete; T11a overran its scope and was partly reverted). Before: local session 13 (T11 prepared: facts, skeletons, fixtures, ITa; H43 measured with the prototype: 1.3e-3 and top-1 24/24 against llama-server on an F32 copy with an f32 KV cache, while llama-server on the Q4_K_M file itself is off by up to 1.8). Before that: local session 12 (local models compared on H39; Oxygene verified; T07–T10, T13, T14 done).
 
 ## Goals
 
@@ -36,7 +36,7 @@ Last updated: 2026-11-23, local session 13 (T11 prepared: facts, skeletons, fixt
 | Theme B detailed design (milestones, modules, LoRA, data spec, evaluation) | **done** (design session 10, 2026-11-17); questions answered 2026-11-17; Oxygene (2) closed 2026-11-22 by the arrival of the compiler (Oxygene is compiled and run, in the first run; HANDOFF local session 12) | DESIGN 8.9–8.19, UML 10, HANDOFF design session 10 |
 | Rehearsal model (a small `qwen35` GGUF, Q4_K_M) | **downloaded 2026-11-17**: Qwen3.5 0.8B Q4_K_M (Unsloth) + mmproj BF16 in `build/models/`, sha256 verified; has Q5_K/Q8_0, tied head, no MTP | DESIGN 8.11, HANDOFF question 1 |
 | M0 preconditions (C4, rehearsal model, SDLC skeleton, H50) | **done** (local session 10) | HANDOFF local session 10 |
-| M1 read and reproduce (T01–T11; H46, H43 on the rehearsal model) | **in progress**: T01–T10, T13 and T14 done (2026-11-22), each agrees with its oracle; a task takes 1–3 h without prepared facts, 25–30 min with them (main and sub GLM 5), 60–120 min each for T07, T09 and T14 with the local Qwen as sub-agent, about 2.5 h for T10b1–T10c; T11 prepared (2026-11-23), resume at T11a | DESIGN 8.18, HANDOFF local sessions 11–13 |
+| M1 read and reproduce (T01–T11; H46, H43 on the rehearsal model) | **done** (2026-11-23): T01–T11, T13 and T14, each agrees with its oracle; a task takes 1–3 h without prepared facts, 25–30 min with them (main and sub GLM 5), 60–120 min each for T07, T09 and T14 with the local Qwen as sub-agent, about 2.5 h for T10b1–T10c, about 4 h for T11 | DESIGN 8.18, HANDOFF local sessions 11–14 |
 | M2 train and deploy in small (T12–T20; H47), M2g GPU smoke | not started | DESIGN 8.18 |
 | M3 data set v1, evaluation tasks, baseline evaluation | not started | DESIGN 8.16, 8.17 |
 | M4 27B run, M5 merge / H45 / evaluation | not started (by the user; Qwen is down during M4) | DESIGN 8.11 |
@@ -51,7 +51,7 @@ Last updated: 2026-11-23, local session 13 (T11 prepared: facts, skeletons, fixt
 | H40 | bf16 / fp16 products work and are fast on gfx1201 | **holds**: 100 / 81 TFLOP/s bf16 (XT / 9070); fp32 only 1.6 / 1.3 |
 | H41 | Q4_K / Q6_K dequantisation in tensor ops is correct and fast | **holds**: exact; 3.2 / 4.7 ms per 89 M weights |
 | H42 | one training step fits and runs from one process on two GPUs | **holds**: 36/28 split, 167 tokens/s at T = 1024 (13.1 / 13.9 GiB), 172 at T = 2048 with host offload (14.0 / 14.7 GiB) |
-| H43 | the Pascal forward matches the running model's log-probabilities | **holds on the rehearsal model with the prototype** (2026-11-23): 1.3e-3, top-1 24/24 against llama-server on an F32 copy, f32 KV (on the Q4_K_M file llama-server itself is off by up to 1.8); T11c confirms with the agents' code; 27B at M4: reference open (HANDOFF local session 13) |
+| H43 | the Pascal forward matches the running model's log-probabilities | **holds on the rehearsal model** (2026-11-23, prototype, then the agents' code in T11c): 1.3e-3, top-1 24/24 against llama-server on an F32 copy, f32 KV (on the Q4_K_M file llama-server itself is off by up to 1.8); GPU split against the CPU 1.1e-4; 27B at M4: reference open (HANDOFF local session 13) |
 | H44 | the bundled `llama-server --lora` applies an adapter to `qwen35` | off the plan (design session 10); diagnostic only |
 | H45 | Ollama imports and runs a merged GGUF with Q8_0 tensors | open; required (C1 = D3), at M5 |
 | H46 | a Pascal BPE tokenizer matches `llama-server /tokenize` | **holds** (T05): 2978/2978 records, 260 253 tokens, incl. 2000 random strings |

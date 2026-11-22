@@ -521,3 +521,46 @@ When a case is run again, do not edit its row; append a new row below (the last 
 | UT-QwenBlocks-214 | OK |  | 2026-11-22 | T10b4 stage 4: TLinearBlock blk.0 backward on leaf randn[8,64]: grad shape [8, 64], isfinite.all true |
 | UT-QwenBlocks-215 | OK |  | 2026-11-22 | T10b4 stage 4: LoadBlock blk.0 → 'TLinearBlock', blk.1 → 'TFullBlock' |
 | UT-QwenBlocks-216 | OK |  | 2026-11-22 | T10b4 stage 4 (line coverage): ReadQwenDims on a GGUF lacking qwen35.rope.freq_base raises EQwenBlock 'metadata key missing: qwen35.rope.freq_base' (KeyFloat missing-key branch, the float-key counterpart of 102) |
+| UT-QwenModel-001 | OK |  | 2026-11-23 | T11b1 stage 1: Load TiedPath (CPU, split 0) → TrunkBlocks 2, Split 0, Vocab 274, Tied True, HeadChunk 8192, Dims.Hidden 64 |
+| UT-QwenModel-002 | OK |  | 2026-11-23 | T11b1 stage 1: Load OwnPath → Tied False, Vocab 274 |
+| UT-QwenModel-003 | OK |  | 2026-11-23 | T11b1 stage 1: Load NextPath → ReadQwenDims(G).Blocks 3, TrunkBlockCount(G, ReadQwenDims(G)) 2, M.TrunkBlocks 2 |
+| UT-QwenModel-004 | OK |  | 2026-11-23 | T11b1 stage 1: TrunkBlockCount on opened TiedPath (no model) → 2 (no qwen35.nextn_predict_layers key) |
+| UT-QwenModel-005 | OK |  | 2026-11-23 | T11b1 stage 1: Load(G, Cpu, Cpu, 3) on TiedPath raises EQwenModel 'split 3 outside 0..2' |
+| UT-QwenModel-006 | OK |  | 2026-11-23 | T11b1 stage 1: Load(G, Cpu, Cpu, -1) on TiedPath raises EQwenModel 'split -1 outside 0..2' |
+| UT-QwenModel-007 | OK |  | 2026-11-23 | T11b1 stage 1: Load on NonePath (no token_embd) raises EPackedLinear 'tensor not in the file: token_embd.weight' |
+| UT-QwenModel-008 | OK |  | 2026-11-23 | T11b1 stage 1: Load on BadEmbdPath (token_embd 32 columns) raises EQwenModel 'token_embd.weight must be [vocab, hidden]' |
+| UT-QwenModel-009 | OK |  | 2026-11-23 | T11b1 stage 1: Load on BadOutPath (output.weight 273 rows) raises EQwenModel 'output.weight must be [vocab, hidden]' |
+| UT-QwenModel-010 | OK |  | 2026-11-23 | T11b1 stage 1: Embed([3, 0, 273]) shape [3, 64], each element exact (=0 diff) vs the rows of DequantizeBytes(8, the token_embd.weight bytes, 274 * 64) |
+| UT-QwenModel-011 | OK |  | 2026-11-23 | T11b1 stage 1: Embed(empty) raises EQwenModel 'no token ids' |
+| UT-QwenModel-012 | OK |  | 2026-11-23 | T11b1 stage 1: Embed([274]) raises EQwenModel 'token id 274 outside 0..273' |
+| UT-QwenModel-013 | OK |  | 2026-11-23 | T11b1 stage 1: Embed([5, -1]) raises EQwenModel 'token id -1 outside 0..273' |
+| UT-QwenModel-014 | OK |  | 2026-11-23 | T11b1 stage 1: Stages → Length 2, S[0] 'TLinearBlock', S[1] 'TFullBlock', S[0].Device 'cpu' |
+| UT-QwenModel-015 | OK |  | 2026-11-23 | T11b1 stage 1: Load split 1 then split 2 on one opened G → Split 1 then 2 |
+| UT-QwenModel-016 | OK |  | 2026-11-23 | T11b1 stage 1: HeadChunk := 0 raises EQwenModel 'head chunk must be positive, got 0' |
+| UT-QwenModel-101 | OK |  | 2026-11-23 | T11b2 stage 2: Trunk + Logits vs RefLogits (tied head, Ids [1 5 10 20 40 80 160 273]) → diff < 1e-4 |
+| UT-QwenModel-102 | OK |  | 2026-11-23 | T11b2 stage 2: Trunk + Logits vs RefLogits (own head, Ids [1 5 10 20 40 80 160 273]) → diff < 1e-4 |
+| UT-QwenModel-103 | OK |  | 2026-11-23 | T11b2 stage 2: Trunk + Logits vs RefLogits (NextN file, Ids [1 5 10 20 40 80 160 273]) → diff < 1e-4 |
+| UT-QwenModel-104 | OK |  | 2026-11-23 | T11b2 stage 2: Trunk + Logits vs RefLogits (tied head, 70 tokens I*37 mod 274) → diff < 1e-4 |
+| UT-QwenModel-105 | OK |  | 2026-11-23 | T11b2 stage 2: HeadChunk 100 → HeadChunk 100, shape [8, 274], diff vs the HeadChunk 4096 result < 1e-5 |
+| UT-QwenModel-106 | OK |  | 2026-11-23 | T11b2 stage 2: LastLogProbs(Ids8) → shape [274], RequiresGrad false, diff vs Lp(RefLogits row 7) < 1e-4 |
+| UT-QwenModel-107 | OK |  | 2026-11-23 | T11b2 stage 2: Logits with [3, 32] raises EQwenModel 'H must be [T, 64]' |
+| UT-QwenModel-108 | OK |  | 2026-11-23 | T11b2 stage 2: Logits with [64] raises EQwenModel 'H must be [T, 64]' |
+| UT-QwenModel-109 | OK |  | 2026-11-23 | T11b2 stage 2: backward on leaf X (Embed(Ids8) detach copy, sum(kNone)) → X.grad shape [8, 64], isfinite.all 1.0 |
+| UT-QwenModel-110 | OK |  | 2026-11-23 | T11b2 stage 2: LastLogProbs([5]) → diff vs Lp(RefLogits row 0) < 1e-4 |
+| UT-LogprobsCli-201 | OK |  | 2026-11-23 | T11b3 stage 3: TopLine('a"b', 3, [5 7], [-0.5 -1.25]) → exact `{"id":"a\"b","n":3,"top":[{"id":5,"logprob":-0.5000000},{"id":7,"logprob":-1.2500000}]}` |
+| UT-LogprobsCli-202 | OK |  | 2026-11-23 | T11b3 stage 3: no arguments → exit 2, 'qlora_logprobs: MODEL and FILE expected' + usage line, out empty |
+| UT-LogprobsCli-203 | OK |  | 2026-11-23 | T11b3 stage 3: --top without a value → exit 2, reason '--top needs a value', usage line |
+| UT-LogprobsCli-204 | OK |  | 2026-11-23 | T11b3 stage 3: --top 0 → exit 2, reason '--top must be 1..100, got 0', usage line |
+| UT-LogprobsCli-205 | OK |  | 2026-11-23 | T11b3 stage 3: --top 101 → exit 2, reason '--top must be 1..100, got 101', usage line |
+| UT-LogprobsCli-206 | OK |  | 2026-11-23 | T11b3 stage 3: --split x → exit 2, reason '--split must be 0..1000, got x', usage line |
+| UT-LogprobsCli-207 | OK |  | 2026-11-23 | T11b3 stage 3: --TOP (case) → exit 2, reason 'unknown option --TOP', usage line |
+| UT-LogprobsCli-208 | OK |  | 2026-11-23 | T11b3 stage 3: one positional argument → exit 2, reason 'MODEL and FILE expected', usage line |
+| UT-LogprobsCli-209 | OK |  | 2026-11-23 | T11b3 stage 3: --top 3 → exit 0, E empty, 3 lines, O[0] = Want('a', [5 17 2], 3), O[1] = Want('2', [8], 3) (no id → its line number) |
+| UT-LogprobsCli-210 | OK |  | 2026-11-23 | T11b3 stage 3: text record → O[2] = Want('t', Encode('hello world'), 3) |
+| UT-LogprobsCli-211 | OK |  | 2026-11-23 | T11b3 stage 3: default top → exit 0, 3 lines, 20 "logprob" occurrences each |
+| UT-LogprobsCli-212 | OK |  | 2026-11-23 | T11b3 stage 3: 'x' → exit 1, 'qlora_logprobs: line 1: not JSON (Error at line 1, Pos 1: Unexpected token (x) encountered.)' |
+| UT-LogprobsCli-213 | OK |  | 2026-11-23 | T11b3 stage 3: [1, 2] → exit 1, 'qlora_logprobs: line 1: not an object' |
+| UT-LogprobsCli-214 | OK |  | 2026-11-23 | T11b3 stage 3: {"id": "x"} → exit 1, 'qlora_logprobs: line 1: needs "tokens" (array) or "text" (string)' |
+| UT-LogprobsCli-215 | OK |  | 2026-11-23 | T11b3 stage 3: model file TinyPath.missing → exit 1, 'qlora_logprobs: Unable to open file "<TinyPath>.missing": No such file or directory' |
+| UT-LogprobsCli-216 | OK |  | 2026-11-23 | T11b3 stage 3: {"tokens": [274]} → exit 1, 'qlora_logprobs: token id 274 outside 0..273' |
+| UT-LogprobsCli-217 | OK |  | 2026-11-23 | T11b3 stage 3: --split 1 (the GPUs are hidden) → exit 1, no output, 'qlora_logprobs: No CUDA GPUs are available' |

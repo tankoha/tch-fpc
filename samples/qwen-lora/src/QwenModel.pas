@@ -56,55 +56,150 @@ function TrunkBlockCount(G: TGgufFile; const D: TQwenDims): Integer;
 implementation
 
 function TrunkBlockCount(G: TGgufFile; const D: TQwenDims): Integer;
+var
+  I: Integer;
 begin
-  Result := 0;
-  raise EQwenModel.Create('TrunkBlockCount: not implemented yet');
+  Result := D.Blocks;
+  I := G.FindKey('qwen35.nextn_predict_layers');
+  if I >= 0 then
+    Result := D.Blocks - G.KV[I].IntVal;
 end;
 
 constructor TQwenModel.Load(G: TGgufFile; const ADevice0, ADevice1: TDevice; ASplit: Integer);
+var
+  D: TInt64Array;
+  I: Integer;
 begin
   inherited Create;
-  raise EQwenModel.Create('TQwenModel.Load: not implemented yet');
-end;
-
-destructor TQwenModel.Destroy;
-begin
-  inherited Destroy;
+  FDims := ReadQwenDims(G);
+  FTrunk := TrunkBlockCount(G, FDims);
+  if (ASplit < 0) or (ASplit > FTrunk) then
+    raise EQwenModel.CreateFmt('split %d outside 0..%d', [ASplit, FTrunk]);
+  FSplit := ASplit;
+  FDevice0 := ADevice0;
+  FDevice1 := ADevice1;
+  FEmbRaw := TensorRaw(G, 'token_embd.weight', ADevice0, FEmbType, D);
+  if (Length(D) <> 2) or (D[1] <> FDims.Hidden) then
+    raise EQwenModel.Create('token_embd.weight must be [vocab, hidden]');
+  FVocab := D[0];
+  FRowBytes := GgufTensorBytes(FEmbType, [QWord(FDims.Hidden)]);
+  SetLength(FBlocks, FTrunk);
+  for I := 0 to FTrunk - 1 do
+    if I < ASplit then
+      FBlocks[I] := LoadBlock(G, I, FDims, ADevice0)
+    else
+      FBlocks[I] := LoadBlock(G, I, FDims, ADevice1);
+  FOutNorm := LoadDense(G, 'output_norm.weight', ADevice1);
+  FTied := G.FindTensor('output.weight') < 0;
+  if FTied then
+  begin
+    FHeadRaw := FEmbRaw.&to(ADevice1);
+    FHeadType := FEmbType;
+  end
+  else
+  begin
+    FHeadRaw := TensorRaw(G, 'output.weight', ADevice1, FHeadType, D);
+    if (Length(D) <> 2) or (D[0] <> FVocab) or (D[1] <> FDims.Hidden) then
+      raise EQwenModel.Create('output.weight must be [vocab, hidden]');
+  end;
+  FHeadRowBytes := GgufTensorBytes(FHeadType, [QWord(FDims.Hidden)]);
+  FHeadChunk := HeadChunkRows;
 end;
 
 procedure TQwenModel.SetHeadChunk(AValue: Int64);
 begin
-  raise EQwenModel.Create('TQwenModel.SetHeadChunk: not implemented yet');
+  if AValue < 1 then
+    raise EQwenModel.CreateFmt('head chunk must be positive, got %d', [AValue]);
+  FHeadChunk := AValue;
+end;
+
+destructor TQwenModel.Destroy;
+var
+  I: Integer;
+begin
+  for I := 0 to High(FBlocks) do
+    FBlocks[I].Free;
+  inherited Destroy;
 end;
 
 function TQwenModel.Embed(const AIds: array of Integer): TTensor;
+var
+  Ids: array of Int64;
+  I: Integer;
+  Rows: TTensor;
 begin
-  Result := Default(TTensor);
-  raise EQwenModel.Create('TQwenModel.Embed: not implemented yet');
+  if Length(AIds) = 0 then
+    raise EQwenModel.Create('no token ids');
+  Ids := nil;
+  SetLength(Ids, Length(AIds));
+  for I := 0 to High(AIds) do
+  begin
+    if (AIds[I] < 0) or (AIds[I] >= FVocab) then
+      raise EQwenModel.CreateFmt('token id %d outside 0..%d', [AIds[I], FVocab - 1]);
+    Ids[I] := AIds[I];
+  end;
+  Rows := FEmbRaw.view([FVocab, FRowBytes])
+    .index_select(0, TTensor.FromArray(Ids).&to(FDevice0)).reshape([-1]);
+  Result := DequantizeT(Rows, FEmbType, Length(AIds) * FDims.Hidden)
+    .view([Length(AIds), FDims.Hidden]);
 end;
 
 function TQwenModel.Stages: TStageArray;
+var
+  I: Integer;
 begin
   Result := nil;
-  raise EQwenModel.Create('TQwenModel.Stages: not implemented yet');
+  SetLength(Result, FTrunk);
+  for I := 0 to FTrunk - 1 do
+    Result[I] := FBlocks[I];
 end;
 
 function TQwenModel.Trunk(const X: TTensor): TTensor;
+var
+  I: Integer;
 begin
-  Result := Default(TTensor);
-  raise EQwenModel.Create('TQwenModel.Trunk: not implemented yet');
+  Result := X;
+  for I := 0 to FTrunk - 1 do
+    Result := FBlocks[I].Forward(Result.&to(FBlocks[I].Device));
+  Result := Result.&to(FDevice1);
 end;
 
 function TQwenModel.Logits(const H: TTensor): TTensor;
+var
+  N, W: TTensor;
+  Parts: array of TTensor;
+  R0, Rows: Int64;
+  K: Integer;
 begin
-  Result := Default(TTensor);
-  raise EQwenModel.Create('TQwenModel.Logits: not implemented yet');
+  if (H.Dim <> 2) or (H.Shape[1] <> FDims.Hidden) then
+    raise EQwenModel.CreateFmt('H must be [T, %d]', [FDims.Hidden]);
+  N := RmsNorm(H.&to(FDevice1), FOutNorm, FDims.Eps);
+  Parts := nil;
+  SetLength(Parts, (FVocab + FHeadChunk - 1) div FHeadChunk);
+  R0 := 0;
+  K := 0;
+  while R0 < FVocab do
+  begin
+    Rows := FVocab - R0;
+    if Rows > FHeadChunk then
+      Rows := FHeadChunk;
+    W := DequantizeT(FHeadRaw.narrow(0, R0 * FHeadRowBytes, Rows * FHeadRowBytes),
+      FHeadType, Rows * FDims.Hidden).view([Rows, FDims.Hidden]);
+    Parts[K] := N.mm(W.t);
+    Inc(K);
+    Inc(R0, Rows);
+  end;
+  Result := TTensor.cat(Parts, 1);
 end;
 
 function TQwenModel.LastLogProbs(const AIds: array of Integer): TTensor;
+var
+  G: IInterface;
+  H: TTensor;
 begin
-  Result := Default(TTensor);
-  raise EQwenModel.Create('TQwenModel.LastLogProbs: not implemented yet');
+  G := NoGradGuard;
+  H := Trunk(Embed(AIds));
+  Result := Logits(H.narrow(0, Length(AIds) - 1, 1)).log_softmax(-1).view([FVocab]);
 end;
 
 end.

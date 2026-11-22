@@ -27,6 +27,32 @@ type
     { Opens APath and loads the model on the CPU (split 0). }
     class function LoadCpu(const APath: string; out G: TGgufFile): TQwenModel; static;
   published
+    procedure TestUT_QwenModel_001;
+    procedure TestUT_QwenModel_002;
+    procedure TestUT_QwenModel_003;
+    procedure TestUT_QwenModel_004;
+    procedure TestUT_QwenModel_005;
+    procedure TestUT_QwenModel_006;
+    procedure TestUT_QwenModel_007;
+    procedure TestUT_QwenModel_008;
+    procedure TestUT_QwenModel_009;
+    procedure TestUT_QwenModel_010;
+    procedure TestUT_QwenModel_011;
+    procedure TestUT_QwenModel_012;
+    procedure TestUT_QwenModel_013;
+    procedure TestUT_QwenModel_014;
+    procedure TestUT_QwenModel_015;
+    procedure TestUT_QwenModel_016;
+    procedure TestUT_QwenModel_101;
+    procedure TestUT_QwenModel_102;
+    procedure TestUT_QwenModel_103;
+    procedure TestUT_QwenModel_104;
+    procedure TestUT_QwenModel_105;
+    procedure TestUT_QwenModel_106;
+    procedure TestUT_QwenModel_107;
+    procedure TestUT_QwenModel_108;
+    procedure TestUT_QwenModel_109;
+    procedure TestUT_QwenModel_110;
   end;
 
 const
@@ -84,6 +110,518 @@ begin
     if ShapeText(L) <> Format('[%d, 274]', [Length(AIds)]) then
       raise Exception.Create('shape ' + ShapeText(L));
     Result := TQwenModelTest.DiffArr(TQwenModelTest.Arr(L), RefLogits(G, RefDims(G), AIds));
+  finally
+    M.Free;
+    G.Free;
+  end;
+end;
+
+{ The log-softmax of the ARow'th row of R (AVocab values wide), computed in
+  Double per the case table: R[t, j] - max - Ln(Σ exp(R[t, k] - max)). }
+function Lp(const R: TDoubleArray; ARow, AVocab: Integer): TDoubleArray;
+var
+  I: Integer;
+  Mx, S: Double;
+begin
+  Mx := -Infinity;
+  for I := 0 to AVocab - 1 do
+    Mx := Max(Mx, R[ARow * AVocab + I]);
+  S := 0;
+  for I := 0 to AVocab - 1 do
+    S := S + Exp(R[ARow * AVocab + I] - Mx);
+  Result := nil;
+  SetLength(Result, AVocab);
+  for I := 0 to AVocab - 1 do
+    Result[I] := R[ARow * AVocab + I] - Mx - Ln(S);
+end;
+
+{ UT-QwenModel-001: Load, tied head. }
+procedure TQwenModelTest.TestUT_QwenModel_001;
+var
+  G: TGgufFile;
+  M: TQwenModel;
+begin
+  M := LoadCpu(TiedPath, G);
+  try
+    AssertEquals(2, M.TrunkBlocks);
+    AssertEquals(0, M.Split);
+    AssertEquals(274, M.Vocab);
+    AssertTrue(M.Tied);
+    AssertEquals(8192, M.HeadChunk);
+    AssertEquals(64, M.Dims.Hidden);
+  finally
+    M.Free;
+    G.Free;
+  end;
+end;
+
+{ UT-QwenModel-002: Load, own head. }
+procedure TQwenModelTest.TestUT_QwenModel_002;
+var
+  G: TGgufFile;
+  M: TQwenModel;
+begin
+  M := LoadCpu(OwnPath, G);
+  try
+    AssertFalse(M.Tied);
+    AssertEquals(274, M.Vocab);
+  finally
+    M.Free;
+    G.Free;
+  end;
+end;
+
+{ UT-QwenModel-003: Load, NextN file. }
+procedure TQwenModelTest.TestUT_QwenModel_003;
+var
+  G: TGgufFile;
+  M: TQwenModel;
+  D: TQwenDims;
+begin
+  M := LoadCpu(NextPath, G);
+  try
+    D := ReadQwenDims(G);
+    AssertEquals(3, D.Blocks);
+    AssertEquals(2, TrunkBlockCount(G, ReadQwenDims(G)));
+    AssertEquals(2, M.TrunkBlocks);
+  finally
+    M.Free;
+    G.Free;
+  end;
+end;
+
+{ UT-QwenModel-004: TrunkBlockCount on an opened file, no model. }
+procedure TQwenModelTest.TestUT_QwenModel_004;
+var
+  G: TGgufFile;
+begin
+  G := TGgufFile.Open(TiedPath);
+  try
+    AssertEquals(2, TrunkBlockCount(G, ReadQwenDims(G)));
+  finally
+    G.Free;
+  end;
+end;
+
+{ UT-QwenModel-005: Load, split 3. }
+procedure TQwenModelTest.TestUT_QwenModel_005;
+var
+  G: TGgufFile;
+begin
+  G := TGgufFile.Open(TiedPath);
+  try
+    try
+      TQwenModel.Load(G, TDevice.Cpu, TDevice.Cpu, 3);
+      Fail('no EQwenModel');
+    except
+      on E: EQwenModel do
+        AssertEquals('split 3 outside 0..2', E.Message);
+    end;
+  finally
+    G.Free;
+  end;
+end;
+
+{ UT-QwenModel-006: Load, split -1. }
+procedure TQwenModelTest.TestUT_QwenModel_006;
+var
+  G: TGgufFile;
+begin
+  G := TGgufFile.Open(TiedPath);
+  try
+    try
+      TQwenModel.Load(G, TDevice.Cpu, TDevice.Cpu, -1);
+      Fail('no EQwenModel');
+    except
+      on E: EQwenModel do
+        AssertEquals('split -1 outside 0..2', E.Message);
+    end;
+  finally
+    G.Free;
+  end;
+end;
+
+{ UT-QwenModel-007: Load, no token_embd. }
+procedure TQwenModelTest.TestUT_QwenModel_007;
+var
+  G: TGgufFile;
+begin
+  G := TGgufFile.Open(NonePath);
+  try
+    try
+      TQwenModel.Load(G, TDevice.Cpu, TDevice.Cpu, 0);
+      Fail('no EPackedLinear');
+    except
+      on E: EPackedLinear do
+        AssertEquals('tensor not in the file: token_embd.weight', E.Message);
+    end;
+  finally
+    G.Free;
+  end;
+end;
+
+{ UT-QwenModel-008: Load, bad embedding shape. }
+procedure TQwenModelTest.TestUT_QwenModel_008;
+var
+  G: TGgufFile;
+begin
+  G := TGgufFile.Open(BadEmbdPath);
+  try
+    try
+      TQwenModel.Load(G, TDevice.Cpu, TDevice.Cpu, 0);
+      Fail('no EQwenModel');
+    except
+      on E: EQwenModel do
+        AssertEquals('token_embd.weight must be [vocab, hidden]', E.Message);
+    end;
+  finally
+    G.Free;
+  end;
+end;
+
+{ UT-QwenModel-009: Load, bad output shape. }
+procedure TQwenModelTest.TestUT_QwenModel_009;
+var
+  G: TGgufFile;
+begin
+  G := TGgufFile.Open(BadOutPath);
+  try
+    try
+      TQwenModel.Load(G, TDevice.Cpu, TDevice.Cpu, 0);
+      Fail('no EQwenModel');
+    except
+      on E: EQwenModel do
+        AssertEquals('output.weight must be [vocab, hidden]', E.Message);
+    end;
+  finally
+    G.Free;
+  end;
+end;
+
+{ UT-QwenModel-010: Embed, exact rows. }
+procedure TQwenModelTest.TestUT_QwenModel_010;
+var
+  G: TGgufFile;
+  M: TQwenModel;
+  E: TTensor;
+  Bytes: TBytes;
+  Ref: TSingleArray;
+  Got: TDoubleArray;
+  Ids: array of Integer;
+  K, C: Integer;
+begin
+  M := LoadCpu(TiedPath, G);
+  try
+    Ids := [3, 0, 273];
+    E := M.Embed(Ids);
+    AssertEquals('[3, 64]', ShapeText(E));
+    G.ReadTensorBytes(G.FindTensor('token_embd.weight'), Bytes);
+    Ref := DequantizeBytes(8, Bytes, 274 * 64);
+    Got := Arr(E);
+    for K := 0 to 2 do
+      for C := 0 to 63 do
+        AssertEquals(0.0, Got[K * 64 + C] - Double(Ref[Ids[K] * 64 + C]), 0.0);
+  finally
+    M.Free;
+    G.Free;
+  end;
+end;
+
+{ UT-QwenModel-011: Embed, empty array. }
+procedure TQwenModelTest.TestUT_QwenModel_011;
+var
+  G: TGgufFile;
+  M: TQwenModel;
+  Empty: array of Integer;
+begin
+  M := LoadCpu(TiedPath, G);
+  try
+    try
+      M.Embed(Empty);
+      Fail('no EQwenModel');
+    except
+      on E: EQwenModel do
+        AssertEquals('no token ids', E.Message);
+    end;
+  finally
+    M.Free;
+    G.Free;
+  end;
+end;
+
+{ UT-QwenModel-012: Embed, id 274. }
+procedure TQwenModelTest.TestUT_QwenModel_012;
+var
+  G: TGgufFile;
+  M: TQwenModel;
+begin
+  M := LoadCpu(TiedPath, G);
+  try
+    try
+      M.Embed([274]);
+      Fail('no EQwenModel');
+    except
+      on E: EQwenModel do
+        AssertEquals('token id 274 outside 0..273', E.Message);
+    end;
+  finally
+    M.Free;
+    G.Free;
+  end;
+end;
+
+{ UT-QwenModel-013: Embed, id -1. }
+procedure TQwenModelTest.TestUT_QwenModel_013;
+var
+  G: TGgufFile;
+  M: TQwenModel;
+begin
+  M := LoadCpu(TiedPath, G);
+  try
+    try
+      M.Embed([5, -1]);
+      Fail('no EQwenModel');
+    except
+      on E: EQwenModel do
+        AssertEquals('token id -1 outside 0..273', E.Message);
+    end;
+  finally
+    M.Free;
+    G.Free;
+  end;
+end;
+
+{ UT-QwenModel-014: Stages. }
+procedure TQwenModelTest.TestUT_QwenModel_014;
+var
+  G: TGgufFile;
+  M: TQwenModel;
+  S: TStageArray;
+begin
+  M := LoadCpu(TiedPath, G);
+  try
+    S := M.Stages;
+    AssertEquals(2, Length(S));
+    AssertEquals('TLinearBlock', S[0].ClassName);
+    AssertEquals('TFullBlock', S[1].ClassName);
+    AssertEquals('cpu', S[0].Device.ToString);
+  finally
+    M.Free;
+    G.Free;
+  end;
+end;
+
+{ UT-QwenModel-015: Load, split 1 and 2 on one file. }
+procedure TQwenModelTest.TestUT_QwenModel_015;
+var
+  G: TGgufFile;
+  M1, M2: TQwenModel;
+begin
+  G := TGgufFile.Open(TiedPath);
+  try
+    M1 := TQwenModel.Load(G, TDevice.Cpu, TDevice.Cpu, 1);
+    try
+      AssertEquals(1, M1.Split);
+    finally
+      M1.Free;
+    end;
+    M2 := TQwenModel.Load(G, TDevice.Cpu, TDevice.Cpu, 2);
+    try
+      AssertEquals(2, M2.Split);
+    finally
+      M2.Free;
+    end;
+  finally
+    G.Free;
+  end;
+end;
+
+{ UT-QwenModel-016: HeadChunk 0. }
+procedure TQwenModelTest.TestUT_QwenModel_016;
+var
+  G: TGgufFile;
+  M: TQwenModel;
+begin
+  M := LoadCpu(TiedPath, G);
+  try
+    try
+      M.HeadChunk := 0;
+      Fail('no EQwenModel');
+    except
+      on E: EQwenModel do
+        AssertEquals('head chunk must be positive, got 0', E.Message);
+    end;
+  finally
+    M.Free;
+    G.Free;
+  end;
+end;
+
+{ UT-QwenModel-101: Trunk + Logits vs the scalar oracle, tied head. }
+procedure TQwenModelTest.TestUT_QwenModel_101;
+var
+  D: Double;
+begin
+  D := LogitsDiff(TiedPath, Ids8);
+  AssertTrue(Format('diff %.3e', [D]), D <= 1e-4);
+end;
+
+{ UT-QwenModel-102: Trunk + Logits vs the scalar oracle, own head. }
+procedure TQwenModelTest.TestUT_QwenModel_102;
+var
+  D: Double;
+begin
+  D := LogitsDiff(OwnPath, Ids8);
+  AssertTrue(Format('diff %.3e', [D]), D <= 1e-4);
+end;
+
+{ UT-QwenModel-103: Trunk + Logits vs the scalar oracle, NextN file. }
+procedure TQwenModelTest.TestUT_QwenModel_103;
+var
+  D: Double;
+begin
+  D := LogitsDiff(NextPath, Ids8);
+  AssertTrue(Format('diff %.3e', [D]), D <= 1e-4);
+end;
+
+{ UT-QwenModel-104: Trunk + Logits vs the oracle, 70 tokens (two delta-rule chunks). }
+procedure TQwenModelTest.TestUT_QwenModel_104;
+var
+  D: Double;
+  Ids: array of Integer;
+  I: Integer;
+begin
+  Ids := nil;
+  SetLength(Ids, 70);
+  for I := 0 to High(Ids) do
+    Ids[I] := I * 37 mod 274;
+  D := LogitsDiff(TiedPath, Ids);
+  AssertTrue(Format('diff %.3e', [D]), D <= 1e-4);
+end;
+
+{ UT-QwenModel-105: HeadChunk 100: three chunks (100, 100, 74). }
+procedure TQwenModelTest.TestUT_QwenModel_105;
+var
+  G: TGgufFile;
+  M: TQwenModel;
+  H, A, B: TTensor;
+  D: Double;
+begin
+  M := LoadCpu(TiedPath, G);
+  try
+    H := M.Trunk(M.Embed(Ids8));
+    A := M.Logits(H);
+    M.HeadChunk := 100;
+    AssertEquals(100, M.HeadChunk);
+    B := M.Logits(H);
+    AssertEquals('[8, 274]', ShapeText(B));
+    D := DiffArr(Arr(A), Arr(B));
+    AssertTrue(Format('diff %.3e', [D]), D <= 1e-5);
+  finally
+    M.Free;
+    G.Free;
+  end;
+end;
+
+{ UT-QwenModel-106: LastLogProbs vs the oracle's row 7, tied head. }
+procedure TQwenModelTest.TestUT_QwenModel_106;
+var
+  G: TGgufFile;
+  M: TQwenModel;
+  LPt: TTensor;
+  R: TDoubleArray;
+  D: Double;
+begin
+  M := LoadCpu(TiedPath, G);
+  try
+    LPt := M.LastLogProbs(Ids8);
+    AssertEquals('[274]', ShapeText(LPt));
+    AssertFalse(LPt.RequiresGrad);
+    R := RefLogits(G, RefDims(G), Ids8);
+    D := DiffArr(Arr(LPt), Lp(R, 7, 274));
+    AssertTrue(Format('diff %.3e', [D]), D <= 1e-4);
+  finally
+    M.Free;
+    G.Free;
+  end;
+end;
+
+{ UT-QwenModel-107: Logits, H not [T, Hidden]. }
+procedure TQwenModelTest.TestUT_QwenModel_107;
+var
+  G: TGgufFile;
+  M: TQwenModel;
+begin
+  M := LoadCpu(TiedPath, G);
+  try
+    try
+      M.Logits(TTensor.zeros([3, 32]));
+      Fail('no EQwenModel');
+    except
+      on E: EQwenModel do
+        AssertEquals('H must be [T, 64]', E.Message);
+    end;
+  finally
+    M.Free;
+    G.Free;
+  end;
+end;
+
+{ UT-QwenModel-108: Logits, H 1-D. }
+procedure TQwenModelTest.TestUT_QwenModel_108;
+var
+  G: TGgufFile;
+  M: TQwenModel;
+begin
+  M := LoadCpu(TiedPath, G);
+  try
+    try
+      M.Logits(TTensor.zeros([64]));
+      Fail('no EQwenModel');
+    except
+      on E: EQwenModel do
+        AssertEquals('H must be [T, 64]', E.Message);
+    end;
+  finally
+    M.Free;
+    G.Free;
+  end;
+end;
+
+{ UT-QwenModel-109: backward through the whole model. }
+procedure TQwenModelTest.TestUT_QwenModel_109;
+var
+  G: TGgufFile;
+  M: TQwenModel;
+  X: TTensor;
+begin
+  M := LoadCpu(TiedPath, G);
+  try
+    X := M.Embed(Ids8).detach.Copy.requires_grad_(True);
+    M.Logits(M.Trunk(X)).sum(kNone).Backward;
+    AssertEquals('[8, 64]', ShapeText(X.grad));
+    AssertTrue('grad finite', X.grad.isfinite.all.DoubleValue([]) = 1.0);
+  finally
+    M.Free;
+    G.Free;
+  end;
+end;
+
+{ UT-QwenModel-110: LastLogProbs with a single token. }
+procedure TQwenModelTest.TestUT_QwenModel_110;
+var
+  G: TGgufFile;
+  M: TQwenModel;
+  LPt: TTensor;
+  R: TDoubleArray;
+  D: Double;
+begin
+  M := LoadCpu(TiedPath, G);
+  try
+    LPt := M.LastLogProbs([5]);
+    R := RefLogits(G, RefDims(G), [5]);
+    D := DiffArr(Arr(LPt), Lp(R, 0, 274));
+    AssertTrue(Format('diff %.3e', [D]), D <= 1e-4);
   finally
     M.Free;
     G.Free;

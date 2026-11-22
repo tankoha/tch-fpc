@@ -110,3 +110,7 @@ When a case is run again, do not edit its row; append a new row below (the last 
 | ITa-T10-003 | OK | - | 2026-11-22 | tiny model, T 70: 2 key / 4 value SSM heads (tiling), 4 query / 2 KV heads (GQA): value 2.4E-006, limit 1.0E-004 |
 | ITa-T10-004 | OK | - | 2026-11-22 | rehearsal blocks 0-3 chained, T 16, against the scalar chain: value 8.9E-007, limit 1.0E-004 |
 | ITa-T10-005 | OK | - | 2026-11-22 | rehearsal blocks 0-3 as Recompute stages: dL/dX0 against an ordinary backward (max |grad| 4.15): value 0.0E+000, limit 1.0E-005 |
+| ITa-T11-001 | OK | - | 2026-11-23 | value 0.0E+000, limit 0.0E+000 |
+| ITa-T11-002 | OK | - | 2026-11-23 | value 1.3E-003, limit 2.0E-002 |
+| ITa-T11-003 | OK | - | 2026-11-23 | value 1.4E-003, limit 2.0E-002 |
+| ITa-T11-004 | OK | - | 2026-11-23 | value 0.0E+000, limit 0.0E+000 |

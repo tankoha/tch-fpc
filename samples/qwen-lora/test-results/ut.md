@@ -381,4 +381,25 @@ When a case is run again, do not edit its row; append a new row below (the last 
 | UT-DeltaRule-117 | OK |  | 2026-11-22 |
 | UT-DeltaRule-118 | OK |  | 2026-11-22 |
 | UT-DeltaRule-119 | OK |  | 2026-11-22 |
-| UT-DeltaRule-120 | OK |  | 2026-11-22 |
+| UT-DeltaRule-120 | OK |  | 2026-11-22 | |
+| UT-Recompute-001 | OK |  | 2026-11-22 | |
+| UT-Recompute-002 | OK |  | 2026-11-22 | |
+| UT-Recompute-003 | OK |  | 2026-11-22 | |
+| UT-Recompute-004 | OK |  | 2026-11-22 | |
+| UT-Recompute-005 | OK |  | 2026-11-22 | |
+| UT-Recompute-006 | OK |  | 2026-11-22 | |
+| UT-Recompute-007 | OK |  | 2026-11-22 | |
+| UT-Recompute-008 | OK |  | 2026-11-22 | |
+| UT-Recompute-009 | OK |  | 2026-11-22 | |
+| UT-Recompute-010 | OK |  | 2026-11-22 | |
+| UT-Recompute-011 | OK |  | 2026-11-22 | |
+| UT-Recompute-012 | OK |  | 2026-11-22 | |
+| UT-Recompute-013 | OK |  | 2026-11-22 | |
+| UT-Recompute-101 | OK |  | 2026-11-22 | |
+| UT-Recompute-102 | OK |  | 2026-11-22 | |
+| UT-Recompute-103 | OK |  | 2026-11-22 | |
+| UT-Recompute-104 | OK |  | 2026-11-22 | |
+| UT-Recompute-105 | OK |  | 2026-11-22 | |
+| UT-Recompute-106 | OK |  | 2026-11-22 | |
+| UT-Recompute-107 | OK |  | 2026-11-22 | |
+| UT-Recompute-108 | OK |  | 2026-11-22 | |

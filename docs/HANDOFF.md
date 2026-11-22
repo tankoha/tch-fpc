@@ -6,7 +6,7 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 Status at a glance of the knowledge-package and fine-tuning work:
 [progress.md](progress.md).
 
-## Local session 12 (2026-11-22): local models compared, Oxygene compiler verified, T08 done — resume here
+## Local session 12 (2026-11-22): local models compared, Oxygene compiler verified, T08 and T13 done — resume here
 
 **Local models on the H39 tasks** (the ten checked tasks of
 `tests/skill/tasks/`, one run per task and mode, GPU logging on).
@@ -101,7 +101,7 @@ T05b3).
 1. ~~T08a → T08b1 → T08b2 → T08c~~ **done, below**; with `tasks/run-task.sh` (main and sub
    GLM 5), the harness owner checking after each (progress below this
    list when done).
-2. M1 remainder: T13, T14, then T07, T09, T10, T11 (H43).
+2. M1 remainder: ~~T13~~ (done, below), T14, then T07, T09, T10, T11 (H43).
 3. ~~Commit~~ **committed 2026-11-22** (tch-fpc, hermes-agent-setup 4cd71d0,
    polyglot-scripting c45962e).
 
@@ -125,6 +125,28 @@ sub GLM 5).** Harness owner's checks after each stage:
   and write the UT build command with `-Fu../../src -Fl<libtch>
   -k-rpath=<libtch>` (Hermes' shell had the library path; a plain shell
   does not).
+
+**T13 done (2026-11-22 12:18–12:41, four runs of `run-task.sh`, main and
+sub GLM 5).** Unit `Recompute` (DESIGN 8.14): `TStage`, `TSavedInputs`,
+`RecomputeForward`, `RecomputeBackward`. One change to the design:
+`RecomputeBackward` is a function returning dL/dX0 (so the input gradient
+is checked too). Prepared by the harness owner as for T08 (prototype,
+`tasks/T13-facts.md` with 21 UT rows all run against it, skeleton, fixture
+`tests/ut/RecomputeFixture.pas` with hand-computable scale stages, affine
+stages and the oracle `WholeGraphBackward`, ITa `tests/ita/T13-run.sh`).
+Checks after each stage:
+- T13a: the case table equals the facts' 21 rows; documents as specified.
+- T13b1: rebuilt with `-Cr`, 13/13; code as in the facts.
+- T13b2: 21/21, gate UT 398/398, line coverage 100 %; code as in the
+  facts; no harness-owner fix needed this time.
+- T13c: ITa 5/5 OK, every value 0 (bit-for-bit equal to the whole-graph
+  backward in fp64, 8 and 64 stages); rerun by the harness owner the same;
+  `ita.md` equals `summary.tsv`. Mutants (gradient not chained, forward
+  without `NoGradGuard`, stages in the wrong order) are caught.
+- Two GPUs (`tests/ita/T13-run.sh gpu`, harness owner only; agents run
+  with the GPUs hidden): stages split over cuda:0 and cuda:1, fp32, against
+  fp64 on the CPU: 2.8e-6 (8 stages, inputs on the host) and 3.8e-5 (64
+  stages, width 512); saved inputs on the right device. 3/3 OK.
 
 ## Local session 11 (2026-11-19 to 22): M1 T01–T05 done, H46 holds
 

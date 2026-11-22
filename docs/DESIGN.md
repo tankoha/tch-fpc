@@ -4483,6 +4483,11 @@ Tensors cross devices with `&to` inside the two loops only. Acceptance:
 on a stack of eight small stages, the parameter gradients equal those of
 one ordinary backward through the whole stack (CPU, fp64, 1e-10).
 
+**Implemented (T13, local session 12):** `RecomputeBackward` is a function
+returning dL/dX0, so that the input gradient is checked as well; measured
+bit-for-bit equal to the whole-graph backward on 8 and 64 stages (fp64,
+CPU) and within 3.8e-5 of fp64 with fp32 stages split over the two GPUs.
+
 **Head.** `h` (the last stage's output, moved to the head's device)
 becomes a leaf; the output matrix is dequantised once per step, 8192 rows
 at a time (the gate's finding); the loss is taken over slices of 256

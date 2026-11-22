@@ -83,3 +83,8 @@ When a case is run again, do not edit its row; append a new row below (the last 
 | ITa-T08-005 | OK | - | 2026-11-22 | reference, g in [-5, 0], seed 14, H 16, T 200: value 2.38E-07, limit 1.00E-05 |
 | ITa-T08-006 | OK | - | 2026-11-22 | reference, T = 1, 63, 64, 65, 200, H 48: value 4.17E-07, limit 1.00E-05 |
 | ITa-T08-007 | OK | - | 2026-11-22 | g = -inf, H 48, T 20: value 2.38E-07, limit 1.00E-06 |
+| ITa-T13-001 | OK | - | 2026-11-22 | value 0.0E+000, limit 1.0E-010 |
+| ITa-T13-002 | OK | - | 2026-11-22 | value 0.0E+000, limit 1.0E-010 |
+| ITa-T13-003 | OK | - | 2026-11-22 | value 0.0E+000, limit 1.0E-006 |
+| ITa-T13-004 | OK | - | 2026-11-22 | value 0.0E+000, limit 0.0E+000 |
+| ITa-T13-005 | OK | - | 2026-11-22 | value 0.0E+000, limit 1.0E-010 |

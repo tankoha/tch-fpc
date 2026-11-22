@@ -6,7 +6,86 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 Status at a glance of the knowledge-package and fine-tuning work:
 [progress.md](progress.md).
 
-## Local session 12 (2026-11-22): local models compared, Oxygene compiler verified, T07–T10, T13 and T14 done — resume here
+## Local session 13 (2026-11-23): T11 prepared, H43 measured with the prototype — resume here
+
+**H43 measured** (DESIGN 8.11 "H43 in detail"; prototype of `QwenModel`
+in `samples/qwen-lora/work/proto/T11/`, git-ignored). Reference: the
+bundled `llama-server` started by hand on the CPU (GPUs hidden),
+`/completion` with `n_predict` 1, `n_probs` 20, prompts as token ids, no
+prompt cache; 24 prompts (Pascal sources, Japanese prose, a chat rendering
+with special tokens, each cut to 1, 2, 5, 63, 64, 65, 130 and 600 tokens)
+and 3 text prompts; `work/oracle/T11/make-oracle.bb`. The
+`top_logprobs` are the log-softmax over the whole vocabulary before any
+sampler (`post_sampling_probs` false).
+
+| Reference | max \|Δ logprob\| over the reference's top 10 | top-1 equal |
+|---|---|---|
+| `llama-server` on the Q4_K_M file | up to **1.8** (0.1–1.8 on every prompt, 0.76 already at T = 1) | 22/24 (misses at margins 0.36, 0.16) |
+| on an all-F32 copy of it, KV cache fp16 (default) | 2.4e-2 | 24/24 |
+| on the F32 copy, `-ctk f32 -ctv f32 -fa off` | **1.3e-3** (text prompts 1.4e-3) | **24/24** |
+
+The Pascal forward reads the Q4_K_M file in every row (its dequantisation
+is exact, T03), so the difference in the first row is `llama-server`'s:
+on the CPU it quantises the activations to Q8_K before every K-quant
+product, and it keeps the KV cache in fp16. The F32 copy is written by
+`work/proto/T11/tof32.pas` (T02's `DequantizeBytes` per tensor, T04's
+writer; `build/models/Qwen3.5-0.8B-F32.gguf`, 3.0 GB). The norm weights in
+the GGUF already carry the `+1` (means 0.95–4.3), so there is no
+`(1 + w)` question. **H43 holds on the rehearsal model** against the F32
+reference with DESIGN's threshold (0.02, same top-1); `T11c` confirms it
+with the agents' code. Also measured: the trunk as `Recompute` stages is
+bit for bit `Trunk`; `--split 12` on cuda:0 / cuda:1 within 1.1e-4 of the
+CPU; about 2 s per prompt on the CPU, most of it the head's dequantisation
+(248 320 × 1024 Q6_K).
+
+**Question for the user / a design session (M4, not blocking T11):** the
+27B criterion of 8.11 (0.15 in bf16) was meant against the running model,
+but `llama-server` on a quantised file is itself off by up to 1.8 on the
+0.8B. An F32 (about 108 GB) or F16 (about 54 GB) copy of the 27B does not
+fit the 30 GB of RAM. Options: compare the 27B in bf16 on the GPUs with
+the Pascal forward in fp32 on the CPU (host memory 30 GB: blocks one at a
+time), with `llama-server` on the Q4_K_M file only as a coarse check
+(top-1 where the margin is large); or a reference from a Q8_0 copy (about
+29 GB, still activation-quantised). Not decided here.
+
+**T11 prepared** (the method of T08–T10):
+- unit `QwenModel` (`TQwenModel.Load(G, Device0, Device1, Split)`:
+  blocks below Split on Device0, the rest and the head on Device1;
+  `Embed` dequantises only the rows of the ids; `Stages` for `Recompute`;
+  `Trunk`; `Logits` with the head dequantised `HeadChunk` rows at a time
+  (8192); `LastLogProbs`; `TrunkBlockCount` leaves out the MTP block
+  through `qwen35.nextn_predict_layers`; the head is `output.weight` or,
+  without it, `token_embd` (tied, as in the rehearsal model));
+- unit `LogprobsCli` and the complete program `src/qlora_logprobs.pas`
+  (`[--top N] [--split S] MODEL FILE`; JSONL `{"id", "tokens"}` or
+  `{"id", "text"}` in, one JSON line with the top N out);
+- `tasks/T11-facts.md` (both units' code from the prototype, 43 UT rows
+  all run against it, 100 % line coverage), skeletons `src/QwenModel.pas`,
+  `src/LogprobsCli.pas`, test skeletons with the helpers;
+- fixtures: `tests/ut/QwenBlocksFixture.pas` gains `WriteTinyQwenModel`
+  (T10's tiny model plus `token_embd` (274 × 64, Q8_0), `output_norm`,
+  optionally `output.weight`, a bad embedding or head, the MTP key, and
+  T05's UT tokenizer); `WriteTinyQwen` writes the same bytes as before
+  (sha256 checked). `tests/ut/QwenRefScalar.pas` gains `RefLogits`;
+- ITa `tests/ita/T11-run.sh` (driver `tests/ita/T11/logprobs_check.pas`,
+  4 cases: top-1, top-10 difference, text prompts, `Recompute`;
+  prototype 4/4, skeleton all NG; mutants without `output_norm`, with the
+  embedding scaled by √Hidden, without the last block are caught; GPU case
+  101 harness owner only);
+- tasks `T11a` (documents, 2 delegations), `T11b1` (`QwenModel` stage 1:
+  load, embed, stages, 16 rows), `T11b2` (trunk, logits, 10 rows),
+  `T11b3` (`LogprobsCli`, 17 rows), `T11c` (ITa).
+The gate with the skeletons: 516/516 earlier cases OK; only the two new
+units and their empty test classes are open, as for T10 before T10b1.
+
+**Next:** `tasks/run-task.sh T11a`, then `T11b1`, `T11b2`, `T11b3` (check
+each: rebuild with `-Cr`, compare the code with `work/proto/T11/`, run the
+gate), then `QLORA_MODEL=<rehearsal GGUF> tasks/run-task.sh T11c` (stop a
+resident Hermes gateway started without `QLORA_MODEL` first) and
+`tests/ita/T11-run.sh gpu`. That ends M1; then M2 (T12, T15–T20) and the
+M4 question above.
+
+## Local session 12 (2026-11-22): local models compared, Oxygene compiler verified, T07–T10, T13 and T14 done
 
 **Local models on the H39 tasks** (the ten checked tasks of
 `tests/skill/tasks/`, one run per task and mode, GPU logging on).
@@ -296,7 +375,7 @@ with `work/proto/T10/`):
   against the CPU, T 256): 4.0e-6, OK.
 No fix by the harness owner.
 
-**Next:** commit T10; then T11 (H43: the Pascal forward against the
+**Next (done, local session 13 above):** commit T10; then T11 (H43: the Pascal forward against the
 running rehearsal model's log-probabilities), prepared as before (facts,
 prototype, skeletons, ITa).
 

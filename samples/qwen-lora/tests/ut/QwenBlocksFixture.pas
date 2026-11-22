@@ -3,7 +3,13 @@
   2), small enough for the scalar reference of QwenRefScalar.pas. Its key
   and value head counts differ (2 key heads, 4 value heads; 4 query heads,
   2 KV heads), so the tiling and the GQA mapping are exercised. Matrices
-  are Q8_0 or F16, vectors F32. Not code under test. }
+  are Q8_0 or F16, vectors F32. Not code under test.
+  T11 adds WriteTinyQwenModel: the same blocks (same weights for the same
+  seed) plus token_embd (Q8_0, 274 tokens), output_norm and, when asked,
+  output.weight (F16) or a qwen35.nextn_predict_layers key (blk.2 is then
+  the MTP block, not written); with a head it also carries the T05 UT
+  tokenizer (TokenizerFixture.TinyVocab, the six tokenizer keys).
+  WriteTinyQwen writes the same bytes as before T11. }
 unit QwenBlocksFixture;
 
 {$mode objfpc}{$H+}
@@ -24,11 +30,26 @@ const
   TinySsmV = 4;
   TinySsmDim = 16;
   TinyConv = 4;
+  TinyModelVocab = 274;   { the T05 UT vocabulary of TokenizerFixture }
+
+type
+  { thNone: no embedding and no head (T10); thTied: token_embd and
+    output_norm; thOwn: also output.weight; thBadEmbd: token_embd of 32
+    columns; thBadOutput: output.weight of 39 rows }
+  TTinyHead = (thNone, thTied, thOwn, thBadEmbd, thBadOutput);
 
 { Writes the tiny model to APath (weights from RandSeed := ASeed). }
 procedure WriteTinyQwen(const APath: string; ASeed: Integer);
 
+{ The tiny model with an embedding and a head (TTinyHead); ANextN adds
+  qwen35.nextn_predict_layers = 1 and makes block_count 3. }
+procedure WriteTinyQwenModel(const APath: string; ASeed: Integer; AHead: TTinyHead;
+  ANextN: Boolean);
+
 implementation
+
+uses
+  TokenizerFixture;
 
 type
   TTens = record
@@ -111,6 +132,12 @@ begin
 end;
 
 procedure WriteTinyQwen(const APath: string; ASeed: Integer);
+begin
+  WriteTinyQwenModel(APath, ASeed, thNone, False);
+end;
+
+procedure WriteTinyQwenModel(const APath: string; ASeed: Integer; AHead: TTinyHead;
+  ANextN: Boolean);
 const
   Align = 32;
 var
@@ -120,6 +147,9 @@ var
   Pad: array[0..31] of Byte;
   A: TSingleArray;
   Qkv: Integer;
+  Toks, Merges: TRawArray;
+  Types: TIntArray;
+  Eos: Integer;
 begin
   RandSeed := ASeed;
   Tens := nil;
@@ -154,6 +184,19 @@ begin
   Mat('blk.1.ffn_gate.weight', TinyFfn, TinyHidden, 8);
   Mat('blk.1.ffn_up.weight', TinyFfn, TinyHidden, 8);
   Mat('blk.1.ffn_down.weight', TinyHidden, TinyFfn, 1);
+  { embedding and head (T11) }
+  case AHead of
+    thTied, thOwn, thBadOutput:
+      Add('token_embd.weight', [TinyHidden, TinyModelVocab], 8, Rand(TinyModelVocab * TinyHidden, 1, 0));
+    thBadEmbd:
+      Add('token_embd.weight', [32, TinyModelVocab], 8, Rand(TinyModelVocab * 32, 1, 0));
+  end;
+  if AHead <> thNone then
+    Vec('output_norm.weight', [TinyHidden], Rand(TinyHidden, 0.1, 1));
+  if AHead = thOwn then
+    Mat('output.weight', TinyModelVocab, TinyHidden, 1);
+  if AHead = thBadOutput then
+    Mat('output.weight', TinyModelVocab - 1, TinyHidden, 1);
 
   FillChar(Pad, SizeOf(Pad), 0);
   S := TFileStream.Create(APath, fmCreate);
@@ -161,9 +204,11 @@ begin
     S.WriteBuffer(PAnsiChar('GGUF')^, 4);
     WU32(S, 3);
     WU64(S, Length(Tens));
-    WU64(S, 16);
+    WU64(S, 16 + Ord(ANextN) + 6 * Ord(AHead <> thNone));
     KvStr(S, 'general.architecture', 'qwen35');
-    KvU32(S, 'qwen35.block_count', 2);
+    KvU32(S, 'qwen35.block_count', 2 + Ord(ANextN));
+    if ANextN then
+      KvU32(S, 'qwen35.nextn_predict_layers', 1);
     KvU32(S, 'qwen35.embedding_length', TinyHidden);
     KvU32(S, 'qwen35.feed_forward_length', TinyFfn);
     KvU32(S, 'qwen35.attention.head_count', TinyHeadsQ);
@@ -178,6 +223,22 @@ begin
     KvU32(S, 'qwen35.ssm.conv_kernel', TinyConv);
     KvU32(S, 'qwen35.full_attention_interval', 2);
     KvU32(S, 'qwen35.attention.value_length', TinyHeadDim);
+    if AHead <> thNone then
+    begin
+      TinyVocab(Toks, Types, Merges, Eos);
+      KvStr(S, 'tokenizer.ggml.model', 'gpt2');
+      KvStr(S, 'tokenizer.ggml.pre', 'qwen35');
+      WStr(S, 'tokenizer.ggml.tokens'); WU32(S, 9); WU32(S, 8); WU64(S, Length(Toks));
+      for I := 0 to High(Toks) do
+        WStr(S, Toks[I]);
+      WStr(S, 'tokenizer.ggml.token_type'); WU32(S, 9); WU32(S, 5); WU64(S, Length(Types));
+      for I := 0 to High(Types) do
+        WU32(S, Cardinal(Types[I]));
+      WStr(S, 'tokenizer.ggml.merges'); WU32(S, 9); WU32(S, 8); WU64(S, Length(Merges));
+      for I := 0 to High(Merges) do
+        WStr(S, Merges[I]);
+      KvU32(S, 'tokenizer.ggml.eos_token_id', Eos);
+    end;
     Off := 0;
     for I := 0 to High(Tens) do
     begin

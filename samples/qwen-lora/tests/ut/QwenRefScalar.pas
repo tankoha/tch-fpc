@@ -3,7 +3,8 @@
   skeleton", "Linear block" and "Full block" and independent of the tensor
   code: weights through the scalar GgufQuant (T02), plain loops for every
   step (convolution, L2 norm, key-head tiling, the delta rule token by
-  token, RoPE, GQA, causal softmax). Not code under test. }
+  token, RoPE, GQA, causal softmax). T11 adds RefLogits (embedding, trunk,
+  output norm, head). Not code under test. }
 unit QwenRefScalar;
 
 {$mode objfpc}{$H+}
@@ -31,6 +32,12 @@ function RefRope(const X: TDoubleArray; T, NHeads, HeadDim, Rot: Integer;
   Base: Double; Pos0: Integer): TDoubleArray;
 { x / sqrt(mean(x^2) + Eps) * w over each run of Length(W) values }
 function RefRms(const X: TDoubleArray; const W: TDoubleArray; Eps: Double): TDoubleArray;
+
+{ T11: the whole model for AIds (T tokens): token_embd rows, the trunk
+  blocks (block_count less qwen35.nextn_predict_layers when present),
+  output_norm, then output.weight or, without it, token_embd (tied).
+  Returns T rows of vocab logits. }
+function RefLogits(G: TGgufFile; const D: TRefDims; const AIds: array of Integer): TDoubleArray;
 
 implementation
 
@@ -362,6 +369,35 @@ begin
   Result := H1;
   for I := 0 to High(Result) do
     Result[I] := Result[I] + F[I];
+end;
+
+
+function RefLogits(G: TGgufFile; const D: TRefDims; const AIds: array of Integer): TDoubleArray;
+var
+  E, H, W: TDoubleArray;
+  N: Int64;
+  T, I, J, Blocks: Integer;
+  Head: RawByteString;
+begin
+  T := Length(AIds);
+  E := Values(G, 'token_embd.weight', N);
+  H := nil;
+  SetLength(H, T * D.Hidden);
+  for I := 0 to T - 1 do
+    for J := 0 to D.Hidden - 1 do
+      H[I * D.Hidden + J] := E[Int64(AIds[I]) * D.Hidden + J];
+  Blocks := G.KV[KeyIdx(G, 'qwen35.block_count')].IntVal;
+  if G.FindKey('qwen35.nextn_predict_layers') >= 0 then
+    Blocks := Blocks - G.KV[G.FindKey('qwen35.nextn_predict_layers')].IntVal;
+  for I := 0 to Blocks - 1 do
+    H := RefBlock(G, I, D, H, T);
+  W := Values(G, 'output_norm.weight', N);
+  H := RefRms(H, W, D.Eps);
+  if G.FindTensor('output.weight') >= 0 then
+    Head := 'output.weight'
+  else
+    Head := 'token_embd.weight';
+  Result := MatVec(G, Head, H, T, D.Hidden);
 end;
 
 end.

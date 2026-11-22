@@ -5,7 +5,71 @@
 再開するときは最初にこれを読んでください。決定事項と理由は [DESIGN_jp.md](DESIGN_jp.md) にあります。
 知識パッケージとファインチューニングの作業の状況は [progress_jp.md](progress_jp.md) で一目で見られます。
 
-## ローカルセッション12（2026-11-22）：ローカルモデルの比較、Oxygene コンパイラでの検証、T07〜T10・T13・T14 完了 — ここから再開
+## ローカルセッション13（2026-11-23）：T11 を準備、試作で H43 を測定 — ここから再開
+
+**H43 を測定**（DESIGN 8.11「H43 の詳細」。`QwenModel` の試作は
+`samples/qwen-lora/work/proto/T11/`、git 対象外）。参照：同梱の `llama-server` を CPU で手動起動
+（GPU は隠す）、`/completion` に `n_predict` 1、`n_probs` 20、プロンプトはトークン ID で渡し、
+プロンプトキャッシュなし。24 プロンプト（Pascal のソース、日本語の文章、特殊トークン入りのチャット
+描画を、それぞれ 1、2、5、63、64、65、130、600 トークンで切る）とテキストのプロンプト 3 件。
+`work/oracle/T11/make-oracle.bb`。`top_logprobs` はサンプラー前の語彙全体の log-softmax
+（`post_sampling_probs` は false）。
+
+| 参照 | 参照の上位 10 での \|Δ logprob\| の最大 | top-1 一致 |
+|---|---|---|
+| Q4_K_M ファイルそのままの `llama-server` | 最大 **1.8**（全プロンプトで 0.1〜1.8、T = 1 ですでに 0.76） | 22/24（外れはマージン 0.36 と 0.16） |
+| その全 F32 コピー、KV キャッシュ fp16（既定） | 2.4e-2 | 24/24 |
+| F32 コピー、`-ctk f32 -ctv f32 -fa off` | **1.3e-3**（テキストのプロンプトは 1.4e-3） | **24/24** |
+
+Pascal の forward はどの行でも Q4_K_M ファイルを読む（逆量子化は厳密、T03）ので、1 行目の差は
+`llama-server` 側のもの：CPU では K 量子化の積のたびに活性化を Q8_K に量子化し、KV キャッシュを
+fp16 で持つ。F32 コピーは `work/proto/T11/tof32.pas` で作る（テンソルごとに T02 の
+`DequantizeBytes`、T04 の書き出し。`build/models/Qwen3.5-0.8B-F32.gguf`、3.0 GB）。GGUF の正規化
+の重みはすでに `+1` 済み（平均 0.95〜4.3）なので `(1 + w)` の問題はない。**H43 はリハーサル用
+モデルで成り立つ**（F32 参照に対し、DESIGN のしきい値 0.02・top-1 一致）。エージェントのコードでは
+`T11c` で確かめる。ほかに測ったこと：幹を `Recompute` のステージとして流すと `Trunk` とビット単位で
+同じ。`--split 12`（cuda:0 / cuda:1）は CPU との差 1.1e-4。CPU で 1 プロンプト約 2 秒、大半はヘッド
+（248 320 × 1024、Q6_K）の逆量子化。
+
+**ユーザーまたは設計セッションへの質問（M4。T11 は止めない）：** 8.11 の 27B の基準（bf16 で
+0.15）は動いているモデルに対するものだが、量子化ファイルの `llama-server` 自体が 0.8B で最大 1.8
+ずれる。27B の F32（約 108 GB）や F16（約 54 GB）のコピーは RAM 30 GB に載らない。案：27B を GPU の
+bf16 で動かし、CPU の fp32 の Pascal forward と比べる（ホストメモリ 30 GB：ブロックを 1 つずつ）、
+Q4_K_M の `llama-server` は粗い確認（マージンの大きい所の top-1）だけにする。または Q8_0 コピー
+（約 29 GB、活性化はやはり量子化される）を参照にする。ここでは決めていない。
+
+**T11 を準備**（T08〜T10 と同じ方法）：
+- ユニット `QwenModel`（`TQwenModel.Load(G, Device0, Device1, Split)`：Split 未満のブロックは
+  Device0、残りとヘッドは Device1。`Embed` は ID の行だけ逆量子化。`Recompute` 用の `Stages`。
+  `Trunk`。`Logits` はヘッドを `HeadChunk` 行（8192）ずつ逆量子化。`LastLogProbs`。
+  `TrunkBlockCount` は `qwen35.nextn_predict_layers` で MTP ブロックを除く。ヘッドは
+  `output.weight`、なければ `token_embd`（リハーサル用モデルと同じく共有））；
+- ユニット `LogprobsCli` と完成済みのプログラム `src/qlora_logprobs.pas`
+  （`[--top N] [--split S] MODEL FILE`。JSONL の `{"id", "tokens"}` か `{"id", "text"}` を
+  読み、上位 N を JSON で 1 行ずつ出す）；
+- `tasks/T11-facts.md`（両ユニットのコードは試作から。UT 43 行はすべて試作で実行済み、行
+  カバレッジ 100 %）、スケルトン `src/QwenModel.pas`・`src/LogprobsCli.pas`、ヘルパー入りの
+  テストスケルトン；
+- fixture：`tests/ut/QwenBlocksFixture.pas` に `WriteTinyQwenModel` を追加（T10 の tiny モデル
+  に `token_embd`（274 × 64、Q8_0）、`output_norm`、必要に応じて `output.weight`、不正な埋め込み
+  やヘッド、MTP のキー、T05 の UT 用トークナイザ）。`WriteTinyQwen` の出力は以前と同じバイト列
+  （sha256 で確認）。`tests/ut/QwenRefScalar.pas` に `RefLogits` を追加；
+- ITa `tests/ita/T11-run.sh`（ドライバ `tests/ita/T11/logprobs_check.pas`、4 ケース：top-1、
+  上位 10 の差、テキストのプロンプト、`Recompute`。試作で 4/4、スケルトンではすべて NG。
+  `output_norm` なし、埋め込みを √Hidden 倍、最後のブロックを飛ばす、の変異は検出される。
+  GPU のケース 101 はハーネス担当のみ）；
+- タスク `T11a`（文書、委任 2 回）、`T11b1`（`QwenModel` の段階 1：読み込み・埋め込み・ステージ、
+  16 行）、`T11b2`（幹・ロジット、10 行）、`T11b3`（`LogprobsCli`、17 行）、`T11c`（ITa）。
+スケルトンを置いた状態のゲート：既存 516/516 ケースは OK。未了は新しい 2 ユニットと空のテスト
+クラスだけで、T10b1 前の T10 と同じ状態。
+
+**次：** `tasks/run-task.sh T11a`、続けて `T11b1`、`T11b2`、`T11b3`（各段階の後に確認：`-Cr` で
+ビルドし直し、コードを `work/proto/T11/` と比べ、ゲートを実行）、次に `QLORA_MODEL=<リハーサル用
+GGUF> tasks/run-task.sh T11c`（`QLORA_MODEL` なしで起動した常駐の Hermes ゲートウェイがあれば先に
+止める）と `tests/ita/T11-run.sh gpu`。これで M1 が終わる。その後は M2（T12、T15〜T20）と上の M4 の
+質問。
+
+## ローカルセッション12（2026-11-22）：ローカルモデルの比較、Oxygene コンパイラでの検証、T07〜T10・T13・T14 完了
 
 **H39 の課題でのローカルモデル**（`tests/skill/tasks/` の検査付き 10 課題。課題とモードごとに1回、
 GPU のログを取りながら）。
@@ -237,7 +301,7 @@ Qwen）。** ユニット `PackedLinear` と `QwenBlocks`。各段階の後の�
   4.0e-6、OK。
 ハーネス担当の修正なし。
 
-**次：** T10 をコミット。続いて T11（H43：Pascal の forward を、動いているリハーサル用モデルの
+**次（済み、上のローカルセッション13）：** T10 をコミット。続いて T11（H43：Pascal の forward を、動いているリハーサル用モデルの
 対数確率と比較）を、これまでどおり準備（facts、試作、スケルトン、ITa）してから。
 
 ## ローカルセッション11（2026-11-19〜22）：M1 の T01〜T05 が完了、H46 が成り立つ

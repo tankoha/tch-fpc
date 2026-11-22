@@ -489,3 +489,35 @@ When a case is run again, do not edit its row; append a new row below (the last 
 | UT-QwenChat-105 | OK |  | 2026-11-22 | T07b3 stage 3: sample with no messages → EChatError 'a training sample must end with an assistant message' |
 | UT-QwenChat-106 | OK |  | 2026-11-22 | T07b3 stage 3: EncodeTraining D off (tiny tokenizer) → 37 ids, LossFrom 33, LossTo 36, span 'hello world' + TagE |
 | UT-QwenChat-107 | OK |  | 2026-11-22 | T07b3 stage 3: EncodeThinking on (D, xhigh) → 250 ids, LossFrom 245, LossTo 249, span 'world' + TagE, last id 267 |
+| UT-PackedLinear-001 | OK |  | 2026-11-22 | T10b1 stage 1: Q8_0 matrix 2x32 on 68 bytes → OutDim 2, InDim 32, TType 8, Device 'cpu' |
+| UT-PackedLinear-002 | OK |  | 2026-11-22 | T10b1 stage 1: Weight shape [2, 32]; values exact, diff 0 vs DequantizeBytes(8, Bytes, 64) |
+| UT-PackedLinear-003 | OK |  | 2026-11-22 | T10b1 stage 1: Forward X [3, 32] → [3, 2]; each element within 1e-5 of Σ_k W[j,k] X[i,k] |
+| UT-PackedLinear-004 | OK |  | 2026-11-22 | T10b1 stage 1: Forward 3-D X [2, 5, 32] → [2, 5, 2] |
+| UT-PackedLinear-005 | OK |  | 2026-11-22 | T10b1 stage 1: F32 (TType 0) 2x3, 24 bytes → Weight [2, 3] = -2.5 -1.5 -0.5 / 0.5 1.5 2.5 exact |
+| UT-PackedLinear-006 | OK |  | 2026-11-22 | T10b1 stage 1: kFloat raw → EPackedLinear 'the packed bytes must be a 1-D kUInt8 tensor, got [34]' |
+| UT-PackedLinear-007 | OK |  | 2026-11-22 | T10b1 stage 1: 2-D raw [2, 34] → EPackedLinear 'the packed bytes must be a 1-D kUInt8 tensor, got [2, 34]' |
+| UT-PackedLinear-008 | OK |  | 2026-11-22 | T10b1 stage 1: OutDim 0 → EPackedLinear 'dimensions must be positive, got 0 x 32' |
+| UT-PackedLinear-009 | OK |  | 2026-11-22 | T10b1 stage 1: 34 bytes for 2x32 q8_0 → EPackedLinear '[34] holds 34 bytes, 2 x 32 of type q8_0 need 68' |
+| UT-PackedLinear-010 | OK |  | 2026-11-22 | T10b1 stage 1: Forward X kDouble → EPackedLinear 'X must be kFloat (fp32)' |
+| UT-PackedLinear-011 | OK |  | 2026-11-22 | T10b1 stage 1: Forward X [3, 31] → EPackedLinear 'X must end in 32, got [3, 31]' |
+| UT-PackedLinear-012 | OK |  | 2026-11-22 | T10b1 stage 1: LoadPacked blk.0.ffn_down.weight → OutDim 64, InDim 96, TType 8 |
+| UT-PackedLinear-013 | OK |  | 2026-11-22 | T10b1 stage 1: LoadDense blk.0.ssm_conv1d.weight → shape [128, 4], kind kFloat |
+| UT-PackedLinear-014 | OK |  | 2026-11-22 | T10b1 stage 1: LoadPacked 'blk.9.x' → EPackedLinear 'tensor not in the file: blk.9.x' |
+| UT-PackedLinear-015 | OK |  | 2026-11-22 | T10b1 stage 1: LoadPacked attn_norm → EPackedLinear 'blk.0.attn_norm.weight is not a matrix (1 dimensions)' |
+| UT-QwenBlocks-101 | OK |  | 2026-11-22 | T10b2 stage 2: ReadQwenDims → Blocks 2, Hidden 64, Ffn 96, HeadsQ 4, HeadsKV 2, HeadDim 32, Rot 16, RopeBase 10000, Eps 1e-6, SsmHeadsK 2, SsmHeadsV 4, SsmDim 16, ConvKernel 4, FullInterval 2 |
+| UT-QwenBlocks-102 | OK |  | 2026-11-22 | T10b2 stage 2: ReadQwenDims without qwen35 keys → EQwenBlock 'metadata key missing: qwen35.block_count' |
+| UT-QwenBlocks-103 | OK |  | 2026-11-22 | T10b2 stage 2: IsFullBlock FullInterval 4, I 0..7 → F F F T F F F T |
+| UT-QwenBlocks-104 | OK |  | 2026-11-22 | T10b2 stage 2: RmsNorm [3.0, 4.0] w [1.0, 2.0] eps 1e-6 vs RefRms ≤ 1e-6 |
+| UT-QwenBlocks-105 | OK |  | 2026-11-22 | T10b2 stage 2: RopeText randn[5,3,32] rot 16 base 10000 pos 0..4 vs RefRope ≤ 1e-6; narrow(2,16,16) exact vs X |
+| UT-QwenBlocks-106 | OK |  | 2026-11-22 | T10b2 stage 2: RopeText Pos0 7 vs RefRope ≤ 1e-6 |
+| UT-QwenBlocks-107 | OK |  | 2026-11-22 | T10b2 stage 2: RopeText position 0 on narrow(0,0,1) exact vs X |
+| UT-QwenBlocks-201 | OK |  | 2026-11-22 | T10b3 stage 3: TFullBlock blk.1 device 'cpu'; Forward randn[8,64] vs RefBlock ≤ 1e-4 |
+| UT-QwenBlocks-202 | OK |  | 2026-11-22 | T10b3 stage 3: TFullBlock blk.1 Forward randn[70,64] vs RefBlock ≤ 1e-4 |
+| UT-QwenBlocks-203 | OK |  | 2026-11-22 | T10b3 stage 3: TFullBlock blk.1 causality: Forward(randn[8,64]) first 5 rows vs Forward(narrow(0,0,5)) ≤ 1e-5 |
+| UT-QwenBlocks-204 | OK |  | 2026-11-22 | T10b3 stage 3: TFullBlock blk.1 backward on leaf randn[8,64]: grad shape [8, 64], isfinite.all true |
+| UT-QwenBlocks-211 | OK |  | 2026-11-22 | T10b4 stage 4: TLinearBlock blk.0 Forward randn[8,64] vs RefBlock ≤ 1e-4 |
+| UT-QwenBlocks-212 | OK |  | 2026-11-22 | T10b4 stage 4: TLinearBlock blk.0 Forward randn[70,64] (two chunks) vs RefBlock ≤ 1e-4 |
+| UT-QwenBlocks-213 | OK |  | 2026-11-22 | T10b4 stage 4: TLinearBlock blk.0 causality: Forward(randn[8,64]) first 5 rows vs Forward(narrow(0,0,5)) ≤ 1e-5 |
+| UT-QwenBlocks-214 | OK |  | 2026-11-22 | T10b4 stage 4: TLinearBlock blk.0 backward on leaf randn[8,64]: grad shape [8, 64], isfinite.all true |
+| UT-QwenBlocks-215 | OK |  | 2026-11-22 | T10b4 stage 4: LoadBlock blk.0 → 'TLinearBlock', blk.1 → 'TFullBlock' |
+| UT-QwenBlocks-216 | OK |  | 2026-11-22 | T10b4 stage 4 (line coverage): ReadQwenDims on a GGUF lacking qwen35.rope.freq_base raises EQwenBlock 'metadata key missing: qwen35.rope.freq_base' (KeyFloat missing-key branch, the float-key counterpart of 102) |

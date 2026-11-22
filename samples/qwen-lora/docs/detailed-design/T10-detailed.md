@@ -797,7 +797,10 @@ exactly; `CreateFmt` formats on the literal parts).
 | 5 | the metadata key is missing | `'metadata key missing: ' + AKey` |
 
 `ReadQwenDims` reads `qwen35.block_count` first, so a file without the
-`qwen35` keys reports that key (UT-QwenBlocks-102).
+`qwen35` keys reports that key (UT-QwenBlocks-102). A file carrying the
+integer keys but lacking `qwen35.rope.freq_base` reports that key
+instead (UT-QwenBlocks-216; the file is written by `WriteQwenMetaNoRopeBase`
+of `tests/ut/QwenBlocksMetaFixture.pas`).
 
 ## 6. Notes (from the facts)
 
@@ -824,3 +827,4 @@ exactly; `CreateFmt` formats on the literal parts).
 | Date | Change | Reason |
 |------|--------|--------|
 | 2026-11-22 | Initial creation | T10a delegation 1 of 2: the T10 documents |
+| 2026-11-22 | §5.5: the `KeyFloat` missing-key case (UT-QwenBlocks-216) noted | T10b4 stage 4: 100 % line coverage of `src/QwenBlocks.pas` |

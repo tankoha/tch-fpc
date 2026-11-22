@@ -107,5 +107,5 @@ No branch of its own; the only dispatch is the virtual `Attn`:
 The checks of `TPackedLinear.Create` / `Forward` / `TensorRaw` / `LoadPacked`
 and of `KeyInt` / `KeyFloat` are driven by the rows of `tests/ut/cases/
 PackedLinear.cases.md` (UT-PackedLinear-001 to 015) and
-`QwenBlocks.cases.md` (UT-QwenBlocks-101 to 107), per the detailed design
-§5.
+`QwenBlocks.cases.md` (UT-QwenBlocks-101 to 107, plus 216 for the
+`KeyFloat` missing-key raise), per the detailed design §5.

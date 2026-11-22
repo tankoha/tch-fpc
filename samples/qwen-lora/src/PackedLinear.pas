@@ -57,48 +57,91 @@ begin
 end;
 
 constructor TPackedLinear.Create(const ARaw: TTensor; ATType: Cardinal; AOutDim, AInDim: Int64);
+var
+  Want: QWord;
 begin
   inherited Create;
-  raise EPackedLinear.Create('TPackedLinear.Create: not implemented yet');
+  if (ARaw.Kind <> kUInt8) or (ARaw.Dim <> 1) then
+    raise EPackedLinear.Create('the packed bytes must be a 1-D kUInt8 tensor, got ' + ShapeStr(ARaw));
+  if (AOutDim < 1) or (AInDim < 1) then
+    raise EPackedLinear.CreateFmt('dimensions must be positive, got %d x %d', [AOutDim, AInDim]);
+  Want := GgufTensorBytes(ATType, [QWord(AOutDim * AInDim)]);
+  if QWord(ARaw.Shape[0]) <> Want then
+    raise EPackedLinear.CreateFmt('%s holds %d bytes, %d x %d of type %s need %d',
+      [ShapeStr(ARaw), ARaw.Shape[0], AOutDim, AInDim, GgufTypeName(ATType), Want]);
+  FRaw := ARaw;
+  FTType := ATType;
+  FOutDim := AOutDim;
+  FInDim := AInDim;
 end;
 
 function TPackedLinear.Weight: TTensor;
 begin
-  Result := Default(TTensor);
-  raise EPackedLinear.Create('TPackedLinear.Weight: not implemented yet');
+  Result := DequantizeT(FRaw, FTType, FOutDim * FInDim).view([FOutDim, FInDim]);
 end;
 
 function TPackedLinear.Forward(const X: TTensor): TTensor;
+var
+  S: TInt64Array;
 begin
-  Result := Default(TTensor);
-  raise EPackedLinear.Create('TPackedLinear.Forward: not implemented yet');
+  S := X.Shape;
+  if X.Kind <> kFloat then
+    raise EPackedLinear.Create('X must be kFloat (fp32)');
+  if (Length(S) = 0) or (S[High(S)] <> FInDim) then
+    raise EPackedLinear.CreateFmt('X must end in %d, got %s', [FInDim, ShapeStr(X)]);
+  Result := X.matmul(Weight.transpose(0, 1));
 end;
 
 function TPackedLinear.Device: TDevice;
 begin
-  Result := Default(TDevice);
-  raise EPackedLinear.Create('TPackedLinear.Device: not implemented yet');
+  Result := FRaw.Device;
 end;
 
 function TensorRaw(G: TGgufFile; const AName: RawByteString; const ADevice: TDevice;
   out ATType: Cardinal; out ADims: TInt64Array): TTensor;
+var
+  I, J: Integer;
+  Info: TGgufTensorInfo;
+  Bytes: TBytes;
 begin
-  ATType := 0;
+  I := G.FindTensor(AName);
+  if I < 0 then
+    raise EPackedLinear.Create('tensor not in the file: ' + AName);
+  Info := G.Tensor[I];
+  G.ReadTensorBytes(I, Bytes);
+  ATType := Info.TType;
   ADims := nil;
-  Result := Default(TTensor);
-  raise EPackedLinear.Create('TensorRaw: not implemented yet');
+  SetLength(ADims, Info.NDims);
+  for J := 0 to Info.NDims - 1 do
+    ADims[J] := Info.Dims[Info.NDims - 1 - J];
+  Result := TTensor.FromBytes(Bytes[0], [Length(Bytes)], kUInt8).&to(ADevice);
 end;
 
 function LoadPacked(G: TGgufFile; const AName: RawByteString; const ADevice: TDevice): TPackedLinear;
+var
+  T: Cardinal;
+  D: TInt64Array;
+  Raw: TTensor;
 begin
-  Result := nil;
-  raise EPackedLinear.Create('LoadPacked: not implemented yet');
+  Raw := TensorRaw(G, AName, ADevice, T, D);
+  if Length(D) <> 2 then
+    raise EPackedLinear.CreateFmt('%s is not a matrix (%d dimensions)', [AName, Length(D)]);
+  Result := TPackedLinear.Create(Raw, T, D[0], D[1]);
 end;
 
 function LoadDense(G: TGgufFile; const AName: RawByteString; const ADevice: TDevice): TTensor;
+var
+  T: Cardinal;
+  D: TInt64Array;
+  Raw: TTensor;
+  N: Int64;
+  J: Integer;
 begin
-  Result := Default(TTensor);
-  raise EPackedLinear.Create('LoadDense: not implemented yet');
+  Raw := TensorRaw(G, AName, ADevice, T, D);
+  N := 1;
+  for J := 0 to High(D) do
+    N := N * D[J];
+  Result := DequantizeT(Raw, T, N).view(D);
 end;
 
 end.

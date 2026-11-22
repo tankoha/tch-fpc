@@ -16,7 +16,9 @@ Stage 3 (task T10b3): B := `TFullBlock.Load(G, 1, D, TDevice.Cpu)`; H for
 T rows := `ManualSeed(40 + T); TTensor.randn([T, 64])`; rows UT-QwenBlocks-201
 to 204.
 Stage 4 (task T10b4): B := `TLinearBlock.Load(G, 0, D, TDevice.Cpu)`; H as
-above; rows UT-QwenBlocks-211 to 215.
+above; rows UT-QwenBlocks-211 to 215, plus UT-QwenBlocks-216 (added in
+T10b4 for 100 % line coverage: the `KeyFloat` missing-key branch, a
+metadata file that lacks `qwen35.rope.freq_base`).
 
 | Case ID | Title | Target function | Input (short) | Expected result | Notes |
 |---|---|---|---|---|---|
@@ -36,3 +38,4 @@ above; rows UT-QwenBlocks-211 to 215.
 | UT-QwenBlocks-213 | TLinearBlock, causality | TLinearBlock / TQwenBlock.Forward | B; as 203 | ≤ 1e-5 (measured 7.2e-7) | |
 | UT-QwenBlocks-214 | TLinearBlock, backward | TLinearBlock / Backward | B; as 204 | `[8, 64]`, finite | |
 | UT-QwenBlocks-215 | LoadBlock, class names | LoadBlock | `LoadBlock(G, 0, D, TDevice.Cpu)` and `LoadBlock(G, 1, ..)` | `ClassName` `'TLinearBlock'` and `'TFullBlock'` | |
+| UT-QwenBlocks-216 | ReadQwenDims, float metadata key missing | ReadQwenDims / KeyFloat | `ReadQwenDims` of a GGUF carrying all the tiny-model keys except `qwen35.rope.freq_base` (`WriteQwenMetaNoRopeBase` of `tests/ut/QwenBlocksMetaFixture.pas`) | `metadata key missing: qwen35.rope.freq_base` | added in T10b4 for 100 % line coverage: the missing-key raise of `KeyFloat` (src/QwenBlocks.pas:94), the float-key counterpart of UT-QwenBlocks-102 |

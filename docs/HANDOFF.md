@@ -6,7 +6,7 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 Status at a glance of the knowledge-package and fine-tuning work:
 [progress.md](progress.md).
 
-## Local session 12 (2026-11-22): local models compared, Oxygene compiler verified, T07, T08, T09, T13 and T14 done — resume here
+## Local session 12 (2026-11-22): local models compared, Oxygene compiler verified, T07–T10, T13 and T14 done — resume here
 
 **Local models on the H39 tasks** (the ten checked tasks of
 `tests/skill/tasks/`, one run per task and mode, GPU logging on).
@@ -274,6 +274,31 @@ equal to the facts. **Next: `tasks/run-task.sh T10b1`, then b2, b3, b4
 `work/proto/T10/`, run the gate), then `QLORA_MODEL=<rehearsal GGUF>
 tasks/run-task.sh T10c` (stop a resident Hermes gateway started without
 `QLORA_MODEL` first), then T11 (H43).**
+
+**T10 done (2026-11-22 20:48–23:04, five runs of `run-task.sh`; main
+GLM 5, sub-agent the local Qwen).** Units `PackedLinear` and `QwenBlocks`.
+Checks after each stage (rebuilt with `-Cr`, the implementation compared
+with `work/proto/T10/`):
+- T10b1 (28 min): 15/15; `PackedLinear` equal to the prototype.
+- T10b2 (34 min): 7/7; the helpers equal to the prototype.
+- T10b3 (22 min): 11/11; `TQwenBlock` and `TFullBlock` equal.
+- T10b4 (40 min): QwenBlocks 17, PackedLinear 15 tests; both units equal
+  to the prototype (only the separator comments differ); gate UT 516/516,
+  line coverage 100 % (2412/2412, run by the harness owner). The sub-agent
+  added row UT-QwenBlocks-216 (`KeyFloat`'s missing-key raise, the float
+  counterpart of 102; the facts missed it, as in T08) with its own fixture
+  `tests/ut/QwenBlocksMetaFixture.pas` (the tiny model's metadata without
+  `qwen35.rope.freq_base`); right, recorded in the case table.
+- T10c (6 min; the resident gateway stopped first, `QLORA_MODEL` = the
+  rehearsal GGUF): ITa 5/5 OK, values equal to the prototype's (8.1e-7,
+  5.4e-7, 2.4e-6, 8.9e-7, 0); rerun by the harness owner gives the same
+  `summary.tsv`; `ita.md` equals it. GPU case 101 (every block on cuda:0
+  against the CPU, T 256): 4.0e-6, OK.
+No fix by the harness owner.
+
+**Next:** commit T10; then T11 (H43: the Pascal forward against the
+running rehearsal model's log-probabilities), prepared as before (facts,
+prototype, skeletons, ITa).
 
 ## Local session 11 (2026-11-19 to 22): M1 T01–T05 done, H46 holds
 

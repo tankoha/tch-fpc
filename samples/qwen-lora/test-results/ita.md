@@ -105,3 +105,8 @@ When a case is run again, do not edit its row; append a new row below (the last 
 | ITa-T09-004 | OK | - | 2026-11-22 | training length T 2048, H 48: 116 ms on the CPU: value 7.2E-007, limit 1.0E-005 |
 | ITa-T09-005 | OK | - | 2026-11-22 | gradients of all five inputs against the token form, H 4, T 70, chunk 16: value 2.1E-006, limit 1.0E-005 |
 | ITa-T09-006 | OK | - | 2026-11-22 | chunk sizes 1, 2, 3, 5, 7, 10, 49, 50, 51, 64 at T 50 (padding and a single chunk): value 9.8E-007, limit 1.0E-005 |
+| ITa-T10-001 | OK | - | 2026-11-22 | every block of the rehearsal model (24), T 8, against the scalar version: value 8.1E-007, limit 1.0E-004 |
+| ITa-T10-002 | OK | - | 2026-11-22 | rehearsal blocks 0 (linear) and 3 (full), T 70 (two chunks of the delta rule): value 5.4E-007, limit 1.0E-004 |
+| ITa-T10-003 | OK | - | 2026-11-22 | tiny model, T 70: 2 key / 4 value SSM heads (tiling), 4 query / 2 KV heads (GQA): value 2.4E-006, limit 1.0E-004 |
+| ITa-T10-004 | OK | - | 2026-11-22 | rehearsal blocks 0-3 chained, T 16, against the scalar chain: value 8.9E-007, limit 1.0E-004 |
+| ITa-T10-005 | OK | - | 2026-11-22 | rehearsal blocks 0-3 as Recompute stages: dL/dX0 against an ordinary backward (max |grad| 4.15): value 0.0E+000, limit 1.0E-005 |

@@ -88,3 +88,10 @@ When a case is run again, do not edit its row; append a new row below (the last 
 | ITa-T13-003 | OK | - | 2026-11-22 | value 0.0E+000, limit 1.0E-006 |
 | ITa-T13-004 | OK | - | 2026-11-22 | value 0.0E+000, limit 0.0E+000 |
 | ITa-T13-005 | OK | - | 2026-11-22 | value 0.0E+000, limit 1.0E-010 |
+| ITa-T14-001 | OK | - | 2026-11-22 | fp32, 20 updates, lr 0.05, wd 0.01 against TOptimizer.AdamW: value 1.2E-007, limit 1.0E-006 |
+| ITa-T14-002 | OK | - | 2026-11-22 | fp64, 200 updates against TOptimizer.AdamW: value 1.1E-016, limit 1.0E-012 |
+| ITa-T14-003 | OK | - | 2026-11-22 | fp32, 20 updates, global-norm clipping at 0.5 against ClipGradNorm + AdamW: value 2.4E-007, limit 1.0E-006 |
+| ITa-T14-004 | OK | - | 2026-11-22 | fp64, 50 updates with clipping: two stores (w; b) against one store (w, b): value 0.0E+000, limit 0.0E+000 |
+| ITa-T14-005 | OK | - | 2026-11-22 | fp32, 100 updates, ScheduleLR(0.05, u, 10, 100, 0.1) on both sides: value 6.0E-008, limit 1.0E-006 |
+| ITa-T14-006 | OK | - | 2026-11-22 | fp32: 10 updates against 5 + save + load + StepCount 5 + 5: value 0.0E+000, limit 0.0E+000 |
+| ITa-T14-007 | OK | - | 2026-11-22 | fp64: gradients after ClipGlobalNorm(0.1) against ClipGradNorm(0.1), and the returned norm: value 0.0E+000, limit 1.0E-012 |

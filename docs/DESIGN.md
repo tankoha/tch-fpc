@@ -4544,6 +4544,13 @@ decay to 10 %, global-norm clipping at 1.0 computed over both stores.
 Acceptance: twenty steps on a toy problem follow `TOptimizer.AdamW` to
 1e-6.
 
+**Implemented (T14, local session 12):** `TLoraAdamW.Step(LR)` takes the
+learning rate of the update (from `ScheduleLR`, outside the optimiser);
+the moments are `m.<j>` / `v.<j>` of one `TVarStore` per parameter store.
+Measured: 20 updates follow `TOptimizer.AdamW` within 1.2e-7 (fp32) and
+1e-15 (fp64), also with clipping and the schedule; save, load and resume
+give exactly the uninterrupted result.
+
 **`Checkpoint`.** Every 50 updates and at the end of each epoch: adapters
 and moments per device (`.ot`), and a `state.json` (update count, epoch,
 position in the shuffled order, seed, schedule position, configuration

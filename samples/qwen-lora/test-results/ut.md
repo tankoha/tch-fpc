@@ -402,4 +402,32 @@ When a case is run again, do not edit its row; append a new row below (the last 
 | UT-Recompute-105 | OK |  | 2026-11-22 | |
 | UT-Recompute-106 | OK |  | 2026-11-22 | |
 | UT-Recompute-107 | OK |  | 2026-11-22 | |
-| UT-Recompute-108 | OK |  | 2026-11-22 | |
+| UT-Recompute-108 | OK |  | 2026-11-22 |
+| UT-LoraOptim-001 | OK |  | 2026-11-22 | T14b1 stage 1: DefaultAdamWConfig exact values (0.9/0.999/1e-8/0.01) |
+| UT-LoraOptim-002 | OK |  | 2026-11-22 | T14b1 stage 1: ScheduleLR warm-up, update 1 of 50 → 2e-6 |
+| UT-LoraOptim-003 | OK |  | 2026-11-22 | T14b1 stage 1: ScheduleLR warm-up, update 50 of 50 → 1e-4 |
+| UT-LoraOptim-004 | OK |  | 2026-11-22 | T14b1 stage 1: ScheduleLR cosine decay, update 525 of 1000 → 5.5e-5 |
+| UT-LoraOptim-005 | OK |  | 2026-11-22 | T14b1 stage 1: ScheduleLR update 1000 of 1000 → 1e-5 |
+| UT-LoraOptim-006 | OK |  | 2026-11-22 | T14b1 stage 1: ScheduleLR no warm-up, update 1 of 3 → 7.75e-5 |
+| UT-LoraOptim-007 | OK |  | 2026-11-22 | T14b1 stage 1: update 0 → ELoraOptim 'update 0 outside 1..1000' |
+| UT-LoraOptim-008 | OK |  | 2026-11-22 | T14b1 stage 1: update 1001 → ELoraOptim 'update 1001 outside 1..1000' |
+| UT-LoraOptim-009 | OK |  | 2026-11-22 | T14b1 stage 1: warm-up 1000 → ELoraOptim 'warm-up 1000 outside 0..999' |
+| UT-LoraOptim-010 | OK |  | 2026-11-22 | T14b1 stage 1: warm-up -1 → ELoraOptim 'warm-up -1 outside 0..999' | |
+| UT-LoraOptim-011 | OK |  | 2026-11-22 | T14b2 stage 2: Create, two stores (kDouble → m.0/v.0/m.1/v.1, kFloat → c), moments non-trainable and zero, StepCount 0 |
+| UT-LoraOptim-012 | OK |  | 2026-11-22 | T14b2 stage 2: Create, no stores → ELoraOptim 'no stores' |
+| UT-LoraOptim-013 | OK |  | 2026-11-22 | T14b2 stage 2: Create, second store without trainable variables → ELoraOptim 'store 1 has no trainable variables' |
+| UT-LoraOptim-014 | OK |  | 2026-11-22 | T14b2 stage 2: loss Backward → grads non-zero; ZeroGrad → W.grad and B.grad zero |
+| UT-LoraOptim-015 | OK |  | 2026-11-22 | T14b2 stage 2: Moments(2) with two stores → ELoraOptim 'store 2 out of range (count 2)' |
+| UT-LoraOptim-016 | OK |  | 2026-11-22 | T14b2 stage 2: Moments(-1) with two stores → ELoraOptim 'store -1 out of range (count 2)' |
+| UT-LoraOptim-101 | OK |  | 2026-11-22 | T14b3 stage 3: Step one step, hand values (Eps 0): P 0.899, m '0.05', v '0.00025', StepCount 1 |
+| UT-LoraOptim-102 | OK |  | 2026-11-22 | T14b3 stage 3: Step second step, hand values (Eps 0): P 0.798101, m '0.095', v '0.00049975', StepCount 2 |
+| UT-LoraOptim-103 | OK |  | 2026-11-22 | T14b3 stage 3: 20 AdamW updates fp32 vs TOptimizer.AdamW, MaxAbsDiff ≤ 1e-6, StepCount 20 |
+| UT-LoraOptim-104 | OK |  | 2026-11-22 | T14b3 stage 3: 20 AdamW updates fp64 vs TOptimizer.AdamW, MaxAbsDiff ≤ 1e-12, StepCount 20 |
+| UT-LoraOptim-105 | OK |  | 2026-11-22 | T14b3 stage 3: trainable var without grad skipped (U stays '1 1', m.2/v.2 '0 0') |
+| UT-LoraOptim-106 | OK |  | 2026-11-22 | T14b3 stage 3: Step with LR 0: P unchanged '1', m '0.05', StepCount 1 |
+| UT-LoraOptim-107 | OK |  | 2026-11-22 | T14b3 stage 3: ClipGlobalNorm(1) norm 5, grad [3,4] clipped to ~[0.6,0.8] |
+| UT-LoraOptim-108 | OK |  | 2026-11-22 | T14b3 stage 3: ClipGlobalNorm(10) no clipping, norm 5, grad stays '3 4' |
+| UT-LoraOptim-109 | OK |  | 2026-11-22 | T14b3 stage 3: ClipGlobalNorm(1) over two stores, norm 5, grad 0.6 / 0.8 |
+| UT-LoraOptim-110 | OK |  | 2026-11-22 | T14b3 stage 3: 20 clip+step updates fp32 vs ClipGradNorm+AdamW, MaxAbsDiff ≤ 1e-6 |
+| UT-LoraOptim-111 | OK |  | 2026-11-22 | T14b3 stage 3: two stores (w; b) equal one store (w, b) after 20 clip+step updates, exact diff 0 (fp64) |
+| UT-LoraOptim-112 | OK |  | 2026-11-22 | T14b3 stage 3: no gradients: ClipGlobalNorm 0, Step no-op (P '1 1'), StepCount 1 |

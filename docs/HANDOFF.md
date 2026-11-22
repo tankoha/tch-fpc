@@ -6,7 +6,7 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 Status at a glance of the knowledge-package and fine-tuning work:
 [progress.md](progress.md).
 
-## Local session 12 (2026-11-22): local models compared, Oxygene compiler verified, T08 and T13 done — resume here
+## Local session 12 (2026-11-22): local models compared, Oxygene compiler verified, T08, T13 and T14 done — resume here
 
 **Local models on the H39 tasks** (the ten checked tasks of
 `tests/skill/tasks/`, one run per task and mode, GPU logging on).
@@ -101,7 +101,7 @@ T05b3).
 1. ~~T08a → T08b1 → T08b2 → T08c~~ **done, below**; with `tasks/run-task.sh` (main and sub
    GLM 5), the harness owner checking after each (progress below this
    list when done).
-2. M1 remainder: ~~T13~~ (done, below), T14, then T07, T09, T10, T11 (H43).
+2. M1 remainder: ~~T13, T14~~ (done, below), then T07, T09, T10, T11 (H43).
 3. ~~Commit~~ **committed 2026-11-22** (tch-fpc, hermes-agent-setup 4cd71d0,
    polyglot-scripting c45962e).
 
@@ -147,6 +147,38 @@ Checks after each stage:
   with the GPUs hidden): stages split over cuda:0 and cuda:1, fp32, against
   fp64 on the CPU: 2.8e-6 (8 stages, inputs on the host) and 3.8e-5 (64
   stages, width 512); saved inputs on the right device. 3/3 OK.
+
+**T14 done (2026-11-22 13:00–14:30, five runs of `run-task.sh`; main GLM
+5, sub-agent the local `qwen3.8-27b-128k:latest` again, by the user's
+choice).** Unit `LoraOptim` (DESIGN 8.14): `TLoraAdamW` (moments `m.<j>`,
+`v.<j>` in one `TVarStore` per parameter store, `Step(LR)`,
+`ClipGlobalNorm`, `ZeroGrad`, `Moments(I)`, `StepCount`),
+`DefaultAdamWConfig`, `ScheduleLR`. Prepared as for T08/T13 (prototype,
+`tasks/T14-facts.md` with 28 UT rows all run against it, skeleton, fixture
+`tests/ut/LoraOptimFixture.pas` with a toy problem and the oracle
+`ReferenceRun` = `TOptimizer.AdamW`, ITa `tests/ita/T14-run.sh`). For the
+local sub-agent the code went in three stages (b1 config and schedule, b2
+construction and moment stores, b3 clipping and update). Checks after each
+stage:
+- T14a: the case table equals the facts' 28 rows.
+- T14b1 (17 min), T14b2 (30 min), T14b3 (23 min): rebuilt with `-Cr`,
+  10, 16, 28 tests pass; the code equals the prototype; gate UT 426/426,
+  line coverage 100 %. **Qwen needed no fix by the harness owner.**
+- T14c: ITa 7/7 OK, values equal to the prototype's (1.2e-7, 1.1e-16,
+  2.4e-7, 0, 6.0e-8, 0, 0); rerun by the harness owner the same;
+  `ita.md` equals `summary.tsv`. Mutants (no bias correction; weight decay
+  added to the gradient; a wrong clipping norm) are caught; the last one
+  only by ITa-T14-007, which compares the clipped gradients directly
+  (Adam is nearly scale-invariant, so a wrong clip barely moves the
+  parameters).
+- GPU (`tests/ita/T14-run.sh gpu`, harness owner only): fp32 on cuda:0
+  against the CPU reference 1.5e-7; w on cuda:0 and b on cuda:1 with
+  clipping over both against one CPU store 6.6e-7. 2/2 OK.
+- Temperatures while Qwen ran (13:30–14:26, `gpulog.sh` now also logs the
+  CPU's Tctl in column `cpuC`): card0 junction up to 106 °C at only
+  about 100 W (84 of 1622 samples at 95 °C or more), card1 up to 91 °C,
+  CPU Tctl up to 91 °C (mean 79 °C; Ollama runs the 128k model 5 % on the
+  CPU). The user changed the surroundings of the PC; no clear drop yet.
 
 ## Local session 11 (2026-11-19 to 22): M1 T01–T05 done, H46 holds
 

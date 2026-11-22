@@ -242,6 +242,39 @@ with ones is an equivalent mutant (k and v are zero there). No fix by the
 harness owner. Temperatures 14:45–18:13: card0 junction up to 106 °C,
 card1 93 °C, CPU Tctl up to 93 °C (mean 73 °C).
 
+**T10 prepared, T10a done (2026-11-22 evening; resume at T10b1 in a new
+session).** Prototype by the harness owner in `samples/qwen-lora/work/proto/T10/`
+(git-ignored): `PackedLinear.pas` (packed GGUF bytes on a device,
+dequantised per call by T03's `DequantizeT`; `LoadPacked`, `LoadDense`)
+and `QwenBlocks.pas` (`ReadQwenDims` from the metadata, `RmsNorm`,
+`RopeText`, `TQwenBlock` = `TStage` with the FFN, `TLinearBlock`,
+`TFullBlock`, `LoadBlock`; fp32; LoRA comes with T12). Oracle, committed
+with the next commit: `tests/ut/QwenRefScalar.pas`, a slow scalar Double
+version of both blocks from DESIGN 8.10 (T02's scalar dequantiser, plain
+loops), and `tests/ut/QwenBlocksFixture.pas`, which writes a tiny `qwen35`
+GGUF (blk.0 linear, blk.1 full; 2 key / 4 value SSM heads, 4 query / 2 KV
+heads; Q8_0, F16, F32). Measured: rehearsal blocks 0 (linear) and 3
+(full) at T 8 and 70 agree with the scalar version to 4.0e-7 / 5.6e-7
+(outputs about 4); the tiny model to 3.4e-6; mutants caught (key tiling
+interleaved instead of repeated, convolution taps reversed, RoPE on
+adjacent pairs). The rehearsal model has equal key and value head counts,
+so only the tiny model exercises the tiling. Next: facts with UT rows
+(PackedLinear, helpers, blocks), skeletons, ITa (all 24 rehearsal blocks
+against the scalar version), tasks T10a, b1–b4, c. **Since done:**
+`tasks/T10-facts.md` (both units' code from the prototype, 31 UT rows all
+run against it), skeletons `src/PackedLinear.pas`, `src/QwenBlocks.pas`,
+test skeletons, ITa `tests/ita/T10-run.sh` (needs `QLORA_MODEL`; driver
+`tests/ita/T10/blocks_check.pas`: every rehearsal block against the scalar
+version, the tiny model, four blocks chained, the blocks as `Recompute`
+stages; prototype 5/5, skeleton all NG; GPU case 101, 4.0e-6). T10a ran
+18:27–18:58 (local Qwen as sub-agent): documents and the case tables
+`PackedLinear.cases.md` (15 rows) and `QwenBlocks.cases.md` (16 rows)
+equal to the facts. **Next: `tasks/run-task.sh T10b1`, then b2, b3, b4
+(check each as before: rebuild with `-Cr`, compare the code with
+`work/proto/T10/`, run the gate), then `QLORA_MODEL=<rehearsal GGUF>
+tasks/run-task.sh T10c` (stop a resident Hermes gateway started without
+`QLORA_MODEL` first), then T11 (H43).**
+
 ## Local session 11 (2026-11-19 to 22): M1 T01–T05 done, H46 holds
 
 **Done** (Hermes SDLC, each checked against an oracle by the harness owner):

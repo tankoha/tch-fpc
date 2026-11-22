@@ -195,6 +195,31 @@ T09c の ITa 6/6 は試作の値と同じで、再実行でも同じ。GPU の�
 14:45〜18:13 の温度：card0 のジャンクション最高 106 °C、card1 93 °C、CPU の Tctl 最高 93 °C
 （平均 73 °C）。
 
+**T10 の準備と T10a が完了（2026-11-22 夜。新しいセッションで T10b1 から再開）。** ハーネス担当の試作は
+`samples/qwen-lora/work/proto/T10/`（git の対象外）：`PackedLinear.pas`（GGUF のバイトのまま
+デバイスに置き、呼び出しごとに T03 の `DequantizeT` で逆量子化。`LoadPacked`、`LoadDense`）と
+`QwenBlocks.pas`（メタデータからの `ReadQwenDims`、`RmsNorm`、`RopeText`、FFN を持つ `TStage`
+としての `TQwenBlock`、`TLinearBlock`、`TFullBlock`、`LoadBlock`。fp32。LoRA は T12）。オラクル
+（次のコミットに含める）：`tests/ut/QwenRefScalar.pas`（DESIGN 8.10 から書いた、両ブロックの
+遅いスカラー版。Double、T02 のスカラー逆量子化と素朴なループ）と `tests/ut/QwenBlocksFixture.pas`
+（小さな `qwen35` の GGUF を書く。blk.0 linear、blk.1 full。SSM のキー 2・値 4 ヘッド、クエリ 4・
+KV 2 ヘッド。Q8_0、F16、F32）。実測：リハーサル用モデルのブロック 0（linear）と 3（full）は
+T 8 と 70 でスカラー版と 4.0e-7 / 5.6e-7（出力は約 4）、小さなモデルで 3.4e-6。変異体（キーの
+タイルを繰り返しでなくインターリーブ、畳み込みのタップの逆順、隣り合う組の RoPE）は検出される。
+リハーサル用モデルはキーと値のヘッド数が同じなので、タイルを試せるのは小さなモデルだけ。次：
+UT の行を含む facts（PackedLinear、補助関数、ブロック）、スケルトン、ITa（リハーサル用モデルの
+24 ブロックすべてをスカラー版と比較）、タスク T10a、b1〜b4、c。**その後に完了：**
+`tasks/T10-facts.md`（両ユニットのコードを試作から。UT 31 行はすべて試作で実行済み）、スケルトン
+`src/PackedLinear.pas`、`src/QwenBlocks.pas`、テストのスケルトン、ITa `tests/ita/T10-run.sh`
+（`QLORA_MODEL` が要る。ドライバ `tests/ita/T10/blocks_check.pas`：リハーサル用モデルの全ブロックを
+スカラー版と比較、小さなモデル、4 ブロックの連結、`Recompute` の段としてのブロック。試作で 5/5、
+スケルトンではすべて NG。GPU のケース 101 は 4.0e-6）。T10a は 18:27〜18:58（サブはローカルの Qwen）：
+文書とケース表 `PackedLinear.cases.md`（15 行）・`QwenBlocks.cases.md`（16 行）は facts と同じ。
+**次：`tasks/run-task.sh T10b1`、続けて b2、b3、b4（これまでどおり各段階の後に確認：`-Cr` で
+ビルドし直し、コードを `work/proto/T10/` と比べ、ゲートを実行）、次に `QLORA_MODEL=<リハーサル用
+GGUF> tasks/run-task.sh T10c`（`QLORA_MODEL` なしで起動した常駐の Hermes ゲートウェイがあれば先に
+止める）、そして T11（H43）。**
+
 ## ローカルセッション11（2026-11-19〜22）：M1 の T01〜T05 が完了、H46 が成り立つ
 
 **完了**（Hermes SDLC。どれもハーネス担当がオラクルと照合した）：

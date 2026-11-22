@@ -6,7 +6,127 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 Status at a glance of the knowledge-package and fine-tuning work:
 [progress.md](progress.md).
 
-## Local session 11 (2026-11-19 to 22): M1 T01–T05 done, H46 holds — resume here
+## Local session 12 (2026-11-22): local models compared, Oxygene compiler verified, T08 done — resume here
+
+**Local models on the H39 tasks** (the ten checked tasks of
+`tests/skill/tasks/`, one run per task and mode, GPU logging on).
+
+Through Hermes (`tests/skill/run-h39.sh`, 40 turns;
+`build/h39/run2-20261122-0553/`):
+
+| Model | with the skill | without |
+|---|---|---|
+| magistral small 24B (64k) | 0/10 | 0/10 |
+| devstral-small-2 24B (64k) | 2/10 (04, 06) | 0/10 |
+
+Both models fail mostly at tool calling, not at Pascal: magistral returns
+its tool calls in a form Ollama does not parse (a probe with one tool
+gave text, not a `tool_calls` entry), and its context is capped at 40 000
+tokens; devstral often ends a turn without a tool call. Hermes therefore
+measures the agent loop, so a second harness without an agent was written.
+
+**Direct harness** `tests/skill/run-direct.bb` (Babashka; usage in its
+header): the model is asked for the whole program, the program is built
+and run with the task's checker, and the compiler messages or the output
+difference go back, up to 6 answers per task. "with" puts the tch-fpc
+skill's SKILL.md and reference files into the system prompt; "without"
+gives the task only (no access to the sources, unlike Hermes).
+`build/h39/direct-20261122-0640/summary.tsv`:
+
+| Model | with the skill | without |
+|---|---|---|
+| magistral small 24B | 0/10 (1,036 s) | 2/10: 04, 05 (855 s) |
+| devstral-small-2 24B | 2/10: 07, 09 (725 s) | 1/10: 05 (692 s) |
+| Qwen3.8 27B (128k) | **9/10** (2,858 s; 6 of 9 at the 2nd answer, 2 at the 1st; 05 failed on `Single` passed for a `TTensor`) | 1/10: 05 (7,017 s) |
+
+Reading: without the skill and without the sources every model invents
+the API (`tch_tensor_zeros_2d`, `JitLoad`, `T_ReLu`); with the skill only
+Qwen turns it into working programs. The 24B models do not reach a
+compiling, correct program in 6 answers even with the skill. **Conclusion:
+neither 24B model replaces Qwen as the tch-fpc coder or as a sub-agent;
+R4's local fallback (devstral) is weak.** The choice of a LoRA base
+(magistral is a plain `llama` transformer; this sample's forward is
+written for `qwen35`) is the user's and is not decided by these numbers.
+
+**GPU temperatures** (`samples/qwen-lora/work/gpulog.tsv`, 03:16–10:20,
+logger stopped): card0 (RX 9070) junction **up to 107 °C** (06:11; 30
+samples at 100 °C or more between 06:07 and 10:17), earlier maximum 97 °C;
+card1 (RX 9070 XT) up to 91 °C. No reset this time. Power limits and
+fans are the user's to change.
+
+**Oxygene compiler (Next 2 of session 11, done).** RemObjects Elements
+14.0.0.3157 builds from the command line with EBuild inside the Earth
+flatpak (`flatpak run --command=/app/dotnet/dotnet com.remobjects.earth
+/app/earth/EBuild.dll X.elements`, then the same `dotnet Bin/X.dll`; a .NET
+Core (Echoes) `.elements` project, no `Echoes` reference). The
+`pascal-oxygene` skill's six examples build and print their `*.expected`
+output (6/6); `tests/check-examples.sh` now builds and runs them (SKIP when
+`flatpak info com.remobjects.earth` fails; work files under
+`${XDG_CACHE_HOME:-~/.cache}`). Three traps found by the compiler and
+written into SKILL.md (version 1.1.0): `=` on a generic `T` is not
+allowed (use `Equals` / `EqualityComparer`); a `{ }` comment ends at the
+first `}` (use `(* *)` around code with braces); `loop` is reserved
+(rename or `&Loop`). Examples 02, 04 and 06 were fixed. Changes are in
+`~/.claude/skills/polyglot-scripting` (repository
+tankoha/polyglot-scripting), commit c45962e.
+**DESIGN 8.16 / M6, question 2:** the compiler arrived before the data
+set is frozen (M3 not started), so by the decision in 8.16 Oxygene is
+compiled and run like the other dialects and is in the first run; the
+filter row for Oxygene (EBuild build and run) is added at M3. Question 2
+is closed unless the user wants otherwise.
+
+**Model wording fixed (Next 4 of session 11, done; hermes-agent-setup 4cd71d0):**
+hermes-agent-setup `sdlc/README.md` and `sdlc/project-template/AGENTS.md`
+name GLM 5 as the sub-agent; `samples/qwen-lora/AGENTS.md` (and `_jp`)
+state the models per task range (main: Mistral Large 3 until T02, GLM 5
+from T03; sub: local Qwen3.8 until T02, others in between, GLM 5 from
+T05b3).
+
+**T08 prepared by the harness owner** (the method of session 11):
+- prototype of the gated delta rule (per head `M := exp(g)·M`,
+  `d := β(v − M k)`, `M := M + d kᵀ`, `o := M q`), equal to a hand case
+  and to a Double scalar reference within 4.8e-7 at the 27B sizes
+  (H = 48, 128 × 128, T = 200; about 50 ms);
+- `tasks/T08-facts.md` (interface, the five implementation lines, checks
+  and messages in order, 33 UT rows all run against the prototype),
+  skeleton `src/DeltaRule.pas`, `tests/ut/DeltaRule_test.pas`, fixture
+  `tests/ut/DeltaRuleFixture.pas` (random inputs, scalar reference);
+- ITa `tests/ita/T08-run.sh` with driver `tests/ita/T08/deltarule_check.pas`,
+  7 cases: prototype 7/7 OK, skeleton all NG, a mutant without the decay
+  NG on 5;
+- tasks `T08a` (documents), `T08b1` (`DeltaStep`), `T08b2`
+  (`DeltaRuleTokens`), `T08c` (ITa).
+
+**Next:**
+1. ~~T08a → T08b1 → T08b2 → T08c~~ **done, below**; with `tasks/run-task.sh` (main and sub
+   GLM 5), the harness owner checking after each (progress below this
+   list when done).
+2. M1 remainder: T13, T14, then T07, T09, T10, T11 (H43).
+3. ~~Commit~~ **committed 2026-11-22** (tch-fpc, hermes-agent-setup 4cd71d0,
+   polyglot-scripting c45962e).
+
+**T08 done (2026-11-22 10:22–10:50, four runs of `run-task.sh`, main and
+sub GLM 5).** Harness owner's checks after each stage:
+- T08a (2 delegations): the case table has the 33 rows of the facts,
+  inputs and expected values identical; detailed design with the five
+  lines and the messages in order; ITa case file as specified.
+- T08b1: rebuilt and rerun, 16/16; `DeltaStep` is the facts' code.
+- T08b2: 40 tests, gate UT 377/377, line coverage 100 %. The sub-agent
+  added 7 rows (017–020, 118–120: kind errors of Q, K, V, Beta) that the
+  facts missed and coverage needs; they are right and recorded in the
+  case table. **Harness owner's fix:** `DeltaRuleTokens` read
+  `V.Shape[2]` before checking V's rank (out of range for a 2-D V, no row
+  hits it); the line was moved after the V check, rerun with `-Cr`: 40/40,
+  gate OK.
+- T08c: ITa 7/7 OK, values equal to the prototype's (0, 0, 0, 4.77e-7,
+  2.38e-7, 4.17e-7, 2.38e-7); rerun by the harness owner gives the same;
+  `ita.md` rows equal `summary.tsv`; no defect.
+- Lesson for the facts: list one error row per raise (each kind check),
+  and write the UT build command with `-Fu../../src -Fl<libtch>
+  -k-rpath=<libtch>` (Hermes' shell had the library path; a plain shell
+  does not).
+
+## Local session 11 (2026-11-19 to 22): M1 T01–T05 done, H46 holds
 
 **Done** (Hermes SDLC, each checked against an oracle by the harness owner):
 

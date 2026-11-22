@@ -5,7 +5,105 @@
 再開するときは最初にこれを読んでください。決定事項と理由は [DESIGN_jp.md](DESIGN_jp.md) にあります。
 知識パッケージとファインチューニングの作業の状況は [progress_jp.md](progress_jp.md) で一目で見られます。
 
-## ローカルセッション11（2026-11-19〜22）：M1 の T01〜T05 が完了、H46 が成り立つ — ここから再開
+## ローカルセッション12（2026-11-22）：ローカルモデルの比較、Oxygene コンパイラでの検証、T08 完了 — ここから再開
+
+**H39 の課題でのローカルモデル**（`tests/skill/tasks/` の検査付き 10 課題。課題とモードごとに1回、
+GPU のログを取りながら）。
+
+Hermes 経由（`tests/skill/run-h39.sh`、40 ターン、`build/h39/run2-20261122-0553/`）：
+
+| モデル | スキルあり | スキルなし |
+|---|---|---|
+| magistral small 24B（64k） | 0/10 | 0/10 |
+| devstral-small-2 24B（64k） | 2/10（04、06） | 0/10 |
+
+どちらも主に Pascal ではなくツール呼び出しで失敗した。magistral は Ollama が解釈しない形でツール
+呼び出しを返し（ツール1つの試験で `tool_calls` ではなく本文になった）、文脈は 40 000 トークンが
+上限。devstral はツールを呼ばずにターンを終えることが多い。Hermes ではエージェントの動きを
+測ってしまうので、エージェントを使わない2つ目のハーネスを書いた。
+
+**直接ハーネス** `tests/skill/run-direct.bb`（Babashka。使い方は先頭のコメント）：モデルに
+プログラム全体を求め、課題の検査スクリプトでビルドと実行をし、コンパイラのメッセージか出力の
+違いを返す。答えは課題ごとに最大6回。「あり」は tch-fpc スキルの SKILL.md と reference の
+ファイルをシステムプロンプトに入れる。「なし」は課題だけを渡す（Hermes と違いソースも読めない）。
+`build/h39/direct-20261122-0640/summary.tsv`：
+
+| モデル | スキルあり | スキルなし |
+|---|---|---|
+| magistral small 24B | 0/10（1,036 秒） | 2/10：04、05（855 秒） |
+| devstral-small-2 24B | 2/10：07、09（725 秒） | 1/10：05（692 秒） |
+| Qwen3.8 27B（128k） | **9/10**（2,858 秒。9 のうち 6 が2回目、2 が1回目の答えで合格。05 は `TTensor` に `Single` を渡して失敗） | 1/10：05（7,017 秒） |
+
+読み方：スキルもソースもないと、どのモデルも API をでっち上げる（`tch_tensor_zeros_2d`、
+`JitLoad`、`T_ReLu`）。スキルがあってそれを動くプログラムにできるのは Qwen だけ。24B の2モデルは
+スキルがあっても6回の答えで正しくコンパイルできるプログラムにたどり着かない。**結論：どちらの
+24B モデルも tch-fpc のコーダーやサブエージェントとして Qwen の代わりにならない。R4 のローカルの
+代替（devstral）は弱い。** LoRA の土台にどれを選ぶか（magistral は素の `llama` の
+トランスフォーマーで、このサンプルの forward は `qwen35` 向け）はユーザーが決めることで、この
+数値では決まらない。
+
+**GPU の温度**（`samples/qwen-lora/work/gpulog.tsv`、03:16〜10:20、ロガーは停止済み）：card0
+（RX 9070）のジャンクションが**最高 107 °C**（06:11。06:07〜10:17 に 100 °C 以上が 30 サンプル）。
+以前の最高は 97 °C。card1（RX 9070 XT）は最高 91 °C。今回はリセットなし。電力上限やファンの
+変更はユーザーが行う。
+
+**Oxygene コンパイラ（セッション11 の次の作業 2、完了）。** RemObjects Elements 14.0.0.3157 は
+Earth の flatpak の中の EBuild でコマンドラインからビルドできる（`flatpak run
+--command=/app/dotnet/dotnet com.remobjects.earth /app/earth/EBuild.dll X.elements`、実行も同じ
+`dotnet Bin/X.dll`。.NET Core（Echoes）の `.elements` プロジェクトで、`Echoes` への参照は
+付けない）。`pascal-oxygene` スキルの例 6 個はビルドでき、`*.expected` のとおりに出力する
+（6/6）。`tests/check-examples.sh` がそれらをビルドして実行するようになった（`flatpak info
+com.remobjects.earth` が失敗すれば SKIP、作業ファイルは `${XDG_CACHE_HOME:-~/.cache}` の下）。
+コンパイラで見つかった罠3つを SKILL.md（版 1.1.0）に書いた：ジェネリックの `T` に `=` は使えない
+（`Equals` / `EqualityComparer` を使う）、`{ }` のコメントは最初の `}` で終わる（波かっこを含む
+コードは `(* *)` で囲む）、`loop` は予約語（名前を変えるか `&Loop`）。例 02、04、06 を直した。
+変更は `~/.claude/skills/polyglot-scripting`（リポジトリ tankoha/polyglot-scripting）にあり、コミット c45962e。
+**DESIGN 8.16 / M6、質問 2：** データセットを凍結する前（M3 は未着手）にコンパイラが来たので、
+8.16 の決定により Oxygene もほかの方言と同じくコンパイルして実行し、1回目の学習に入れる。
+Oxygene のフィルタの行（EBuild でビルドして実行）は M3 で加える。ユーザーが別の考えでなければ
+質問 2 は閉じる。
+
+**モデル名の記述を修正（セッション11 の次の作業 4、完了。hermes-agent-setup 4cd71d0）：** hermes-agent-setup の
+`sdlc/README.md` と `sdlc/project-template/AGENTS.md` はサブエージェントを GLM 5 とした。
+`samples/qwen-lora/AGENTS.md`（と `_jp`）はタスクの範囲ごとのモデルを書く（メイン：T02 まで
+Mistral Large 3、T03 から GLM 5。サブ：T02 までローカルの Qwen3.8、その間はほかのモデル、
+T05b3 から GLM 5）。
+
+**ハーネス担当が T08 を準備**（セッション11 のやり方）：
+- gated delta rule の試作（ヘッドごとに `M := exp(g)·M`、`d := β(v − M k)`、`M := M + d kᵀ`、
+  `o := M q`）。手計算の例と一致し、27B の大きさ（H = 48、128 × 128、T = 200、約 50 ms）で
+  Double のスカラー参照と 4.8e-7 以内で一致；
+- `tasks/T08-facts.md`（インタフェース、実装の5行、検査とメッセージの順序、UT の 33 行。
+  すべて試作で実行済み）、スケルトン `src/DeltaRule.pas`、`tests/ut/DeltaRule_test.pas`、
+  フィクスチャ `tests/ut/DeltaRuleFixture.pas`（乱数の入力、スカラー参照）；
+- ITa `tests/ita/T08-run.sh` とドライバ `tests/ita/T08/deltarule_check.pas`、7 ケース：試作で
+  7/7 OK、スケルトンではすべて NG、減衰を抜いた変異体で 5 つ NG；
+- タスク `T08a`（文書）、`T08b1`（`DeltaStep`）、`T08b2`（`DeltaRuleTokens`）、`T08c`（ITa）。
+
+**次の作業：**
+1. ~~`tasks/run-task.sh`（メイン・サブとも GLM 5）で T08a → T08b1 → T08b2 → T08c~~ **完了、下記**。各段階の後に
+   ハーネス担当が確認する（終わったらこの一覧の下に経過を書く）。
+2. M1 の残り：T13、T14、次に T07、T09、T10、T11（H43）。
+3. ~~コミット~~ **2026-11-22 にコミット済み**（tch-fpc、hermes-agent-setup 4cd71d0、
+   polyglot-scripting c45962e）。
+
+**T08 完了（2026-11-22 10:22〜10:50、`run-task.sh` を4回、メイン・サブとも GLM 5）。**
+各段階の後のハーネス担当の確認：
+- T08a（委任2回）：ケース表は facts の 33 行で、入力も期待値も同じ。詳細設計は実装の5行と
+  メッセージを順序どおりに書く。ITa のケースファイルも指定どおり。
+- T08b1：ビルドし直して実行し 16/16。`DeltaStep` は facts のコードそのもの。
+- T08b2：テスト 40、UT ゲート 377/377、行カバレッジ 100 %。サブエージェントが facts に
+  抜けていてカバレッジに要る7行（017〜020、118〜120：Q、K、V、Beta の型のエラー）を足した。
+  正しく、ケース表にも記録されている。**ハーネス担当の修正：** `DeltaRuleTokens` が V の次元を
+  確かめる前に `V.Shape[2]` を読んでいた（2次元の V では範囲外、どの行も通らない）。その行を
+  V の検査の後ろへ移し、`-Cr` で再実行：40/40、ゲート OK。
+- T08c：ITa 7/7 OK、値は試作と同じ（0、0、0、4.77e-7、2.38e-7、4.17e-7、2.38e-7）。
+  ハーネス担当の再実行でも同じ。`ita.md` の行は `summary.tsv` と一致。不具合なし。
+- facts への教訓：raise ごとにエラーの行を1つ置く（型の検査それぞれ）。UT のビルドコマンドには
+  `-Fu../../src -Fl<libtch> -k-rpath=<libtch>` を書く（Hermes のシェルにはライブラリの場所が
+  あったが、素のシェルにはない）。
+
+## ローカルセッション11（2026-11-19〜22）：M1 の T01〜T05 が完了、H46 が成り立つ
 
 **完了**（Hermes SDLC。どれもハーネス担当がオラクルと照合した）：
 

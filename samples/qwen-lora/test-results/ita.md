@@ -76,3 +76,10 @@ When a case is run again, do not edit its row; append a new row below (the last 
 | ITa-T05-006 | OK | - | 2026-11-22 | token ids equal /tokenize: fuzz records: diff 0, 2000/2000 lines |
 | ITa-T05-007 | OK | - | 2026-11-22 | decode of encode gives the text back: diff 0, 2978/2978 lines |
 | ITa-T05-008 | OK | - | 2026-11-22 | plain mode: one file's ids equal /tokenize: diff 0, 1/1 lines |
+| ITa-T08-001 | OK | - | 2026-11-22 | hand case, two tokens: value 0.00E+00, limit 0.00E+00 |
+| ITa-T08-002 | OK | - | 2026-11-22 | hand case, g = ln(1/2) on token 1: value 0.00E+00, limit 0.00E+00 |
+| ITa-T08-003 | OK | - | 2026-11-22 | beta = 0, H 48, T 200: value 0.00E+00, limit 0.00E+00 |
+| ITa-T08-004 | OK | - | 2026-11-22 | reference, g in [-0.1, 0], seed 13, H 48, T 200: value 4.77E-07, limit 1.00E-05 |
+| ITa-T08-005 | OK | - | 2026-11-22 | reference, g in [-5, 0], seed 14, H 16, T 200: value 2.38E-07, limit 1.00E-05 |
+| ITa-T08-006 | OK | - | 2026-11-22 | reference, T = 1, 63, 64, 65, 200, H 48: value 4.17E-07, limit 1.00E-05 |
+| ITa-T08-007 | OK | - | 2026-11-22 | g = -inf, H 48, T 20: value 2.38E-07, limit 1.00E-06 |

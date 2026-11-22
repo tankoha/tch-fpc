@@ -7,7 +7,7 @@ The detailed log and the next steps are in [HANDOFF.md](HANDOFF.md);
 decisions and numbers in [DESIGN.md](DESIGN.md). Update this page at the
 end of every session, together with HANDOFF.
 
-Last updated: 2026-11-22, local session 11 (M1 T01–T06 done, H46 holds; models and harness lessons in HANDOFF).
+Last updated: 2026-11-22, local session 12 (local models compared on H39: only Qwen writes tch-fpc code, with the skill 9/10; Oxygene examples verified with the Elements compiler; T08 done).
 
 ## Goals
 
@@ -33,10 +33,10 @@ Last updated: 2026-11-22, local session 11 (M1 T01–T06 done, H46 holds; models
 | H42 re-run (re-balanced split, T = 2048 with host offload) | done 2026-11-17 | same, step 2 |
 | C1 deployment path (D2 / D3 / D4) | **decided 2026-11-17: D3** (merged GGUF, adapted tensors Q8_0, `ollama create`) | DESIGN 8.8 "Decisions" |
 | C3 inputs | 2026-11-17: Mistral terms settled (Apache-2.0); GGUF base for the first run, original after it; Oxygene in scope (licence requested from RemObjects); blob read access done with read-only ACLs. **C3 done** | DESIGN 8.8 "Decisions", HANDOFF C3 |
-| Theme B detailed design (milestones, modules, LoRA, data spec, evaluation) | **done** (design session 10, 2026-11-17); questions answered 2026-11-17 except Oxygene (2) | DESIGN 8.9–8.19, UML 10, HANDOFF design session 10 |
+| Theme B detailed design (milestones, modules, LoRA, data spec, evaluation) | **done** (design session 10, 2026-11-17); questions answered 2026-11-17; Oxygene (2) closed 2026-11-22 by the arrival of the compiler (Oxygene is compiled and run, in the first run; HANDOFF local session 12) | DESIGN 8.9–8.19, UML 10, HANDOFF design session 10 |
 | Rehearsal model (a small `qwen35` GGUF, Q4_K_M) | **downloaded 2026-11-17**: Qwen3.5 0.8B Q4_K_M (Unsloth) + mmproj BF16 in `build/models/`, sha256 verified; has Q5_K/Q8_0, tied head, no MTP | DESIGN 8.11, HANDOFF question 1 |
 | M0 preconditions (C4, rehearsal model, SDLC skeleton, H50) | **done** (local session 10) | HANDOFF local session 10 |
-| M1 read and reproduce (T01–T11; H46, H43 on the rehearsal model) | **in progress**: T01–T06 done (2026-11-22), each agrees with its oracle; with Bedrock models (main and sub GLM 5) a task takes 1–3 h; left T07–T11, T13, T14 | DESIGN 8.18, HANDOFF local session 11 |
+| M1 read and reproduce (T01–T11; H46, H43 on the rehearsal model) | **in progress**: T01–T06 and T08 done (2026-11-22), each agrees with its oracle; with Bedrock models (main and sub GLM 5) a task takes 1–3 h (T08 with prepared facts: 30 min); left T07, T09–T11, T13, T14 | DESIGN 8.18, HANDOFF local sessions 11, 12 |
 | M2 train and deploy in small (T12–T20; H47), M2g GPU smoke | not started | DESIGN 8.18 |
 | M3 data set v1, evaluation tasks, baseline evaluation | not started | DESIGN 8.16, 8.17 |
 | M4 27B run, M5 merge / H45 / evaluation | not started (by the user; Qwen is down during M4) | DESIGN 8.11 |
@@ -47,7 +47,7 @@ Last updated: 2026-11-22, local session 11 (M1 T01–T06 done, H46 holds; models
 |---|---|---|
 | H37 | Claude Code and Hermes both load the planned skill tree | **Hermes holds**; Claude Code after the push |
 | H38 | every planned pitfall fails with a stable message | **holds**: six pitfalls, messages quoted in SKILL.md |
-| H39 | the skill raises the local Qwen's pass rate on ten tasks | **measured**: 10/10 with and without (ceiling); the skill halves the time (29 against 55 min). C4: Qwen writes small tch-fpc programs |
+| H39 | the skill raises the local Qwen's pass rate on ten tasks | **measured**: 10/10 with and without (ceiling); the skill halves the time (29 against 55 min). C4: Qwen writes small tch-fpc programs. Session 12, without an agent: Qwen 9/10 with, 1/10 without (the API is invented without it); magistral and devstral 24B 0–2/10 |
 | H40 | bf16 / fp16 products work and are fast on gfx1201 | **holds**: 100 / 81 TFLOP/s bf16 (XT / 9070); fp32 only 1.6 / 1.3 |
 | H41 | Q4_K / Q6_K dequantisation in tensor ops is correct and fast | **holds**: exact; 3.2 / 4.7 ms per 89 M weights |
 | H42 | one training step fits and runs from one process on two GPUs | **holds**: 36/28 split, 167 tokens/s at T = 1024 (13.1 / 13.9 GiB), 172 at T = 2048 with host offload (14.0 / 14.7 GiB) |

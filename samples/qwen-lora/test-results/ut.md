@@ -382,6 +382,30 @@ When a case is run again, do not edit its row; append a new row below (the last 
 | UT-DeltaRule-118 | OK |  | 2026-11-22 |
 | UT-DeltaRule-119 | OK |  | 2026-11-22 |
 | UT-DeltaRule-120 | OK |  | 2026-11-22 | |
+| UT-DeltaRule-201 | OK |  | 2026-11-22 | |
+| UT-DeltaRule-202 | OK |  | 2026-11-22 | |
+| UT-DeltaRule-203 | OK |  | 2026-11-22 | |
+| UT-DeltaRule-204 | OK |  | 2026-11-22 | |
+| UT-DeltaRule-205 | OK |  | 2026-11-22 | |
+| UT-DeltaRule-206 | OK |  | 2026-11-22 | |
+| UT-DeltaRule-207 | OK |  | 2026-11-22 | |
+| UT-DeltaRule-208 | OK |  | 2026-11-22 | |
+| UT-DeltaRule-209 | OK |  | 2026-11-22 | |
+| UT-DeltaRule-210 | OK |  | 2026-11-22 | |
+| UT-DeltaRule-211 | OK |  | 2026-11-22 | |
+| UT-DeltaRule-212 | OK |  | 2026-11-22 | |
+| UT-DeltaRule-213 | OK |  | 2026-11-22 | |
+| UT-DeltaRule-214 | OK |  | 2026-11-22 | |
+| UT-DeltaRule-215 | OK |  | 2026-11-22 | |
+| UT-DeltaRule-216 | OK |  | 2026-11-22 | |
+| UT-DeltaRule-217 | OK |  | 2026-11-22 | |
+| UT-DeltaRule-218 | OK |  | 2026-11-22 | |
+| UT-DeltaRule-219 | OK |  | 2026-11-22 | |
+| UT-DeltaRule-220 | OK |  | 2026-11-22 | |
+| UT-DeltaRule-221 | OK |  | 2026-11-22 | |
+| UT-DeltaRule-222 | OK |  | 2026-11-22 | |
+| UT-DeltaRule-223 | OK |  | 2026-11-22 | |
+| UT-DeltaRule-224 | OK |  | 2026-11-22 | |
 | UT-Recompute-001 | OK |  | 2026-11-22 | |
 | UT-Recompute-002 | OK |  | 2026-11-22 | |
 | UT-Recompute-003 | OK |  | 2026-11-22 | |

@@ -7,7 +7,7 @@ The detailed log and the next steps are in [HANDOFF.md](HANDOFF.md);
 decisions and numbers in [DESIGN.md](DESIGN.md). Update this page at the
 end of every session, together with HANDOFF.
 
-Last updated: 2026-11-22, local session 12 (local models compared on H39: only Qwen writes tch-fpc code, with the skill 9/10; Oxygene examples verified with the Elements compiler; T07, T08, T13 and T14 done, T07 and T14 with the local Qwen as sub-agent again).
+Last updated: 2026-11-22, local session 12 (local models compared on H39: only Qwen writes tch-fpc code, with the skill 9/10; Oxygene examples verified with the Elements compiler; T07, T08, T09, T13 and T14 done, T07, T09 and T14 with the local Qwen as sub-agent again).
 
 ## Goals
 
@@ -36,7 +36,7 @@ Last updated: 2026-11-22, local session 12 (local models compared on H39: only Q
 | Theme B detailed design (milestones, modules, LoRA, data spec, evaluation) | **done** (design session 10, 2026-11-17); questions answered 2026-11-17; Oxygene (2) closed 2026-11-22 by the arrival of the compiler (Oxygene is compiled and run, in the first run; HANDOFF local session 12) | DESIGN 8.9–8.19, UML 10, HANDOFF design session 10 |
 | Rehearsal model (a small `qwen35` GGUF, Q4_K_M) | **downloaded 2026-11-17**: Qwen3.5 0.8B Q4_K_M (Unsloth) + mmproj BF16 in `build/models/`, sha256 verified; has Q5_K/Q8_0, tied head, no MTP | DESIGN 8.11, HANDOFF question 1 |
 | M0 preconditions (C4, rehearsal model, SDLC skeleton, H50) | **done** (local session 10) | HANDOFF local session 10 |
-| M1 read and reproduce (T01–T11; H46, H43 on the rehearsal model) | **in progress**: T01–T08, T13 and T14 done (2026-11-22), each agrees with its oracle; a task takes 1–3 h without prepared facts, 25–30 min with them (main and sub GLM 5), 90 min for T14 and 2 h for T07 with the local Qwen as sub-agent; left T09–T11 | DESIGN 8.18, HANDOFF local sessions 11, 12 |
+| M1 read and reproduce (T01–T11; H46, H43 on the rehearsal model) | **in progress**: T01–T09, T13 and T14 done (2026-11-22), each agrees with its oracle; a task takes 1–3 h without prepared facts, 25–30 min with them (main and sub GLM 5), 60–120 min each for T07, T09 and T14 with the local Qwen as sub-agent; left T10, T11 | DESIGN 8.18, HANDOFF local sessions 11, 12 |
 | M2 train and deploy in small (T12–T20; H47), M2g GPU smoke | not started | DESIGN 8.18 |
 | M3 data set v1, evaluation tasks, baseline evaluation | not started | DESIGN 8.16, 8.17 |
 | M4 27B run, M5 merge / H45 / evaluation | not started (by the user; Qwen is down during M4) | DESIGN 8.11 |

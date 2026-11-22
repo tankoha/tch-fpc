@@ -3960,7 +3960,11 @@ are kept, git-ignored, in `build/gate-2026-11-16/` (`h40.pas`, `h41.pas`,
 - **Chunked delta rule.** The chunked gated delta rule (chunk 64,
   `linalg_solve_triangular` for the in-chunk inverse) matches a naive
   token-by-token recurrence to 5.4e-7 (H = 2, T = 256, D = 16, fp32, CPU)
-  and runs forward and backward on gfx1201.
+  and runs forward and backward on gfx1201. **Implemented (T09, local
+  session 12):** `DeltaRuleChunked`, within 7.2e-7 of T08's token form at
+  the 27B sizes for T = 1–2048 (4.4e-6 with strong decay, gradients
+  2.1e-6); 13–17 ms at T = 2048 on the RX 9070. G must be finite (g = −inf
+  gives NaN in the chunked form).
 - **(H42), one training step of a synthetic stack**: 32 + 32 blocks with
   the real tensor types and shapes (every fourth block gated full
   attention with SDPA and GQA, the others Gated-DeltaNet), packed random

@@ -6,7 +6,7 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 Status at a glance of the knowledge-package and fine-tuning work:
 [progress.md](progress.md).
 
-## Local session 12 (2026-11-22): local models compared, Oxygene compiler verified, T07, T08, T13 and T14 done — resume here
+## Local session 12 (2026-11-22): local models compared, Oxygene compiler verified, T07, T08, T09, T13 and T14 done — resume here
 
 **Local models on the H39 tasks** (the ten checked tasks of
 `tests/skill/tasks/`, one run per task and mode, GPU logging on).
@@ -101,7 +101,7 @@ T05b3).
 1. ~~T08a → T08b1 → T08b2 → T08c~~ **done, below**; with `tasks/run-task.sh` (main and sub
    GLM 5), the harness owner checking after each (progress below this
    list when done).
-2. M1 remainder: ~~T13, T14, T07~~ (done, below), then T09, T10, T11 (H43).
+2. M1 remainder: ~~T13, T14, T07, T09~~ (done, below), then T10, T11 (H43).
 3. ~~Commit~~ **committed 2026-11-22** (tch-fpc, hermes-agent-setup 4cd71d0,
    polyglot-scripting c45962e).
 
@@ -219,6 +219,28 @@ caught. Interruptions: T07b3's first run met an expired `aws login`
 session (the user logged in again); T07c's first run stopped at
 `run-task.sh`'s gateway check (exit 3: the resident gateway lacked
 `QLORA_MODEL`; `hermes gateway stop`, then rerun).
+
+**T09 done (2026-11-22 17:11–18:12, four runs of `run-task.sh`, main
+GLM 5, sub-agent the local Qwen).** `DeltaRuleChunked` added to
+`DeltaRule` (chunk 64 by default, the sequence padded with zero tokens,
+one `linalg_solve_triangular` per chunk; T08's conventions: state
+[H, Dv, Dk], q as given, the final state returned). Prepared from the
+gate measurement's `ChunkGDR` (`build/gate-2026-11-16/h42.pas`). Against
+`DeltaRuleTokens` at the 27B sizes: at most 7.2e-7 for T = 1, 63, 64, 65,
+200 and 2048; 4.4e-6 with g down to −5 per token; gradients of all five
+inputs 2.1e-6; T08's hand cases exact. T = 2048: 100–116 ms on the CPU
+(token form 379 ms), 13–17 ms on the RX 9070. **G must be finite** (g =
+−inf, allowed in the token form, gives NaN in the chunked form; real
+gates are finite). Checks after each stage: T09a appended rows 201–224 to
+`DeltaRule.cases.md` exactly as the facts; T09b1 52 and T09b2 64 tests
+pass with `-Cr`; the function equals the prototype (the K check written
+as in T08); gate UT 484/484, coverage 100 % (run by the harness owner);
+T09c ITa 6/6 equal to the prototype's values, rerun the same; GPU case
+101 8.3e-7. Mutants (State not transposed, decay factor dropped from the
+output, diagonal kept in L, padding g not zero) are caught; padding β
+with ones is an equivalent mutant (k and v are zero there). No fix by the
+harness owner. Temperatures 14:45–18:13: card0 junction up to 106 °C,
+card1 93 °C, CPU Tctl up to 93 °C (mean 73 °C).
 
 ## Local session 11 (2026-11-19 to 22): M1 T01–T05 done, H46 holds
 

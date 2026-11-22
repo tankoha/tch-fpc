@@ -35,6 +35,13 @@ function DeltaStep(const M, Q, K, V, Beta, G: TTensor; out O: TTensor): TTensor;
   state [H, Dv, Dk]. Raises EDeltaRule (messages in the facts). }
 function DeltaRuleTokens(const Q, K, V, Beta, G: TTensor; out State: TTensor): TTensor;
 
+{ T09: the same as DeltaRuleTokens in the chunked form (chunks of ChunkSize
+  tokens, the sequence padded with zero tokens to a multiple of it; one
+  triangular solve per chunk). G must be finite (-inf gives NaN here).
+  Raises EDeltaRule (messages in tasks/T09-facts.md). }
+function DeltaRuleChunked(const Q, K, V, Beta, G: TTensor; out State: TTensor;
+  ChunkSize: Integer = 64): TTensor;
+
 implementation
 
 function ShapeStr(const T: TTensor): string;
@@ -142,6 +149,91 @@ begin
                    Beta.select(1, I), G.select(1, I), Outs[I]);
   Result := TTensor.stack(Outs, 1);
   State := M;
+end;
+
+function DeltaRuleChunked(const Q, K, V, Beta, G: TTensor; out State: TTensor;
+  ChunkSize: Integer): TTensor;
+var
+  H, T, Dk, Dv, C, N, P, I: Int64;
+  Qp, Kp, Vp, Bp, Gp, KB, VB, Gc, Decay, L, Eye, Tm, U, W, S: TTensor;
+  Qi, Ki, Ui, Wi, Gi, Di, Ai, VNew, Last: TTensor;
+  Outs: array of TTensor;
+begin
+  State := Default(TTensor);
+  Result := Default(TTensor);
+  { Kind checks, in order Q, K, V, Beta, G }
+  if Q.Kind <> kFloat then
+    raise EDeltaRule.Create('Q must be kFloat (fp32)');
+  if K.Kind <> kFloat then
+    raise EDeltaRule.Create('K must be kFloat (fp32)');
+  if V.Kind <> kFloat then
+    raise EDeltaRule.Create('V must be kFloat (fp32)');
+  if Beta.Kind <> kFloat then
+    raise EDeltaRule.Create('Beta must be kFloat (fp32)');
+  if G.Kind <> kFloat then
+    raise EDeltaRule.Create('G must be kFloat (fp32)');
+  { Shape checks and the chunk size }
+  if Length(Q.Shape) <> 3 then
+    raise EDeltaRule.Create('Q must be [H, T, Dk], got ' + ShapeStr(Q));
+  H := Q.Shape[0];
+  T := Q.Shape[1];
+  Dk := Q.Shape[2];
+  if T = 0 then
+    raise EDeltaRule.Create('no tokens (T = 0)');
+  if not ((Length(K.Shape) = 3) and (K.Shape[0] = H) and (K.Shape[1] = T) and (K.Shape[2] = Dk)) then
+    raise EDeltaRule.Create('K must be the shape of Q ' + ShapeStr(Q) + ', got ' + ShapeStr(K));
+  if not ((Length(V.Shape) = 3) and (V.Shape[0] = H) and (V.Shape[1] = T)) then
+    raise EDeltaRule.Create('V must be [' + IntToStr(H) + ', ' + IntToStr(T) + ', Dv], got ' + ShapeStr(V));
+  Dv := V.Shape[2];
+  if not ((Length(Beta.Shape) = 2) and (Beta.Shape[0] = H) and (Beta.Shape[1] = T)) then
+    raise EDeltaRule.Create('Beta must be [' + IntToStr(H) + ', ' + IntToStr(T) + '], got ' + ShapeStr(Beta));
+  if not ((Length(G.Shape) = 2) and (G.Shape[0] = H) and (G.Shape[1] = T)) then
+    raise EDeltaRule.Create('G must be [' + IntToStr(H) + ', ' + IntToStr(T) + '], got ' + ShapeStr(G));
+  if ChunkSize < 1 then
+    raise EDeltaRule.Create('chunk size must be at least 1, got ' + IntToStr(ChunkSize));
+  { Implementation (from tasks/T09-facts.md, as-is) }
+  C := ChunkSize;
+  N := (T + C - 1) div C;
+  P := N * C - T;
+  Qp := Q; Kp := K; Vp := V; Bp := Beta; Gp := G;
+  if P > 0 then
+  begin
+    Qp := TTensor.cat([Q, TTensor.zeros([H, P, Dk], kFloat, Q.Device)], 1);
+    Kp := TTensor.cat([K, TTensor.zeros([H, P, Dk], kFloat, Q.Device)], 1);
+    Vp := TTensor.cat([V, TTensor.zeros([H, P, Dv], kFloat, Q.Device)], 1);
+    Bp := TTensor.cat([Beta, TTensor.zeros([H, P], kFloat, Q.Device)], 1);
+    Gp := TTensor.cat([G, TTensor.zeros([H, P], kFloat, Q.Device)], 1);
+  end;
+  KB := (Kp * Bp.unsqueeze(2)).reshape([H, N, C, Dk]);
+  VB := (Vp * Bp.unsqueeze(2)).reshape([H, N, C, Dv]);
+  Qp := Qp.reshape([H, N, C, Dk]);
+  Kp := Kp.reshape([H, N, C, Dk]);
+  Gc := Gp.reshape([H, N, C]).cumsum(2);
+  Decay := (Gc.unsqueeze(3) - Gc.unsqueeze(2)).tril.exp.tril;
+  L := (KB.matmul(Kp.transpose(2, 3)) * Decay).tril(-1);
+  Eye := TTensor.eye(C, kFloat, Q.Device);
+  Tm := (L + Eye).linalg_solve_triangular(Eye.expand([H, N, C, C]), False);
+  U := Tm.matmul(VB);
+  W := Tm.matmul(KB * Gc.exp.unsqueeze(3));
+  S := TTensor.zeros([H, Dk, Dv], kFloat, Q.Device);
+  SetLength(Outs, N);
+  for I := 0 to N - 1 do
+  begin
+    Qi := Qp.select(1, I);
+    Ki := Kp.select(1, I);
+    Ui := U.select(1, I);
+    Wi := W.select(1, I);
+    Gi := Gc.select(1, I);
+    Di := Decay.select(1, I);
+    Ai := (Qi.matmul(Ki.transpose(1, 2)) * Di).tril;
+    VNew := Ui - Wi.matmul(S);
+    Outs[I] := (Qi * Gi.exp.unsqueeze(2)).matmul(S) + Ai.matmul(VNew);
+    Last := Gi.narrow(1, C - 1, 1);
+    S := S * Last.exp.unsqueeze(2)
+         + (Ki * (Last - Gi).exp.unsqueeze(2)).transpose(1, 2).matmul(VNew);
+  end;
+  Result := TTensor.stack(Outs, 1).reshape([H, N * C, Dv]).narrow(1, 0, T);
+  State := S.transpose(1, 2);
 end;
 
 end.

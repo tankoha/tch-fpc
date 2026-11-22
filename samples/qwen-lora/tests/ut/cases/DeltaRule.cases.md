@@ -42,3 +42,27 @@
 | UT-DeltaRule-115 | V wrong T | DeltaRuleTokens | V zeros([2, 2, 5]) | `V must be [2, 3, Dv], got [2, 2, 5]` | |
 | UT-DeltaRule-116 | Beta wrong shape | DeltaRuleTokens | Beta zeros([2, 4]) | `Beta must be [2, 3], got [2, 4]` | |
 | UT-DeltaRule-117 | G wrong shape | DeltaRuleTokens | G zeros([2]) | `G must be [2, 3], got [2]` | |
+| UT-DeltaRule-201 | Q wrong kind | DeltaRuleChunked | Q zeros([2, 3, 4], kDouble) | `Q must be kFloat (fp32)` | |
+| UT-DeltaRule-202 | K wrong kind | DeltaRuleChunked | K zeros([2, 3, 4], kDouble) | `K must be kFloat (fp32)` | |
+| UT-DeltaRule-203 | V wrong kind | DeltaRuleChunked | V zeros([2, 3, 5], kDouble) | `V must be kFloat (fp32)` | |
+| UT-DeltaRule-204 | Beta wrong kind | DeltaRuleChunked | Beta zeros([2, 3], kDouble) | `Beta must be kFloat (fp32)` | |
+| UT-DeltaRule-205 | G wrong kind | DeltaRuleChunked | G zeros([2, 3], kBFloat16) | `G must be kFloat (fp32)` | |
+| UT-DeltaRule-206 | Q not 3-D | DeltaRuleChunked | Q zeros([2, 3]) | `Q must be [H, T, Dk], got [2, 3]` | |
+| UT-DeltaRule-207 | T = 0 | DeltaRuleChunked | Q, K zeros([2, 0, 4]), V zeros([2, 0, 5]), Beta, G zeros([2, 0]) | `no tokens (T = 0)` | |
+| UT-DeltaRule-208 | K wrong shape | DeltaRuleChunked | K zeros([2, 3, 3]) | `K must be the shape of Q [2, 3, 4], got [2, 3, 3]` | |
+| UT-DeltaRule-209 | V wrong T | DeltaRuleChunked | V zeros([2, 2, 5]) | `V must be [2, 3, Dv], got [2, 2, 5]` | |
+| UT-DeltaRule-210 | Beta wrong shape | DeltaRuleChunked | Beta zeros([2, 4]) | `Beta must be [2, 3], got [2, 4]` | |
+| UT-DeltaRule-211 | G wrong shape | DeltaRuleChunked | G zeros([2]) | `G must be [2, 3], got [2]` | |
+| UT-DeltaRule-212 | ChunkSize 0 | DeltaRuleChunked | ChunkSize 0 | `chunk size must be at least 1, got 0` | |
+| UT-DeltaRule-213 | Hand case, default chunk | DeltaRuleChunked | T08's hand case: Q Make([1, 1, 1, 2], [1, 2, 2]), K Make([1, 0, 1, 1], [1, 2, 2]), V Make([2, 4, 3, 3], [1, 2, 2]), Beta Make([0.5, 0.5], [1, 2]), G Make([0, 0], [1, 2]); default chunk | exact: O `[1, 2, 2]` `1 2 4 3.5`; State `[1, 2, 2]` `2 1 2.5 0.5` | |
+| UT-DeltaRule-214 | Hand case with decay | DeltaRuleChunked | as 213 with G Make([0, Ln(0.5)], [1, 2]) | exact: O `1 2 4.25 4`; State `1.75 1.25 2 1` | |
+| UT-DeltaRule-215 | β = 0, zero state | DeltaRuleChunked | `RandomInputs(7, 3, 5, 4, 6, 1.0, …)`, Beta replaced by zeros([3, 5]); ChunkSize 2 | O `[3, 5, 6]`, State `[3, 6, 4]`; `O.abs.max` and `State.abs.max` 0 | |
+| UT-DeltaRule-216 | ChunkSize 2, random vs tokens | DeltaRuleChunked | `RandomInputs(20, 2, 5, 4, 6, 1.0, …)` (Dk 4, Dv 6); ChunkSize 2 | O `[2, 5, 6]`, State `[2, 6, 4]`; against tokens(..) ≤ 1e-6 (measured 1.8e-7, 1.2e-7) | |
+| UT-DeltaRule-217 | ChunkSize 1, random vs tokens | DeltaRuleChunked | `RandomInputs(16, 4, 50, 16, 16, 1.0, …)`; ChunkSize 1 | against tokens(..) ≤ 1e-6 (measured 1.8e-7) | |
+| UT-DeltaRule-218 | ChunkSize 7, padding 6, random vs tokens | DeltaRuleChunked | `RandomInputs(17, 4, 50, 16, 16, 1.0, …)`; ChunkSize 7 (padding 6) | ≤ 1e-6 (measured 1.8e-7) | |
+| UT-DeltaRule-219 | T = 1, model sizes vs tokens | DeltaRuleChunked | `RandomInputs(101, 48, 1, 128, 128, 0.1, …)`; default chunk (T = 1) | ≤ 1e-5 (measured 2.4e-7) | |
+| UT-DeltaRule-220 | T = 64, no padding, model sizes vs tokens | DeltaRuleChunked | `RandomInputs(164, 48, 64, 128, 128, 0.1, …)`; default (T = 64, no padding) | ≤ 1e-5 (measured 7.2e-7) | |
+| UT-DeltaRule-221 | T = 65, padding 63, model sizes vs tokens | DeltaRuleChunked | `RandomInputs(165, 48, 65, 128, 128, 0.1, …)`; default (T = 65, padding 63) | ≤ 1e-5 (measured 5.7e-7) | |
+| UT-DeltaRule-222 | Strong decay, model sizes vs tokens | DeltaRuleChunked | `RandomInputs(14, 16, 200, 128, 128, 5.0, …)`; default (strong decay) | ≤ 1e-5 (measured 4.4e-6) | |
+| UT-DeltaRule-223 | Default chunk equals ChunkSize 64 | DeltaRuleChunked | `RandomInputs(21, 3, 70, 8, 8, 1.0, …)`; once without ChunkSize, once with 64 | exact: equal O and State | |
+| UT-DeltaRule-224 | Gradients of the five inputs vs token form | DeltaRuleChunked | `RandomInputs(22, 4, 70, 16, 16, 1.0, …)`; `ManualSeed(23)`; W := `TTensor.randn([4, 70, 16])`; two copies of the five inputs as new leaves (`detach.Copy.requires_grad_(True)`); backward of `(tokens(..) * W).sum(kNone)` on one and of `(DeltaRuleChunked(.., 16) * W).sum(kNone)` on the other | the five gradients agree ≤ 1e-5 (measured 2.1e-6) | |

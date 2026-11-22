@@ -66,6 +66,32 @@ type
     procedure TestUT_DeltaRule_118;
     procedure TestUT_DeltaRule_119;
     procedure TestUT_DeltaRule_120;
+    { Stage T09b1: DeltaRuleChunked checks }
+    procedure TestUT_DeltaRule_201;
+    procedure TestUT_DeltaRule_202;
+    procedure TestUT_DeltaRule_203;
+    procedure TestUT_DeltaRule_204;
+    procedure TestUT_DeltaRule_205;
+    procedure TestUT_DeltaRule_206;
+    procedure TestUT_DeltaRule_207;
+    procedure TestUT_DeltaRule_208;
+    procedure TestUT_DeltaRule_209;
+    procedure TestUT_DeltaRule_210;
+    procedure TestUT_DeltaRule_211;
+    procedure TestUT_DeltaRule_212;
+    { Stage T09b2: DeltaRuleChunked values }
+    procedure TestUT_DeltaRule_213;
+    procedure TestUT_DeltaRule_214;
+    procedure TestUT_DeltaRule_215;
+    procedure TestUT_DeltaRule_216;
+    procedure TestUT_DeltaRule_217;
+    procedure TestUT_DeltaRule_218;
+    procedure TestUT_DeltaRule_219;
+    procedure TestUT_DeltaRule_220;
+    procedure TestUT_DeltaRule_221;
+    procedure TestUT_DeltaRule_222;
+    procedure TestUT_DeltaRule_223;
+    procedure TestUT_DeltaRule_224;
   end;
 
 class function TDeltaRuleTest.Make(const AValues: array of Double; const AShape: array of Int64): TTensor;
@@ -741,6 +767,388 @@ begin
     on E: EDeltaRule do
       AssertEquals('Beta must be kFloat (fp32)', E.Message);
   end;
+end;
+
+{ T09b1 stage 1: DeltaRuleChunked check tests (201-212) }
+
+procedure TDeltaRuleTest.TestUT_DeltaRule_201;
+var
+  Q, K, V, Beta, G, O, State: TTensor;
+begin
+  Q := TTensor.zeros([2, 3, 4], kDouble);
+  K := TTensor.zeros([2, 3, 4]);
+  V := TTensor.zeros([2, 3, 5]);
+  Beta := TTensor.zeros([2, 3]);
+  G := TTensor.zeros([2, 3]);
+  try
+    O := DeltaRuleChunked(Q, K, V, Beta, G, State);
+    Fail('no EDeltaRule');
+  except
+    on E: EDeltaRule do
+      AssertEquals('Q must be kFloat (fp32)', E.Message);
+  end;
+end;
+
+procedure TDeltaRuleTest.TestUT_DeltaRule_202;
+var
+  Q, K, V, Beta, G, O, State: TTensor;
+begin
+  Q := TTensor.zeros([2, 3, 4]);
+  K := TTensor.zeros([2, 3, 4], kDouble);
+  V := TTensor.zeros([2, 3, 5]);
+  Beta := TTensor.zeros([2, 3]);
+  G := TTensor.zeros([2, 3]);
+  try
+    O := DeltaRuleChunked(Q, K, V, Beta, G, State);
+    Fail('no EDeltaRule');
+  except
+    on E: EDeltaRule do
+      AssertEquals('K must be kFloat (fp32)', E.Message);
+  end;
+end;
+
+procedure TDeltaRuleTest.TestUT_DeltaRule_203;
+var
+  Q, K, V, Beta, G, O, State: TTensor;
+begin
+  Q := TTensor.zeros([2, 3, 4]);
+  K := TTensor.zeros([2, 3, 4]);
+  V := TTensor.zeros([2, 3, 5], kDouble);
+  Beta := TTensor.zeros([2, 3]);
+  G := TTensor.zeros([2, 3]);
+  try
+    O := DeltaRuleChunked(Q, K, V, Beta, G, State);
+    Fail('no EDeltaRule');
+  except
+    on E: EDeltaRule do
+      AssertEquals('V must be kFloat (fp32)', E.Message);
+  end;
+end;
+
+procedure TDeltaRuleTest.TestUT_DeltaRule_204;
+var
+  Q, K, V, Beta, G, O, State: TTensor;
+begin
+  Q := TTensor.zeros([2, 3, 4]);
+  K := TTensor.zeros([2, 3, 4]);
+  V := TTensor.zeros([2, 3, 5]);
+  Beta := TTensor.zeros([2, 3], kDouble);
+  G := TTensor.zeros([2, 3]);
+  try
+    O := DeltaRuleChunked(Q, K, V, Beta, G, State);
+    Fail('no EDeltaRule');
+  except
+    on E: EDeltaRule do
+      AssertEquals('Beta must be kFloat (fp32)', E.Message);
+  end;
+end;
+
+procedure TDeltaRuleTest.TestUT_DeltaRule_205;
+var
+  Q, K, V, Beta, G, O, State: TTensor;
+begin
+  Q := TTensor.zeros([2, 3, 4]);
+  K := TTensor.zeros([2, 3, 4]);
+  V := TTensor.zeros([2, 3, 5]);
+  Beta := TTensor.zeros([2, 3]);
+  G := TTensor.zeros([2, 3], kBFloat16);
+  try
+    O := DeltaRuleChunked(Q, K, V, Beta, G, State);
+    Fail('no EDeltaRule');
+  except
+    on E: EDeltaRule do
+      AssertEquals('G must be kFloat (fp32)', E.Message);
+  end;
+end;
+
+procedure TDeltaRuleTest.TestUT_DeltaRule_206;
+var
+  Q, K, V, Beta, G, O, State: TTensor;
+begin
+  Q := TTensor.zeros([2, 3]);
+  K := TTensor.zeros([2, 3, 4]);
+  V := TTensor.zeros([2, 3, 5]);
+  Beta := TTensor.zeros([2, 3]);
+  G := TTensor.zeros([2, 3]);
+  try
+    O := DeltaRuleChunked(Q, K, V, Beta, G, State);
+    Fail('no EDeltaRule');
+  except
+    on E: EDeltaRule do
+      AssertEquals('Q must be [H, T, Dk], got [2, 3]', E.Message);
+  end;
+end;
+
+procedure TDeltaRuleTest.TestUT_DeltaRule_207;
+var
+  Q, K, V, Beta, G, O, State: TTensor;
+begin
+  Q := TTensor.zeros([2, 0, 4]);
+  K := TTensor.zeros([2, 0, 4]);
+  V := TTensor.zeros([2, 0, 5]);
+  Beta := TTensor.zeros([2, 0]);
+  G := TTensor.zeros([2, 0]);
+  try
+    O := DeltaRuleChunked(Q, K, V, Beta, G, State);
+    Fail('no EDeltaRule');
+  except
+    on E: EDeltaRule do
+      AssertEquals('no tokens (T = 0)', E.Message);
+  end;
+end;
+
+procedure TDeltaRuleTest.TestUT_DeltaRule_208;
+var
+  Q, K, V, Beta, G, O, State: TTensor;
+begin
+  Q := TTensor.zeros([2, 3, 4]);
+  K := TTensor.zeros([2, 3, 3]);
+  V := TTensor.zeros([2, 3, 5]);
+  Beta := TTensor.zeros([2, 3]);
+  G := TTensor.zeros([2, 3]);
+  try
+    O := DeltaRuleChunked(Q, K, V, Beta, G, State);
+    Fail('no EDeltaRule');
+  except
+    on E: EDeltaRule do
+      AssertEquals('K must be the shape of Q [2, 3, 4], got [2, 3, 3]', E.Message);
+  end;
+end;
+
+procedure TDeltaRuleTest.TestUT_DeltaRule_209;
+var
+  Q, K, V, Beta, G, O, State: TTensor;
+begin
+  Q := TTensor.zeros([2, 3, 4]);
+  K := TTensor.zeros([2, 3, 4]);
+  V := TTensor.zeros([2, 2, 5]);
+  Beta := TTensor.zeros([2, 3]);
+  G := TTensor.zeros([2, 3]);
+  try
+    O := DeltaRuleChunked(Q, K, V, Beta, G, State);
+    Fail('no EDeltaRule');
+  except
+    on E: EDeltaRule do
+      AssertEquals('V must be [2, 3, Dv], got [2, 2, 5]', E.Message);
+  end;
+end;
+
+procedure TDeltaRuleTest.TestUT_DeltaRule_210;
+var
+  Q, K, V, Beta, G, O, State: TTensor;
+begin
+  Q := TTensor.zeros([2, 3, 4]);
+  K := TTensor.zeros([2, 3, 4]);
+  V := TTensor.zeros([2, 3, 5]);
+  Beta := TTensor.zeros([2, 4]);
+  G := TTensor.zeros([2, 3]);
+  try
+    O := DeltaRuleChunked(Q, K, V, Beta, G, State);
+    Fail('no EDeltaRule');
+  except
+    on E: EDeltaRule do
+      AssertEquals('Beta must be [2, 3], got [2, 4]', E.Message);
+  end;
+end;
+
+procedure TDeltaRuleTest.TestUT_DeltaRule_211;
+var
+  Q, K, V, Beta, G, O, State: TTensor;
+begin
+  Q := TTensor.zeros([2, 3, 4]);
+  K := TTensor.zeros([2, 3, 4]);
+  V := TTensor.zeros([2, 3, 5]);
+  Beta := TTensor.zeros([2, 3]);
+  G := TTensor.zeros([2]);
+  try
+    O := DeltaRuleChunked(Q, K, V, Beta, G, State);
+    Fail('no EDeltaRule');
+  except
+    on E: EDeltaRule do
+      AssertEquals('G must be [2, 3], got [2]', E.Message);
+  end;
+end;
+
+procedure TDeltaRuleTest.TestUT_DeltaRule_212;
+var
+  Q, K, V, Beta, G, O, State: TTensor;
+begin
+  Q := TTensor.zeros([2, 3, 4]);
+  K := TTensor.zeros([2, 3, 4]);
+  V := TTensor.zeros([2, 3, 5]);
+  Beta := TTensor.zeros([2, 3]);
+  G := TTensor.zeros([2, 3]);
+  try
+    O := DeltaRuleChunked(Q, K, V, Beta, G, State, 0);
+    Fail('no EDeltaRule');
+  except
+    on E: EDeltaRule do
+      AssertEquals('chunk size must be at least 1, got 0', E.Message);
+  end;
+end;
+
+{ T09b2 stage 2: DeltaRuleChunked value tests (213-224) }
+
+procedure TDeltaRuleTest.TestUT_DeltaRule_213;
+var
+  Q, K, V, Beta, G, O, State: TTensor;
+begin
+  Q := Make([1, 1, 1, 2], [1, 2, 2]);
+  K := Make([1, 0, 1, 1], [1, 2, 2]);
+  V := Make([2, 4, 3, 3], [1, 2, 2]);
+  Beta := Make([0.5, 0.5], [1, 2]);
+  G := Make([0, 0], [1, 2]);
+  O := DeltaRuleChunked(Q, K, V, Beta, G, State);
+  CheckTensor('O', '[1, 2, 2]', '1 2 4 3.5', O);
+  CheckTensor('State', '[1, 2, 2]', '2 1 2.5 0.5', State);
+end;
+
+procedure TDeltaRuleTest.TestUT_DeltaRule_214;
+var
+  Q, K, V, Beta, G, O, State: TTensor;
+begin
+  Q := Make([1, 1, 1, 2], [1, 2, 2]);
+  K := Make([1, 0, 1, 1], [1, 2, 2]);
+  V := Make([2, 4, 3, 3], [1, 2, 2]);
+  Beta := Make([0.5, 0.5], [1, 2]);
+  G := Make([0, Ln(0.5)], [1, 2]);
+  O := DeltaRuleChunked(Q, K, V, Beta, G, State);
+  CheckTensor('O', '[1, 2, 2]', '1 2 4.25 4', O);
+  CheckTensor('State', '[1, 2, 2]', '1.75 1.25 2 1', State);
+end;
+
+procedure TDeltaRuleTest.TestUT_DeltaRule_215;
+var
+  Q, K, V, Beta, G, O, State: TTensor;
+begin
+  RandomInputs(7, 3, 5, 4, 6, 1.0, Q, K, V, Beta, G);
+  Beta := TTensor.zeros([3, 5]);
+  O := DeltaRuleChunked(Q, K, V, Beta, G, State, 2);
+  AssertEquals('O shape', '[3, 5, 6]', ShapeText(O));
+  AssertEquals('State shape', '[3, 6, 4]', ShapeText(State));
+  AssertTrue('O.abs.max is 0', O.abs.max.DoubleValue([]) <= 0);
+  AssertTrue('State.abs.max is 0', State.abs.max.DoubleValue([]) <= 0);
+end;
+
+procedure TDeltaRuleTest.TestUT_DeltaRule_216;
+var
+  Q, K, V, Beta, G, O, State, TokO, TokS: TTensor;
+begin
+  RandomInputs(20, 2, 5, 4, 6, 1.0, Q, K, V, Beta, G);
+  O := DeltaRuleChunked(Q, K, V, Beta, G, State, 2);
+  TokO := DeltaRuleTokens(Q, K, V, Beta, G, TokS);
+  AssertEquals('O shape', '[2, 5, 6]', ShapeText(O));
+  AssertEquals('State shape', '[2, 6, 4]', ShapeText(State));
+  AssertTrue('O diff', MaxAbsDiff(O, TokO) <= 1e-6);
+  AssertTrue('State diff', MaxAbsDiff(State, TokS) <= 1e-6);
+end;
+
+procedure TDeltaRuleTest.TestUT_DeltaRule_217;
+var
+  Q, K, V, Beta, G, O, State, TokO, TokS: TTensor;
+begin
+  RandomInputs(16, 4, 50, 16, 16, 1.0, Q, K, V, Beta, G);
+  O := DeltaRuleChunked(Q, K, V, Beta, G, State, 1);
+  TokO := DeltaRuleTokens(Q, K, V, Beta, G, TokS);
+  AssertTrue('O diff', MaxAbsDiff(O, TokO) <= 1e-6);
+  AssertTrue('State diff', MaxAbsDiff(State, TokS) <= 1e-6);
+end;
+
+procedure TDeltaRuleTest.TestUT_DeltaRule_218;
+var
+  Q, K, V, Beta, G, O, State, TokO, TokS: TTensor;
+begin
+  RandomInputs(17, 4, 50, 16, 16, 1.0, Q, K, V, Beta, G);
+  O := DeltaRuleChunked(Q, K, V, Beta, G, State, 7);
+  TokO := DeltaRuleTokens(Q, K, V, Beta, G, TokS);
+  AssertTrue('O diff', MaxAbsDiff(O, TokO) <= 1e-6);
+  AssertTrue('State diff', MaxAbsDiff(State, TokS) <= 1e-6);
+end;
+
+procedure TDeltaRuleTest.TestUT_DeltaRule_219;
+var
+  Q, K, V, Beta, G, O, State, TokO, TokS: TTensor;
+begin
+  RandomInputs(101, 48, 1, 128, 128, 0.1, Q, K, V, Beta, G);
+  O := DeltaRuleChunked(Q, K, V, Beta, G, State);
+  TokO := DeltaRuleTokens(Q, K, V, Beta, G, TokS);
+  AssertTrue('O diff', MaxAbsDiff(O, TokO) <= 1e-5);
+  AssertTrue('State diff', MaxAbsDiff(State, TokS) <= 1e-5);
+end;
+
+procedure TDeltaRuleTest.TestUT_DeltaRule_220;
+var
+  Q, K, V, Beta, G, O, State, TokO, TokS: TTensor;
+begin
+  RandomInputs(164, 48, 64, 128, 128, 0.1, Q, K, V, Beta, G);
+  O := DeltaRuleChunked(Q, K, V, Beta, G, State);
+  TokO := DeltaRuleTokens(Q, K, V, Beta, G, TokS);
+  AssertTrue('O diff', MaxAbsDiff(O, TokO) <= 1e-5);
+  AssertTrue('State diff', MaxAbsDiff(State, TokS) <= 1e-5);
+end;
+
+procedure TDeltaRuleTest.TestUT_DeltaRule_221;
+var
+  Q, K, V, Beta, G, O, State, TokO, TokS: TTensor;
+begin
+  RandomInputs(165, 48, 65, 128, 128, 0.1, Q, K, V, Beta, G);
+  O := DeltaRuleChunked(Q, K, V, Beta, G, State);
+  TokO := DeltaRuleTokens(Q, K, V, Beta, G, TokS);
+  AssertTrue('O diff', MaxAbsDiff(O, TokO) <= 1e-5);
+  AssertTrue('State diff', MaxAbsDiff(State, TokS) <= 1e-5);
+end;
+
+procedure TDeltaRuleTest.TestUT_DeltaRule_222;
+var
+  Q, K, V, Beta, G, O, State, TokO, TokS: TTensor;
+begin
+  RandomInputs(14, 16, 200, 128, 128, 5.0, Q, K, V, Beta, G);
+  O := DeltaRuleChunked(Q, K, V, Beta, G, State);
+  TokO := DeltaRuleTokens(Q, K, V, Beta, G, TokS);
+  AssertTrue('O diff', MaxAbsDiff(O, TokO) <= 1e-5);
+  AssertTrue('State diff', MaxAbsDiff(State, TokS) <= 1e-5);
+end;
+
+procedure TDeltaRuleTest.TestUT_DeltaRule_223;
+var
+  Q, K, V, Beta, G, O1, O2, State1, State2: TTensor;
+begin
+  RandomInputs(21, 3, 70, 8, 8, 1.0, Q, K, V, Beta, G);
+  O1 := DeltaRuleChunked(Q, K, V, Beta, G, State1);
+  O2 := DeltaRuleChunked(Q, K, V, Beta, G, State2, 64);
+  AssertTrue('O equal', MaxAbsDiff(O1, O2) <= 0);
+  AssertTrue('State equal', MaxAbsDiff(State1, State2) <= 0);
+end;
+
+procedure TDeltaRuleTest.TestUT_DeltaRule_224;
+var
+  Q, K, V, Beta, G, W: TTensor;
+  Q1, K1, V1, Beta1, G1: TTensor;
+  Q2, K2, V2, Beta2, G2: TTensor;
+  State1, State2, L1, L2: TTensor;
+begin
+  RandomInputs(22, 4, 70, 16, 16, 1.0, Q, K, V, Beta, G);
+  ManualSeed(23);
+  W := TTensor.randn([4, 70, 16]);
+  Q1 := Q.detach.Copy.requires_grad_(True);
+  K1 := K.detach.Copy.requires_grad_(True);
+  V1 := V.detach.Copy.requires_grad_(True);
+  Beta1 := Beta.detach.Copy.requires_grad_(True);
+  G1 := G.detach.Copy.requires_grad_(True);
+  Q2 := Q.detach.Copy.requires_grad_(True);
+  K2 := K.detach.Copy.requires_grad_(True);
+  V2 := V.detach.Copy.requires_grad_(True);
+  Beta2 := Beta.detach.Copy.requires_grad_(True);
+  G2 := G.detach.Copy.requires_grad_(True);
+  L1 := (DeltaRuleTokens(Q1, K1, V1, Beta1, G1, State1) * W).sum(kNone);
+  L1.Backward;
+  L2 := (DeltaRuleChunked(Q2, K2, V2, Beta2, G2, State2, 16) * W).sum(kNone);
+  L2.Backward;
+  AssertTrue('Q grad diff', MaxAbsDiff(Q1.grad, Q2.grad) <= 1e-5);
+  AssertTrue('K grad diff', MaxAbsDiff(K1.grad, K2.grad) <= 1e-5);
+  AssertTrue('V grad diff', MaxAbsDiff(V1.grad, V2.grad) <= 1e-5);
+  AssertTrue('Beta grad diff', MaxAbsDiff(Beta1.grad, Beta2.grad) <= 1e-5);
+  AssertTrue('G grad diff', MaxAbsDiff(G1.grad, G2.grad) <= 1e-5);
 end;
 
 var

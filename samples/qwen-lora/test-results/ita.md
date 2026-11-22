@@ -99,3 +99,9 @@ When a case is run again, do not edit its row; append a new row below (the last 
 | ITa-T07-002 | OK | - | 2026-11-22 | training samples whose token ids differ from /tokenize, of 5: value 0, limit 0 |
 | ITa-T07-003 | OK | - | 2026-11-22 | training samples whose loss span is not exactly the last answer and its end-of-turn token, of 5: value 0, limit 0 |
 | ITa-T07-004 | OK | - | 2026-11-22 | conversations the template rejects that did not raise EChatError, of 4: value 0, limit 0 |
+| ITa-T09-001 | OK | - | 2026-11-22 | O and State against DeltaRuleTokens, H 48, 128 x 128, T = 1, 63, 64, 65, 200 (seeds 100 + T): value 7.2E-007, limit 1.0E-005 |
+| ITa-T09-002 | OK | - | 2026-11-22 | O and State against the scalar Double reference RefTokens, seed 13, H 48, T 200: value 4.8E-007, limit 1.0E-005 |
+| ITa-T09-003 | OK | - | 2026-11-22 | strong decay: g in (-5, 0], seed 14, H 16, T 200: value 4.4E-006, limit 1.0E-005 |
+| ITa-T09-004 | OK | - | 2026-11-22 | training length T 2048, H 48: 116 ms on the CPU: value 7.2E-007, limit 1.0E-005 |
+| ITa-T09-005 | OK | - | 2026-11-22 | gradients of all five inputs against the token form, H 4, T 70, chunk 16: value 2.1E-006, limit 1.0E-005 |
+| ITa-T09-006 | OK | - | 2026-11-22 | chunk sizes 1, 2, 3, 5, 7, 10, 49, 50, 51, 64 at T 50 (padding and a single chunk): value 9.8E-007, limit 1.0E-005 |

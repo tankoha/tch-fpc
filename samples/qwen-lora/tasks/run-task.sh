@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Hand one task of DESIGN 8.18 to the Hermes SDLC process (main agent
 # GLM 5 on Bedrock; the sub-agent is delegation.* of ~/.hermes/config.yaml,
-# since 2026-11-22 GPT-OSS 20B on the local Ollama) and keep the transcript.
+# since 2026-11-22 GLM 5 on Bedrock) and keep the transcript.
 # Usage: tasks/run-task.sh <Txx>      (reads tasks/<Txx>.md)
 #   TURNS  max turns of the main agent (default 150)
 #   MAIN_MODEL  main agent model id (default zai.glm-5: from T03 on it reported

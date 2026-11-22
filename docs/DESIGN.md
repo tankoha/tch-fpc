@@ -3623,6 +3623,25 @@ rate. A first trial run without links to the units lost most of its 15
 minutes to the Pascal verify hook (plain `fpc` cannot find `Tch`);
 `run-h39.sh` now links the tch-fpc units into each task directory.
 
+**H39 with other local models (local session 12, 2026-11-22,
+*measured*).** Through Hermes, magistral small 24B passed 0/10 with and
+without the skill and devstral-small-2 24B 2/10 with, 0/10 without; both
+failed mostly at tool calling. A harness without an agent
+(`tests/skill/run-direct.bb`: the model answers with the whole program,
+compiler messages or output differences go back, up to 6 answers;
+"without" gives no API information at all) gave:
+
+| Model | with the skill | without |
+|---|---|---|
+| magistral small 24B | 0/10 | 2/10 |
+| devstral-small-2 24B | 2/10 | 1/10 |
+| Qwen3.8 27B | 9/10 | 1/10 |
+
+Without the skill every model invents the API; with it only Qwen writes
+working programs. The skill is what makes Qwen able to write tch-fpc
+code when it cannot read the sources; the 24B models are not fallbacks
+for the coding tasks (R4). Details in HANDOFF, local session 12.
+
 ## 8. Fine-tuning Qwen3.8 27B with tch-fpc: feasibility gate (design session 9)
 
 **Verdict: GO with conditions. The design stops at this gate.** Training

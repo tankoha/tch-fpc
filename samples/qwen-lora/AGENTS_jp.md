@@ -2,8 +2,8 @@
 
 （[AGENTS.md](AGENTS.md) の日本語訳です。内容が食い違う場合は英語版が正です。）
 
-このプロジェクトは工程と担当モデルを分けて開発する。メインエージェント (Bedrock の GPT-OSS-120B。T02 までは Mistral Large 3) と
-サブエージェント (Bedrock の Qwen3 Coder 480B、`delegate_task` で起動。T02 まではローカルの Qwen3.8) の両方がこの規約に従う。
+このプロジェクトは工程と担当モデルを分けて開発する。メインエージェント (T03 から Bedrock の GLM 5。T02 までは Mistral Large 3) と
+サブエージェント (T05b3 から Bedrock の GLM 5、`delegate_task` で起動。T02 まではローカルの Qwen3.8、その間は別モデル) の両方がこの規約に従う。
 規約の一部はシェルフック (`sdlc.bb`) が機械的に強制する。フックにブロックされたら、
 回避せずにブロック理由に従うこと。
 

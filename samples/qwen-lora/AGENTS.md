@@ -3,8 +3,9 @@
 Japanese version: [AGENTS_jp.md](AGENTS_jp.md). English is canonical.
 
 This project is developed with phases and owners kept apart. The main agent
-(GPT-OSS-120B on Bedrock; Mistral Large 3 until T02) and the sub-agent (Qwen3
-Coder 480B on Bedrock, started with `delegate_task`; the local Qwen3.8 until T02)
+(GLM 5 on Bedrock from T03; Mistral Large 3 until T02) and the sub-agent
+(GLM 5 on Bedrock from T05b3, started with `delegate_task`; the local Qwen3.8
+until T02, other models in between)
 both follow these rules. Part of them is enforced by a shell hook
 (`sdlc.bb`). When the hook blocks you, do what the reason says; do not work
 around it.

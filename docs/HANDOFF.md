@@ -6,7 +6,7 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 Status at a glance of the knowledge-package and fine-tuning work:
 [progress.md](progress.md).
 
-## Local session 12 (2026-11-22): local models compared, Oxygene compiler verified, T08, T13 and T14 done — resume here
+## Local session 12 (2026-11-22): local models compared, Oxygene compiler verified, T07, T08, T13 and T14 done — resume here
 
 **Local models on the H39 tasks** (the ten checked tasks of
 `tests/skill/tasks/`, one run per task and mode, GPU logging on).
@@ -101,7 +101,7 @@ T05b3).
 1. ~~T08a → T08b1 → T08b2 → T08c~~ **done, below**; with `tasks/run-task.sh` (main and sub
    GLM 5), the harness owner checking after each (progress below this
    list when done).
-2. M1 remainder: ~~T13, T14~~ (done, below), then T07, T09, T10, T11 (H43).
+2. M1 remainder: ~~T13, T14, T07~~ (done, below), then T09, T10, T11 (H43).
 3. ~~Commit~~ **committed 2026-11-22** (tch-fpc, hermes-agent-setup 4cd71d0,
    polyglot-scripting c45962e).
 
@@ -179,6 +179,46 @@ stage:
   about 100 W (84 of 1622 samples at 95 °C or more), card1 up to 91 °C,
   CPU Tctl up to 91 °C (mean 79 °C; Ollama runs the 128k model 5 % on the
   CPU). The user changed the surroundings of the PC; no clear drop yet.
+
+**T07 done (2026-11-22 14:45–16:41, main GLM 5, sub-agent the local
+Qwen).** Unit `QwenChat`: `RenderChat` (system, user and assistant text
+turns; thinking on/off; effort xhigh/medium/low; `reasoning_content`;
+`PreserveThinking`; generation prompt), `RenderTraining` (answer byte
+span), `EncodeTraining` (token span `[LossFrom, LossTo)` = the last answer
+and its end-of-turn token), `TrimChat`, `ReasoningInstruction`.
+Measured while preparing it:
+- **The rehearsal 0.8B GGUF's chat template is not the 27B's** (7,816
+  against 8,952 bytes; only the 27B one has the reasoning-effort
+  sentence). The oracle is therefore the bundled `llama-server` on the
+  0.8B model with `--chat-template-file` of the template extracted from
+  the `qwen3.8:27b` blob (`work/oracle/T07/tpl27.jinja`,
+  `make-oracle.bb`): 14 conversations, 5 training samples with
+  `/tokenize` ids, 4 rejected conversations.
+- `llama-server` treats a final assistant message as a prefill and drops
+  its `<|im_end|>\n`; training samples were rendered with one more user
+  turn and cut.
+- Trimming is ASCII white space only (space, \t, \n, \v, \f, \r);
+  U+3000 and U+00A0 stay. (Ollama's own renderer may differ; the captured
+  prompt of M3 settles it.)
+- fpjson's `GetJSON(..., UseUTF8 = True)` corrupts non-ASCII in FPC 3.2.2
+  (already seen in T05): the ITa driver reads with `False`.
+- **Tags are never written literally** in facts, tasks, skeletons or
+  tests (GLM 5 and Qwen read them as their own special tokens): facts use
+  placeholders (`<s>`, `<e>`, `{think}`, ...), Pascal uses constants built
+  from pieces. The local Qwen turned the placeholders into the constant
+  expressions in the case table by itself; no run broke on a tag.
+- Two prototype guards in `EncodeTraining` (token boundaries) could never
+  fire and were dropped for 100 % coverage; ITa-T07-003 checks the spans.
+Checks after each stage: T07a case table equal to the facts' 34 rows;
+T07b1 10, T07b2 27, T07b3 34 tests pass with `-Cr`; the code equals the
+prototype (b1 and `IsToolResponse` written slightly differently,
+equivalent); gate UT 460/460, coverage 100 % (run by the harness owner).
+T07c ITa 4/4 (every value 0), rerun by the harness owner the same; mutants
+(narrow trim, think block only with PreserveThinking, wrong span end)
+caught. Interruptions: T07b3's first run met an expired `aws login`
+session (the user logged in again); T07c's first run stopped at
+`run-task.sh`'s gateway check (exit 3: the resident gateway lacked
+`QLORA_MODEL`; `hermes gateway stop`, then rerun).
 
 ## Local session 11 (2026-11-19 to 22): M1 T01–T05 done, H46 holds
 

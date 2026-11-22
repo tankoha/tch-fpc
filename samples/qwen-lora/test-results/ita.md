@@ -95,3 +95,7 @@ When a case is run again, do not edit its row; append a new row below (the last 
 | ITa-T14-005 | OK | - | 2026-11-22 | fp32, 100 updates, ScheduleLR(0.05, u, 10, 100, 0.1) on both sides: value 6.0E-008, limit 1.0E-006 |
 | ITa-T14-006 | OK | - | 2026-11-22 | fp32: 10 updates against 5 + save + load + StepCount 5 + 5: value 0.0E+000, limit 0.0E+000 |
 | ITa-T14-007 | OK | - | 2026-11-22 | fp64: gradients after ClipGlobalNorm(0.1) against ClipGradNorm(0.1), and the returned norm: value 0.0E+000, limit 1.0E-012 |
+| ITa-T07-001 | OK | - | 2026-11-22 | renderings different from /apply-template, of 14 conversations: value 0, limit 0 |
+| ITa-T07-002 | OK | - | 2026-11-22 | training samples whose token ids differ from /tokenize, of 5: value 0, limit 0 |
+| ITa-T07-003 | OK | - | 2026-11-22 | training samples whose loss span is not exactly the last answer and its end-of-turn token, of 5: value 0, limit 0 |
+| ITa-T07-004 | OK | - | 2026-11-22 | conversations the template rejects that did not raise EChatError, of 4: value 0, limit 0 |

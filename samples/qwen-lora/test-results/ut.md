@@ -431,3 +431,37 @@ When a case is run again, do not edit its row; append a new row below (the last 
 | UT-LoraOptim-110 | OK |  | 2026-11-22 | T14b3 stage 3: 20 clip+step updates fp32 vs ClipGradNorm+AdamW, MaxAbsDiff ≤ 1e-6 |
 | UT-LoraOptim-111 | OK |  | 2026-11-22 | T14b3 stage 3: two stores (w; b) equal one store (w, b) after 20 clip+step updates, exact diff 0 (fp64) |
 | UT-LoraOptim-112 | OK |  | 2026-11-22 | T14b3 stage 3: no gradients: ClipGlobalNorm 0, Step no-op (P '1 1'), StepCount 1 |
+| UT-QwenChat-001 | OK |  | 2026-11-22 | T07b1 stage 1: DefaultChatOptions: EnableThinking True, Effort reXHigh, PreserveThinking True, AddGenerationPrompt True |
+| UT-QwenChat-002 | OK |  | 2026-11-22 | T07b1 stage 1: ChatMsg(crUser,'c'): Role crUser, Content 'c', Reasoning '' |
+| UT-QwenChat-003 | OK |  | 2026-11-22 | T07b1 stage 1: ChatMsg(crAssistant,'c','r'): Role crAssistant, Content 'c', Reasoning 'r' |
+| UT-QwenChat-004 | OK |  | 2026-11-22 | T07b1 stage 1: TrimChat trims all six chat spaces at both ends, 'a b' kept |
+| UT-QwenChat-005 | OK |  | 2026-11-22 | T07b1 stage 1: TrimChat leaves U+3000/Q/U+00A0 unchanged, the same 6 bytes |
+| UT-QwenChat-006 | OK |  | 2026-11-22 | T07b1 stage 1: TrimChat all-whitespace input returns '' |
+| UT-QwenChat-007 | OK |  | 2026-11-22 | T07b1 stage 1: ReasoningInstruction(DefaultChatOptions) = XH |
+| UT-QwenChat-008 | OK |  | 2026-11-22 | T07b1 stage 1: D with Effort reLow returns LOW |
+| UT-QwenChat-009 | OK |  | 2026-11-22 | T07b1 stage 1: D with Effort reMedium returns '' |
+| UT-QwenChat-010 | OK |  | 2026-11-22 | T07b1 stage 1: D with EnableThinking False and Effort reLow returns '' |
+| UT-QwenChat-011 | OK |  | 2026-11-22 | T07b2 stage 2: user only, thinking on (D): system turn with XH, user turn, generation prompt with open think |
+| UT-QwenChat-012 | OK |  | 2026-11-22 | T07b2 stage 2: user only, thinking off (D off): closed empty think block in generation prompt |
+| UT-QwenChat-013 | OK |  | 2026-11-22 | T07b2 stage 2: system S + user Q, D: XH + #10#10 before the system content |
+| UT-QwenChat-014 | OK |  | 2026-11-22 | T07b2 stage 2: system S + user Q, D with Effort reMedium: system turn without instruction sentence |
+| UT-QwenChat-015 | OK |  | 2026-11-22 | T07b2 stage 2: system S + user Q, D with Effort reLow: LOW + #10#10 before the system content |
+| UT-QwenChat-016 | OK |  | 2026-11-22 | T07b2 stage 2: system '   ' (trimmed empty) + user Q, D: XH-only system turn |
+| UT-QwenChat-017 | OK |  | 2026-11-22 | T07b2 stage 2: system '   ' + user Q, D off: no system turn at all |
+| UT-QwenChat-018 | OK |  | 2026-11-22 | T07b2 stage 2: user only, D off, AddGenerationPrompt False: no generation prompt |
+| UT-QwenChat-019 | OK |  | 2026-11-22 | T07b2 stage 2: multi-turn D off: think block with reasoning r1 kept (PreserveThinking) |
+| UT-QwenChat-020 | OK |  | 2026-11-22 | T07b2 stage 2: multi-turn D off, PreserveThinking False: think block dropped for the in-turn assistant |
+| UT-QwenChat-021 | OK |  | 2026-11-22 | T07b2 stage 2: answer after the last query keeps the think block (D off, PreserveThinking False, AddGenerationPrompt False) |
+| UT-QwenChat-022 | OK |  | 2026-11-22 | T07b2 stage 2: tool response user turn is not the last query (IsToolResponse), think block stays for the earlier assistant |
+| UT-QwenChat-023 | OK |  | 2026-11-22 | T07b2 stage 2: trimming in every role (system/user content and assistant reasoning), D off, AddGenerationPrompt False |
+| UT-QwenChat-024 | OK |  | 2026-11-22 | T07b2 stage 2: empty messages → EChatError 'no messages' |
+| UT-QwenChat-025 | OK |  | 2026-11-22 | T07b2 stage 2: user then system → EChatError 'message 1: a system message must be the first' |
+| UT-QwenChat-026 | OK |  | 2026-11-22 | T07b2 stage 2: system only → EChatError 'no user query in the messages' |
+| UT-QwenChat-027 | OK |  | 2026-11-22 | T07b2 stage 2: only a tool response → EChatError 'no user query in the messages' (IsToolResponse) |
+| UT-QwenChat-101 | OK |  | 2026-11-22 | T07b3 stage 3: training sample, D off → 82 bytes, AnswerStart 70, AnswerEnd 81, answer 'A' + TagE |
+| UT-QwenChat-102 | OK |  | 2026-11-22 | T07b3 stage 3: training sample, multi-turn D off → 172 bytes, AnswerStart 159, AnswerEnd 171, answer 'A2' + TagE |
+| UT-QwenChat-103 | OK |  | 2026-11-22 | T07b3 stage 3: training sample, thinking on (D) → 320 bytes, AnswerStart 308, AnswerEnd 319, answer 'A' + TagE |
+| UT-QwenChat-104 | OK |  | 2026-11-22 | T07b3 stage 3: user-only sample → EChatError 'a training sample must end with an assistant message' |
+| UT-QwenChat-105 | OK |  | 2026-11-22 | T07b3 stage 3: sample with no messages → EChatError 'a training sample must end with an assistant message' |
+| UT-QwenChat-106 | OK |  | 2026-11-22 | T07b3 stage 3: EncodeTraining D off (tiny tokenizer) → 37 ids, LossFrom 33, LossTo 36, span 'hello world' + TagE |
+| UT-QwenChat-107 | OK |  | 2026-11-22 | T07b3 stage 3: EncodeThinking on (D, xhigh) → 250 ids, LossFrom 245, LossTo 249, span 'world' + TagE, last id 267 |

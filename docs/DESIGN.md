@@ -4256,6 +4256,14 @@ run this template**: the model's Modelfile is `TEMPLATE {{ .Prompt }}`,
 Ollama's built-in renderer. Whether it equals the Jinja text is **not
 verified**; one rendered prompt has to be captured (8.11, M3).
 
+**Implemented (T07, local session 12):** `QwenChat` renders text turns
+byte for byte like `llama-server`'s `/apply-template` with the 27B
+template (14 conversations); the rehearsal 0.8B GGUF carries a different
+template (no reasoning-effort sentence), so the oracle loads the 27B
+template with `--chat-template-file`. Trimming is ASCII white space only.
+The loss span (`EncodeTraining`) is the last answer and its end-of-turn
+token. Equality with Ollama's renderer is still the open row below.
+
 **Corrections and additions to 8.1:** the key-head tiling (`j mod 16`)
 against GQA's `h div 6`; the L2 norm's ε; `q / sqrt(128)`; the state
 orientation; the convolution's index order and missing bias; RoPE touching

@@ -6,7 +6,7 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 Status at a glance of the knowledge-package and fine-tuning work:
 [progress.md](progress.md).
 
-## Local session 14, continued (2026-11-23/24): T12, T16 and T15 done — resume here
+## Local session 14, continued (2026-11-23/24): T12, T16 and T15 done, T17 prepared — resume here
 
 **T12 (`Lora`) done** (T12a, T12b1–T12b4, T12c through
 `tasks/run-task.sh`, about 4 h). Each step checked: rebuilt with `-Cr`;
@@ -100,11 +100,12 @@ The gate with the skeleton: 643/643 earlier cases OK.
 **Open question for T17 (found while preparing T15):** `QwenModel` (T11)
 runs one sequence `[T, H]`. DESIGN 8.14 batches short samples so that one
 forward pays the dequantisation (about 1 s on the 27B) for many; with
-the current model a batch costs B forwards. Either T17 runs the samples
-of a batch one by one (simple; slower on the 27B by roughly the batch
-size in dequantisation, 3.4 samples per batch on the ITa's records) or
-the blocks gain a batch dimension (DeltaRule, attention, RoPE; a change
-to T08–T11 with their tests). To be decided before T17 is prepared.
+the current model a batch costs B forwards. **Decided by the user
+2026-11-24:** T17 runs the samples of a batch one by one (simple; slower
+on the 27B by roughly the batch size in dequantisation, 3.4 samples per
+batch on the ITa's records); if the 27B's speed is a problem, the blocks
+gain a batch dimension (DeltaRule, attention, RoPE; T08–T11 and their
+tests) before M4.
 
 **T15 done** (T15a, T15b1, T15b2, T15c through `tasks/run-task.sh`, about
 2.5 h, no rework). Each step checked: rebuilt with `-Cr`; the
@@ -115,9 +116,39 @@ result notes match the case titles. UT gate 667/667, line coverage 100 %
 (3227/3227). ITa, rerun by the harness owner: 0 / 0 / 0 / 0 / 0, equal to
 the prototype's; ITa gate 103/103.
 
-**Next:** the question above, T18 (`GgufMerge`,
-H47), T19 (`qlora_dataset`), T20 (`qlora_eval`); T17 (`qlora_train`)
-last. And the M4 question of local session 13.
+**T17 (`qlora_train`) prepared** (DESIGN 8.14 "As written for T17";
+one sample per forward as decided). Prototype in
+`samples/qwen-lora/work/proto/T17/` (git-ignored; reference tests in
+`ref/`, mutants in `mut/`). Found on the way: the first loop advanced the
+epoch inside the batch loop, so a wrong position at an epoch's end made
+the next epoch empty and the run endless; the epoch now advances after
+the batch loop, and the saved state is the next epoch's start. Measured:
+one sample on the CPU costs about 2 s + 6.4 ms per token (the
+dequantisation twice); 8 short samples overfit to 9 % of the first loss
+in 8 updates. Committed:
+- `src/TrainStep.pas`, `src/TrainCli.pas` skeletons (interfaces final),
+  `src/qlora_train.pas` (complete, a thin wrapper like `qlora_logprobs`);
+  `tests/ut/TrainStep_test.pas`, `TrainCli_test.pas` skeletons with
+  helpers (the tiny model);
+- `tasks/T17-facts.md` (29 UT rows: TrainStep 001–009, TrainCli 101–108
+  helpers and 201–212 runs, each run against the prototype; 100 % line
+  coverage; ten mutants caught);
+- ITa `tests/ita/T17-run.sh`, driver `tests/ita/T17/train_check.pas`,
+  inputs `train.jsonl` (8) and `valid.jsonl` (4) made by `make-data.bb`:
+  001 overfit 0.0896 (limit 0.1); 002 update 1 against the whole graph
+  3.2e-9; 003 best validation / base 0.745 (limit 0.99); 004 recorded
+  validation loss 4.7e-9; 005 one process vs 3 updates + resume inside
+  an epoch + the rest: 0; 006 lr 1e30 stops with exit code 3: 0. About 6.5 min.
+- tasks `T17a`, `T17b1` (TrainStep), `T17b2` (command line), `T17b3`
+  (the run), `T17c` (terminal timeout 900).
+
+**Next:** `tasks/run-task.sh T17a`, then `T17b1` to `T17b3` (check each:
+rebuild with `-Cr`, compare with `work/proto/T17/`, run the gate; stop the
+gateway before every run), then `QLORA_MODEL=<rehearsal GGUF>
+tasks/run-task.sh T17c`. Then the M2 exit run by the harness owner (32
+fixed samples below 10 % of the first loss; about half an hour on the
+CPU) and the rest of M2: T18 (`GgufMerge`, H47), T19 (`qlora_dataset`),
+T20 (`qlora_eval`). And the M4 question of local session 13.
 
 ## Local session 14 (2026-11-23): T11 done, H43 holds with the agents' code, M1 complete; T12 prepared
 

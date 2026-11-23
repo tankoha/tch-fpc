@@ -4560,6 +4560,10 @@ tokenizer with 42 records: 3.4 samples per batch at budget 2048, 96 % of
 the padded positions are tokens. **Open for T17:** `QwenModel` runs one
 sequence `[T, H]`; a batch needs B forwards (each paying the
 dequantisation, which batching was meant to share) or a batched model.
+**Decided by the user 2026-11-24:** T17 runs the samples of a batch one
+by one (gradients accumulate over the batch, the loss is divided by the
+batch's mask count); if the 27B's speed turns out to be a problem, the
+blocks gain a batch dimension before M4.
 
 **Thinking format (decision for the first run).** Training text uses the
 no-thinking form (`<think>\n\n</think>\n\n` before the answer), because
@@ -4650,6 +4654,26 @@ Planning numbers (*computed* from the gate's 167–172 tokens/s; real data,
 RoPE and the update will cost some of it): four dialects × 1000 samples ×
 about 850 positions = 3.4 M positions per epoch, about 6 h; three epochs
 17–20 h.
+
+**As written for T17 (local session 14, 2026-11-24;
+`samples/qwen-lora/tasks/T17-facts.md`).** Units `TrainStep`
+(`SampleLossBackward`: the trunk block-wise, the head only on the loss
+rows in slices of 256, each slice divided by the update's loss-token
+count; `SampleLoss` and `ValidationLoss` without gradients) and
+`TrainCli` (`qlora_train [options] MODEL TRAIN OUTDIR`: one sample per
+forward as decided; `--batches-per-update` 2; the schedule's total summed
+over the epochs; checkpoints every `--ckpt-every` updates and at each
+epoch's end with the validation loss, the state then being the next
+epoch's start; `--resume` refuses another configuration (MD5 of the data
+files and the settings) or base; a non-finite loss stops with exit code
+3; the log `train-log.tsv` is appended per update). The base's sha256 is
+not computed (stock FPC 3.2.2 has no sha256): `--base-sha256` or an
+Ollama blob name. *Measured* on the rehearsal model on the CPU: one
+sample costs about 2 s + 6.4 ms per token (the 2 s are the
+dequantisation, paid by the forward and by the recompute); 8 short
+samples at lr 1e-3 go from 3.40 to 0.30 in 8 updates; the best validation
+loss is 0.745 of the base's; 4 updates in one process and 2 + resume in
+a new process + 2 are bit-identical.
 
 ### 8.15 The D3 writer
 

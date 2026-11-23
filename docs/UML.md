@@ -729,6 +729,15 @@ classDiagram
     +SkipBatches(Batches, Position)
     +BatchTensors(Set, Batch) Ids, Targets, Mask
   }
+  class TrainStep {
+    <<unit>>
+    +SampleLossBackward(M, Sample, Denom, Slice)
+    +ValidationLoss(M, Set, Slice)
+  }
+  class TrainCli {
+    <<unit>>
+    +RunTrainCLI(Args) exit code
+  }
   class TCheckpoints {
     root, keep
     +Save(State, Set, Optim) dir
@@ -752,6 +761,10 @@ classDiagram
   Recompute ..> TSavedInputs
   TLoraAdamW ..> TLoraSet
   TrainData ..> TTrainSet
+  TrainCli ..> TrainStep
+  TrainCli ..> TCheckpoints
+  TrainCli ..> TLoraAdamW
+  TrainStep ..> Recompute
   TCheckpoints ..> TLoraSet
   TCheckpoints ..> TLoraAdamW
 ```

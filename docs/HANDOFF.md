@@ -6,7 +6,7 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 Status at a glance of the knowledge-package and fine-tuning work:
 [progress.md](progress.md).
 
-## Local session 14, continued (2026-11-23): T12 and T16 done — resume here
+## Local session 14, continued (2026-11-23/24): T12 and T16 done, T15 prepared — resume here
 
 **T12 (`Lora`) done** (T12a, T12b1–T12b4, T12c through
 `tasks/run-task.sh`, about 4 h). Each step checked: rebuilt with `-Cr`;
@@ -71,9 +71,47 @@ owner: 0 / 0 / 0 / 0, equal to the prototype's (10 updates in one go and
 14 745 600 values; the loss 245.9 to 92.7); ITa gate 98/98. The gateway
 was stopped before every run; no refusal this time.
 
-**Next:** the rest of M2: T15 (`TrainData`), T19 (`qlora_dataset`), T20
-(`qlora_eval`) depend on nothing open; T18 (`GgufMerge`, H47) can start;
-T17 (`qlora_train`) comes last. And the M4 question of local session 13.
+**T15 (`TrainData`) prepared** (the last unit T17 needs; DESIGN 8.14 "As
+written for T15"). Prototype in `samples/qwen-lora/work/proto/T15/`
+(git-ignored; reference tests in `ref/`, mutants in `mut/`). Decided and
+measured on the way: records are JSONL with `id`, `dialect`, `prompt`,
+`answer`, `class` (T19 must write the class into every record and write
+raw UTF-8: fpjson turns a `\u` escape of a non-ASCII character into `?`,
+so `TrainData` refuses such escapes); **no token cache** (`EncodeTraining`
+of a 2000-token sample takes 4 ms); a seeded SplitMix64 order, pools
+sorted by length, greedy batches within the budget, resumable by
+skipping batches. Committed:
+- `src/TrainData.pas` skeleton (interface final);
+  `tests/ut/TrainData_test.pas` skeleton with helpers (T05's tiny
+  tokenizer);
+- `tasks/T15-facts.md` (24 UT rows: 001–014 samples and the data file,
+  101–110 order, batches, tensors, each run against the prototype; 100 %
+  line coverage; nine mutants caught);
+- ITa `tests/ita/T15-run.sh`, driver `tests/ita/T15/data_check.pas`, input
+  `tests/ita/T15/records.jsonl` (42 records cut from this sample's sources
+  by `make-records.bb`, committed): 001 tokens and loss spans against
+  text rendered by the driver: 0; 002 counts: 0; 003 three epochs within
+  the budget, every sample once: 0; 004 two processes give the same
+  batches: 0; 005 masked targets of the batch tensors: 0. 22 s. Skeleton:
+  all NG; three mutants NG where expected.
+- tasks `T15a`, `T15b1` (samples), `T15b2` (batches), `T15c`.
+The gate with the skeleton: 643/643 earlier cases OK.
+
+**Open question for T17 (found while preparing T15):** `QwenModel` (T11)
+runs one sequence `[T, H]`. DESIGN 8.14 batches short samples so that one
+forward pays the dequantisation (about 1 s on the 27B) for many; with
+the current model a batch costs B forwards. Either T17 runs the samples
+of a batch one by one (simple; slower on the 27B by roughly the batch
+size in dequantisation, 3.4 samples per batch on the ITa's records) or
+the blocks gain a batch dimension (DeltaRule, attention, RoPE; a change
+to T08–T11 with their tests). To be decided before T17 is prepared.
+
+**Next:** `tasks/run-task.sh T15a`, then `T15b1`, `T15b2` (check each:
+rebuild with `-Cr`, compare with `work/proto/T15/`, run the gate; stop the
+gateway before every run), then `QLORA_MODEL=<rehearsal GGUF>
+tasks/run-task.sh T15c`. Then the question above, T18 (`GgufMerge`,
+H47), T19 (`qlora_dataset`), T20 (`qlora_eval`); T17 (`qlora_train`)
+last. And the M4 question of local session 13.
 
 ## Local session 14 (2026-11-23): T11 done, H43 holds with the agents' code, M1 complete; T12 prepared
 

@@ -4540,6 +4540,27 @@ optimiser update accumulates two batches (about 4096 positions).
 **Loss mask.** Only the assistant's answer and the closing `<|im_end|>`;
 nothing of the system or user turn or the template text.
 
+**As written for T15 (local session 14, 2026-11-24;
+`samples/qwen-lora/tasks/T15-facts.md`).** Unit `TrainData`: a data set
+file is JSONL with the string keys `id`, `dialect`, `prompt`, `answer`,
+`class` (T19 writes the verification class into every record; raw UTF-8,
+because fpjson turns a `\u` escape of a non-ASCII character into `?`,
+*measured*). `TTrainSet.Create(Tok, File, Classes, MaxLen)` admits the
+listed classes, renders user + assistant without thinking
+(`EncodeTraining`, the loss span `[LossFrom, LossTo)` = the trimmed
+answer and its `<|im_end|>`) and drops samples over the maximum length.
+**No token cache**: `EncodeTraining` of a 2000-token sample takes 4 ms
+(*measured*), so data set v1 tokenises in seconds. `EpochOrder` is a
+Fisher–Yates permutation from (seed, epoch) with SplitMix64;
+`EpochBatches` cuts it into pools, sorts each pool by length, fills
+batches greedily up to count × longest ≤ budget and shuffles the batches
+of a pool; `SkipBatches` resumes at T16's position; `BatchTensors` gives
+`Ids`, `Targets` (shifted by one) and `Mask` [B, T]. On the rehearsal
+tokenizer with 42 records: 3.4 samples per batch at budget 2048, 96 % of
+the padded positions are tokens. **Open for T17:** `QwenModel` runs one
+sequence `[T, H]`; a batch needs B forwards (each paying the
+dequantisation, which batching was meant to share) or a batched model.
+
 **Thinking format (decision for the first run).** Training text uses the
 no-thinking form (`<think>\n\n</think>\n\n` before the answer), because
 Mistral's samples carry no reasoning in Qwen's style and inventing one

@@ -711,6 +711,16 @@ classDiagram
     +Step() +ZeroGrad()
     +ClipGlobalNorm(Max)
   }
+  class TTrainSet {
+    samples : tokens, loss span
+    +Create(Tok, File, Classes, MaxLen)
+  }
+  class TrainData {
+    <<unit>>
+    +EpochBatches(Set, Seed, Epoch, Pool, Budget)
+    +SkipBatches(Batches, Position)
+    +BatchTensors(Set, Batch) Ids, Targets, Mask
+  }
   class TCheckpoints {
     root, keep
     +Save(State, Set, Optim) dir
@@ -733,6 +743,7 @@ classDiagram
   Recompute ..> TStage
   Recompute ..> TSavedInputs
   TLoraAdamW ..> TLoraSet
+  TrainData ..> TTrainSet
   TCheckpoints ..> TLoraSet
   TCheckpoints ..> TLoraAdamW
 ```

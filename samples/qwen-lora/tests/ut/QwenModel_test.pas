@@ -1,19 +1,19 @@
 { UT program for src/QwenModel.pas: the rows UT-QwenModel-NNN of
   tests/ut/cases/QwenModel.cases.md (stage 1 from 001: Load, Embed, Stages,
-  HeadChunk; stage 2 from 101: Trunk, Logits, LastLogProbs).
+  HeadChunk; stage 2 from 101: Trunk, Logits, LastLogProbs; T12 from 201: AttachLora).
   The tiny qwen35 models of tests/ut/QwenBlocksFixture.pas
   (WriteTinyQwenModel) are written once at start; the scalar oracle is
   RefLogits of tests/ut/QwenRefScalar.pas.
   Runs on the CPU (.sdlc/ut-coverage.sh hides the GPUs).
   Invoked with `--all --format=plain` (see .sdlc/ut-coverage.sh).
 
-  Skeleton by the harness owner; the test methods are written in T11b. }
+  Skeleton by the harness owner; the test methods are written in T11b and T12b. }
 program QwenModel_test;
 
 {$mode objfpc}{$H+}
 
 uses
-  SysUtils, Math, Tch, GgufFile, GgufQuant, PackedLinear, QwenBlocks, Recompute, QwenModel,
+  SysUtils, Math, Tch, GgufFile, GgufQuant, PackedLinear, QwenBlocks, Recompute, QwenModel, Lora,
   TokenizerFixture, QwenBlocksFixture, QwenRefScalar, DeltaRuleFixture,
   fpcunit, testregistry, consoletestrunner;
 
@@ -627,6 +627,45 @@ begin
     G.Free;
   end;
 end;
+
+{ stage 3 (T12): AttachLora }
+
+{ the pairs' names, comma-separated }
+function PairNames(S: TLoraSet): string;
+var
+  I: Integer;
+begin
+  Result := '';
+  for I := 0 to S.Count - 1 do
+  begin
+    if I > 0 then
+      Result := Result + ',';
+    Result := Result + S.Pair(I).Name;
+  end;
+end;
+
+{ every B := 0.1 N(0, 1), after ManualSeed(6) }
+procedure RandomB(S: TLoraSet);
+var
+  G: IInterface;
+  I: Integer;
+begin
+  ManualSeed(6);
+  G := NoGradGuard;
+  for I := 0 to S.Count - 1 do
+    S.Pair(I).B.CopyFrom(TTensor.randn([S.Pair(I).OutDim, S.Rank]) * 0.1);
+end;
+
+function NoGradLogits(M: TQwenModel): TTensor;
+var
+  G: IInterface;
+begin
+  G := NoGradGuard;
+  Result := M.Logits(M.Trunk(M.Embed(Ids8)));
+end;
+
+const
+  TinyPairs = 'blk.0.attn_qkv,blk.0.attn_gate,blk.0.ssm_out,blk.1.attn_q,blk.1.attn_k,blk.1.attn_v,blk.1.attn_output';
 
 var
   App: TTestRunner;

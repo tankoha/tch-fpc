@@ -1,17 +1,17 @@
 { UT program for src/PackedLinear.pas: the rows UT-PackedLinear-NNN of
-  tests/ut/cases/PackedLinear.cases.md (stage 1 from 001: TPackedLinear; stage 1 also 012 to 015: LoadPacked, LoadDense).
+  tests/ut/cases/PackedLinear.cases.md (stage 1 from 001: TPackedLinear; stage 1 also 012 to 015: LoadPacked, LoadDense; T12 from 101: the LoRA pair of a matrix).
   The tiny qwen35 GGUF of tests/ut/QwenBlocksFixture.pas is written once
   at start (TinyPath); the scalar oracle is tests/ut/QwenRefScalar.pas.
   Runs on the CPU (.sdlc/ut-coverage.sh hides the GPUs).
   Invoked with `--all --format=plain` (see .sdlc/ut-coverage.sh).
 
-  Skeleton by the harness owner; the test methods are written in T10b. }
+  Skeleton by the harness owner; the test methods are written in T10b and T12b. }
 program PackedLinear_test;
 
 {$mode objfpc}{$H+}
 
 uses
-  SysUtils, Math, Tch, GgufFile, GgufQuant, PackedLinear, QwenBlocksFixture,
+  SysUtils, Math, Tch, TchNN, GgufFile, GgufQuant, PackedLinear, Lora, QwenBlocksFixture,
   DeltaRuleFixture, QwenRefScalar,
   fpcunit, testregistry, consoletestrunner;
 
@@ -356,6 +356,79 @@ begin
     end;
   finally
     G.Free;
+  end;
+end;
+
+{ stage 2 (T12): the LoRA pair of a matrix }
+
+{ an F32 matrix 6 x 8, W[o, c] = 0.01 (8 o + c) - 0.2 }
+function NewLinear: TPackedLinear;
+var
+  V: array[0..47] of Single;
+  I: Integer;
+begin
+  for I := 0 to 47 do
+    V[I] := 0.01 * I - 0.2;
+  Result := TPackedLinear.Create(TTensor.FromBytes(V[0], [48 * 4], kUInt8), 0, 6, 8);
+end;
+
+{ X [5, 8], X[t, c] = sin(1 + 8 t + c) }
+function FixX: TTensor;
+var
+  V: array of Double;
+  I: Integer;
+begin
+  V := nil;
+  SetLength(V, 40);
+  for I := 0 to 39 do
+    V[I] := Sin(1 + I);
+  Result := TTensor.FromArray(V).view([5, 8]);
+end;
+
+{ the pair 'q' (AIn -> AOut, rank 3, scale 2) in S }
+function NewPair(S: TVarStore; AIn, AOut: Int64): TLoraPair;
+begin
+  Result := TLoraPair.Create(S.Root / 'q', 'q', AIn, AOut, 3, 2.0);
+end;
+
+{ B[o, k] = 0.03 (o - k) }
+procedure SetB(P: TLoraPair);
+var
+  G: IInterface;
+  V: array of Double;
+  O, K: Integer;
+begin
+  V := nil;
+  SetLength(V, P.OutDim * 3);
+  for O := 0 to P.OutDim - 1 do
+    for K := 0 to 2 do
+      V[O * 3 + K] := 0.03 * (O - K);
+  G := NoGradGuard;
+  P.B.CopyFrom(TTensor.FromArray(V).view([P.OutDim, 3]));
+end;
+
+procedure CheckSetLora(T: TTestCase; AIn, AOut: Int64; const AMessage: string);
+var
+  L: TPackedLinear;
+  S: TVarStore;
+  P: TLoraPair;
+begin
+  L := NewLinear;
+  S := TVarStore.Create(TDevice.Cpu);
+  P := NewPair(S, AIn, AOut);
+  try
+    try
+      L.Lora := P;
+      T.Fail('no EPackedLinear');
+    except
+      on E: EPackedLinear do
+        T.AssertEquals(AMessage, E.Message);
+    end;
+    T.AssertTrue(L.Lora = nil);
+  finally
+    L.Free;
+    P.Free;
+    S.Free;
   end;
 end;
 

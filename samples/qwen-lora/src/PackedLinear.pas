@@ -1,11 +1,12 @@
 { T10: a matrix kept packed on a device (the GGUF's own bytes), dequantised
   per call to fp32 by GgufQuantT.DequantizeT (DESIGN 8.12, "PackedLinear").
   Shapes in libtorch order [Out, In]; a GGUF matrix lists its dims as
-  (In, Out). LoadPacked / LoadDense read a tensor of a TGgufFile. LoRA is
-  added in T12. Written without reference to Qwen.
+  (In, Out). LoadPacked / LoadDense read a tensor of a TGgufFile. With a
+  LoRA pair (T12; not owned) Forward adds its Delta. Written without
+  reference to Qwen.
 
-  Interface by the harness owner (tasks/T10-facts.md); the bodies are
-  written in T10b. }
+  Interface by the harness owner (tasks/T10-facts.md, T12-facts.md); the
+  bodies are written in T10b and T12b. }
 unit PackedLinear;
 
 {$mode objfpc}{$H+}
@@ -13,7 +14,7 @@ unit PackedLinear;
 interface
 
 uses
-  SysUtils, Tch, GgufFile, GgufQuantT;
+  SysUtils, Tch, GgufFile, GgufQuantT, Lora;
 
 type
   EPackedLinear = class(Exception);
@@ -23,6 +24,8 @@ type
     FRaw: TTensor;
     FTType: Cardinal;
     FOutDim, FInDim: Int64;
+    FLora: TLoraPair;
+    procedure SetLora(AValue: TLoraPair);
   public
     constructor Create(const ARaw: TTensor; ATType: Cardinal; AOutDim, AInDim: Int64);
     function Weight: TTensor;
@@ -31,6 +34,8 @@ type
     property TType: Cardinal read FTType;
     property OutDim: Int64 read FOutDim;
     property InDim: Int64 read FInDim;
+    { Not owned; nil (the default) for none. }
+    property Lora: TLoraPair read FLora write SetLora;
   end;
 
 function TensorRaw(G: TGgufFile; const AName: RawByteString; const ADevice: TDevice;
@@ -90,6 +95,11 @@ begin
   if (Length(S) = 0) or (S[High(S)] <> FInDim) then
     raise EPackedLinear.CreateFmt('X must end in %d, got %s', [FInDim, ShapeStr(X)]);
   Result := X.matmul(Weight.transpose(0, 1));
+end;
+
+procedure TPackedLinear.SetLora(AValue: TLoraPair);
+begin
+  raise EPackedLinear.Create('TPackedLinear.SetLora: not implemented yet');
 end;
 
 function TPackedLinear.Device: TDevice;

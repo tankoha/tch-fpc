@@ -6,7 +6,7 @@
   tasks/T11-facts.md.
 
   Skeleton by the harness owner (interface final); the routines are
-  written in T11b. }
+  written in T11b, AttachLora in T12b (tasks/T12-facts.md). }
 unit QwenModel;
 
 {$mode objfpc}{$H+}
@@ -14,7 +14,7 @@ unit QwenModel;
 interface
 
 uses
-  SysUtils, Tch, GgufFile, GgufQuantT, PackedLinear, QwenBlocks, Recompute;
+  SysUtils, Tch, GgufFile, GgufQuantT, PackedLinear, QwenBlocks, Recompute, Lora;
 
 const
   HeadChunkRows = 8192;
@@ -43,6 +43,10 @@ type
     function Trunk(const X: TTensor): TTensor;
     function Logits(const H: TTensor): TTensor;
     function LastLogProbs(const AIds: array of Integer): TTensor;
+    { Adds to ASet one pair per LoRA target of every trunk block
+      ('blk.<i>.<target>', on the block's device) and attaches it to the
+      matrix; returns the number of pairs added (T12, DESIGN 8.13). }
+    function AttachLora(ASet: TLoraSet): Integer;
     property Dims: TQwenDims read FDims;
     property TrunkBlocks: Integer read FTrunk;
     property Split: Integer read FSplit;
@@ -200,6 +204,12 @@ begin
   G := NoGradGuard;
   H := Trunk(Embed(AIds));
   Result := Logits(H.narrow(0, Length(AIds) - 1, 1)).log_softmax(-1).view([FVocab]);
+end;
+
+function TQwenModel.AttachLora(ASet: TLoraSet): Integer;
+begin
+  Result := 0;
+  raise EQwenModel.Create('TQwenModel.AttachLora: not implemented yet');
 end;
 
 end.

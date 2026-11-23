@@ -6,7 +6,7 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 Status at a glance of the knowledge-package and fine-tuning work:
 [progress.md](progress.md).
 
-## Local session 14 (2026-11-23): T11 done, H43 holds with the agents' code, M1 complete — resume here
+## Local session 14 (2026-11-23): T11 done, H43 holds with the agents' code, M1 complete; T12 prepared — resume here
 
 **T11 done** (T11a, T11b1–T11b3, T11c through `tasks/run-task.sh`, about
 4 h including the stop below). Each step checked: rebuilt with `-Cr`; the
@@ -30,7 +30,37 @@ stopped before T11c. Suggestion for later task files: a delegation with the
 skill `sdlc-ut-tdd` that must not write code says so in the delegation text
 itself ("no source code; stop after the tables"), not only in the task.
 
-**Next:** M2 (T12, T15–T20; H47) and the M4 question of local session 13.
+**M2 started: T12 (`Lora`) prepared** (the method of T08–T11; DESIGN 8.13
+"As written for T12"). Prototype in `samples/qwen-lora/work/proto/T12/`
+(git-ignored; reference tests in `ref/`, the mutants in `mut/`). Committed:
+- `src/Lora.pas` skeleton (interface final); interface additions with
+  "not implemented" bodies in `PackedLinear` (`Lora`, `SetLora`),
+  `QwenBlocks` (`Target`, `LoraTargets`, `Index`) and `QwenModel`
+  (`AttachLora`);
+- `tests/ut/Lora_test.pas` skeleton and helpers in the three other test
+  programs (no T12 test methods yet);
+- `tasks/T12-facts.md` (52 UT rows: Lora 001–016 and 101–114,
+  PackedLinear 101–107, QwenBlocks 301–308, QwenModel 201–207, each run
+  against the prototype; 100 % line coverage; four mutants caught);
+- ITa `tests/ita/T12-run.sh`, driver `tests/ita/T12/lora_check.pas`
+  (001 pairs and parameters against the tensor directory: 78 pairs,
+  4 915 200 parameters at rank 16; 002 B = 0 exact; 003 adapted forward
+  against the base forward on a GGUF with W + s·B·A computed in Double:
+  4.8e-5, limit 1e-3; 004 block-wise against whole-graph gradients: 0;
+  005 save/load: 0). Skeleton: all NG; prototype: all OK; mutants caught.
+- tasks `T12a` (documents, 2 delegations; each delegation's goal now
+  carries "no source code ... stop" itself, after T11a), `T12b1` (pair),
+  `T12b2` (set), `T12b3` (matrix and block), `T12b4` (model), `T12c`.
+The gate with the skeletons: 559/559 earlier cases OK; only the new
+routines and the empty `Lora_test` are open.
+
+**Next:** `tasks/run-task.sh T12a`, then `T12b1` to `T12b4` (check each:
+rebuild with `-Cr`, compare with `work/proto/T12/`, run the gate), then
+`QLORA_MODEL=<rehearsal GGUF> tasks/run-task.sh T12c` (stop a resident
+gateway first). Then the rest of M2: T15 (`TrainData`), T19
+(`qlora_dataset`) and T20 (`qlora_eval`) depend on nothing open; T16
+(`Checkpoint`) and T18 (`GgufMerge`, H47) need T12; T17 (`qlora_train`)
+comes last. And the M4 question of local session 13.
 
 ## Local session 13 (2026-11-23): T11 prepared, H43 measured with the prototype
 

@@ -8,11 +8,12 @@
   value heads, DeltaRule.DeltaRuleChunked); TFullBlock the gated attention
   block (q/k RMS norms, RoPE on the first Rot dimensions of a head, causal
   SDPA with GQA). Every size comes from the GGUF metadata (TQwenDims), so
-  the same code runs the rehearsal 0.8B and the 27B model. LoRA is added
-  in T12, bf16 in M2.
+  the same code runs the rehearsal 0.8B and the 27B model. Target gives a
+  block's matrices by their GGUF name, LoraTargets the names DESIGN 8.13
+  adapts (T12); bf16 in M2.
 
-  Interface by the harness owner (tasks/T10-facts.md); the bodies are
-  written in T10b. }
+  Interface by the harness owner (tasks/T10-facts.md, T12-facts.md); the
+  bodies are written in T10b and T12b. }
 unit QwenBlocks;
 
 {$mode objfpc}{$H+}
@@ -37,6 +38,7 @@ type
   protected
     FDims: TQwenDims;
     FDevice: TDevice;
+    FIndex: Integer;
     FAttnNorm, FPostNorm: TTensor;
     FFfnGate, FFfnUp, FFfnDown: TPackedLinear;
     function Attn(const X: TTensor): TTensor; virtual; abstract;
@@ -45,6 +47,12 @@ type
     destructor Destroy; override;
     function Device: TDevice; override;
     function Forward(const H: TTensor): TTensor; override;
+    { The matrix AName ('ffn_gate', 'ffn_up', 'ffn_down' or one of the
+      kind's own, without '.weight'); EQwenBlock for any other name. }
+    function Target(const AName: string): TPackedLinear; virtual;
+    { The names DESIGN 8.13 adapts in this kind of block. }
+    function LoraTargets: TStringArray; virtual; abstract;
+    property Index: Integer read FIndex;
   end;
 
   TLinearBlock = class(TQwenBlock)
@@ -55,6 +63,8 @@ type
   public
     constructor Load(G: TGgufFile; ABlock: Integer; const ADims: TQwenDims; const ADevice: TDevice); override;
     destructor Destroy; override;
+    function Target(const AName: string): TPackedLinear; override;
+    function LoraTargets: TStringArray; override;
   end;
 
   TFullBlock = class(TQwenBlock)
@@ -65,6 +75,8 @@ type
   public
     constructor Load(G: TGgufFile; ABlock: Integer; const ADims: TQwenDims; const ADevice: TDevice); override;
     destructor Destroy; override;
+    function Target(const AName: string): TPackedLinear; override;
+    function LoraTargets: TStringArray; override;
   end;
 
 function ReadQwenDims(G: TGgufFile): TQwenDims;
@@ -164,6 +176,12 @@ begin
   FFfnDown := LoadPacked(G, P + 'ffn_down.weight', ADevice);
 end;
 
+function TQwenBlock.Target(const AName: string): TPackedLinear;
+begin
+  Result := nil;
+  raise EQwenBlock.Create('TQwenBlock.Target: not implemented yet');
+end;
+
 destructor TQwenBlock.Destroy;
 begin
   FFfnGate.Free;
@@ -211,6 +229,18 @@ begin
   FAlpha.Free;
   FSsmOut.Free;
   inherited Destroy;
+end;
+
+function TLinearBlock.Target(const AName: string): TPackedLinear;
+begin
+  Result := nil;
+  raise EQwenBlock.Create('TLinearBlock.Target: not implemented yet');
+end;
+
+function TLinearBlock.LoraTargets: TStringArray;
+begin
+  Result := nil;
+  raise EQwenBlock.Create('TLinearBlock.LoraTargets: not implemented yet');
 end;
 
 function TLinearBlock.Attn(const X: TTensor): TTensor;
@@ -271,6 +301,18 @@ begin
   FV.Free;
   FOut.Free;
   inherited Destroy;
+end;
+
+function TFullBlock.Target(const AName: string): TPackedLinear;
+begin
+  Result := nil;
+  raise EQwenBlock.Create('TFullBlock.Target: not implemented yet');
+end;
+
+function TFullBlock.LoraTargets: TStringArray;
+begin
+  Result := nil;
+  raise EQwenBlock.Create('TFullBlock.LoraTargets: not implemented yet');
 end;
 
 function TFullBlock.Attn(const X: TTensor): TTensor;

@@ -4464,6 +4464,28 @@ type
 
 The MTP head is not trained and not loaded for training.
 
+**As written for T12 (local session 14, 2026-11-23;
+`samples/qwen-lora/tasks/T12-facts.md`).** The sketch above became:
+`TLoraPair.Create(P, Name, InDim, OutDim, Rank, Scale)` registers
+`lora_a` uniform in ±1/√in (PyTorch's `kaiming_uniform_` with a = √5, as
+common LoRA code does) and `lora_b` zero; `Delta(X)` casts A and B to X's
+kind, so no `ComputeKind` parameter is needed (bf16 at M2g passes bf16
+activations). `TPackedLinear` keeps its T10 constructor and gains a
+property `Lora` (a pair it does not own; dimensions checked);
+`Forward(X)` adds `Delta(X)`. `TLoraSet.Create(Rank, Scale)` owns the
+pairs and one `TVarStore` per device; `Add(Name, In, Out, Device)`,
+`Find`, `Pair`, `Stores`, `ParameterCount`; `Save` / `Load` write one tch
+archive through a temporary CPU store, so the file does not depend on the
+device map (rank and scale are the checkpoint's, T16). `TQwenBlock`
+gains `Target(Name)` (its matrices by GGUF name) and `LoraTargets` (the
+names above per block kind); `TQwenModel.AttachLora(Set)` adds and
+attaches one pair per target of every trunk block. Rehearsal 0.8B at rank
+16: 78 pairs, 4 915 200 parameters (*measured*). The prototype passes
+the acceptance of 8.18 on the rehearsal model: with B = 0 the
+log-probabilities are bit for bit those without adapters; with random B
+the adapted forward is within 4.8e-5 of the base forward on a GGUF with
+W + s·B·A; block-wise gradients equal the whole-graph ones.
+
 ### 8.14 Block-wise backward, optimiser, checkpoints, the step
 
 **`Recompute`** — the reusable routine. A stage is anything with a device

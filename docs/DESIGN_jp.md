@@ -4073,6 +4073,24 @@ type
 
 MTP のヘッドは学習しない。学習のときには読み込みもしない。
 
+**T12 で書いた形（ローカルセッション14、2026-11-23。
+`samples/qwen-lora/tasks/T12-facts.md`）。** 上の素描は次のようになった。
+`TLoraPair.Create(P, Name, InDim, OutDim, Rank, Scale)` は `lora_a` を ±1/√in の一様分布
+（PyTorch の `kaiming_uniform_`、a = √5。よくある LoRA の実装と同じ）、`lora_b` をゼロで登録する。
+`Delta(X)` は A と B を X の型に変換するので `ComputeKind` の引数は要らない（M2g の bf16 では
+bf16 の活性を渡す）。`TPackedLinear` は T10 のコンストラクタのままで、プロパティ `Lora`
+（所有しないペア。次元を確かめる）を持ち、`Forward(X)` が `Delta(X)` を足す。
+`TLoraSet.Create(Rank, Scale)` はペアとデバイスごとの `TVarStore` を所有する。
+`Add(Name, In, Out, Device)`、`Find`、`Pair`、`Stores`、`ParameterCount`。`Save` / `Load` は
+CPU の一時ストアを通して tch のアーカイブ 1 つに書くので、ファイルはデバイスの割り当てに
+よらない（ランクとスケールはチェックポイント T16 が持つ）。`TQwenBlock` に `Target(Name)`
+（GGUF の名前で行列を返す）と `LoraTargets`（ブロックの種類ごとの上の名前）が加わり、
+`TQwenModel.AttachLora(Set)` が幹の全ブロックの対象ごとにペアを 1 つ足して付ける。
+リハーサル用 0.8B でランク 16：ペア 78、パラメータ 4 915 200（*測定*）。試作はリハーサル用
+モデルで 8.18 の受け入れ条件を満たす。B = 0 では対数確率がアダプタなしとビット単位で同じ。
+B が乱数のとき、アダプタ付きの順方向は W + s·B·A を入れた GGUF での素の順方向と 4.8e-5 以内。
+ブロック単位の勾配はグラフ全体の勾配と一致する。
+
 ### 8.14 ブロック単位の逆伝播、オプティマイザ、チェックポイント、1ステップ
 
 **`Recompute`** — 再利用できる手続き。ステージとは、デバイスと順方向を持つものの

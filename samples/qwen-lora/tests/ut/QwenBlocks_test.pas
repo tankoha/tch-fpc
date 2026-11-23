@@ -1,11 +1,11 @@
 { UT program for src/QwenBlocks.pas: the rows UT-QwenBlocks-NNN of
-  tests/ut/cases/QwenBlocks.cases.md (stage 2 from 101: ReadQwenDims, IsFullBlock, RmsNorm, RopeText; stage 3 from 201: the full block; stage 4 from 211: the linear block).
+  tests/ut/cases/QwenBlocks.cases.md (stage 2 from 101: ReadQwenDims, IsFullBlock, RmsNorm, RopeText; stage 3 from 201: the full block; stage 4 from 211: the linear block; T12 from 301: Target, LoraTargets, Index).
   The tiny qwen35 GGUF of tests/ut/QwenBlocksFixture.pas is written once
   at start (TinyPath); the scalar oracle is tests/ut/QwenRefScalar.pas.
   Runs on the CPU (.sdlc/ut-coverage.sh hides the GPUs).
   Invoked with `--all --format=plain` (see .sdlc/ut-coverage.sh).
 
-  Skeleton by the harness owner; the test methods are written in T10b. }
+  Skeleton by the harness owner; the test methods are written in T10b and T12b. }
 program QwenBlocks_test;
 
 {$mode objfpc}{$H+}
@@ -449,6 +449,44 @@ begin
     G.Free;
   end;
   DeleteFile(P);
+end;
+
+{ stage 3 (T12): Target, LoraTargets, Index }
+
+{ 'name in -> out' of the block's matrix AName }
+function TargetText(B: TQwenBlock; const AName: string): string;
+var
+  L: TPackedLinear;
+begin
+  L := B.Target(AName);
+  Result := Format('%s %d -> %d', [AName, L.InDim, L.OutDim]);
+end;
+
+{ block AIndex of the tiny model on the CPU; the caller frees B, then G }
+function TinyBlock(AIndex: Integer; out G: TGgufFile): TQwenBlock;
+begin
+  G := TGgufFile.Open(TinyPath);
+  Result := LoadBlock(G, AIndex, ReadQwenDims(G), TDevice.Cpu);
+end;
+
+procedure CheckTarget(T: TTestCase; AIndex: Integer; const AName, AMessage: string);
+var
+  G: TGgufFile;
+  B: TQwenBlock;
+begin
+  B := TinyBlock(AIndex, G);
+  try
+    try
+      B.Target(AName);
+      T.Fail('no EQwenBlock');
+    except
+      on E: EQwenBlock do
+        T.AssertEquals(AMessage, E.Message);
+    end;
+  finally
+    B.Free;
+    G.Free;
+  end;
 end;
 
 var

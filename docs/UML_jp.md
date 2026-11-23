@@ -684,16 +684,18 @@ classDiagram
   class TPackedLinear {
     packed : TTensor
     quantType
-    +Forward(X, ComputeKind) TTensor
+    +Forward(X) TTensor
+    +Lora : TLoraPair
   }
   class TLoraPair {
     A, B : TTensor
     scale
-    +Delta(X, ComputeKind) TTensor
+    +Delta(X) TTensor
     +MergedDelta() TTensor
   }
   class TLoraSet {
     デバイスごとに TVarStore 1つ
+    +Add(Name, In, Out, Device) TLoraPair
     +Save() +Load()
   }
   class TSavedInputs {

@@ -6,7 +6,7 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 Status at a glance of the knowledge-package and fine-tuning work:
 [progress.md](progress.md).
 
-## Local session 14, continued (2026-11-23): T12 done — resume here
+## Local session 14, continued (2026-11-23): T12 done, T16 prepared — resume here
 
 **T12 (`Lora`) done** (T12a, T12b1–T12b4, T12c through
 `tasks/run-task.sh`, about 4 h). Each step checked: rebuilt with `-Cr`;
@@ -32,11 +32,40 @@ What happened on the way:
   T12b4 had `QLORA_MODEL` empty. `hermes gateway stop`, then rerun. Before
   every run with `QLORA_MODEL`, stop the gateway first.
 
-**Next:** the rest of M2. T15 (`TrainData`), T19 (`qlora_dataset`) and
-T20 (`qlora_eval`) depend on nothing open; T16 (`Checkpoint`) and T18
-(`GgufMerge`, H47) can start now that T12 is done; T17 (`qlora_train`)
-comes last. Prepare each with the method of T08–T12 (prototype, facts,
-skeletons, ITa, task files). And the M4 question of local session 13.
+**T16 (`Checkpoint`) prepared** (next on the path to T17; DESIGN 8.14
+"As written for T16"). Prototype in `samples/qwen-lora/work/proto/T16/`
+(git-ignored; reference tests in `ref/`, mutants in `mut2/`). Decided on
+the way: the moments are stored by variable name (`<variable>.adam_m`,
+`.adam_v`) through a CPU store, because T14's moment stores are indexed by
+position and a per-store file resumed with another device split would load
+other matrices' moments, silently where shapes agree; `state.json` strings
+are printable ASCII (fpjson writes UTF-8 encoded twice); a non-finite
+validation loss is `null`. Measured: fpjson round-trips Double exactly (an
+apparent mismatch with `0.1` was the Extended constant). Committed:
+- `src/Checkpoint.pas` skeleton (interface final);
+  `tests/ut/Checkpoint_test.pas` skeleton with helpers (a small set and its
+  AdamW, no model);
+- `tasks/T16-facts.md` (32 UT rows: 001–012 run state and `state.json`,
+  101–120 `TCheckpoints`, each run against the prototype; 100 % line
+  coverage; seven mutants caught);
+- ITa `tests/ita/T16-run.sh`, driver `tests/ita/T16/ckpt_check.pas`, four
+  processes (`full`, `part1`, `part2` resumed with another seed,
+  `compare`): 001 every A, B and moment, one go vs resumed: 0; 002
+  `state.json` fields: 0; 003 retention (last 3 and the best): 0; 004 the
+  loss of every update: 0. About 2 min. Skeleton: all NG; three mutants
+  NG where expected.
+- tasks `T16a` (documents, 2 delegations, the "no source code ... stop"
+  sentence in each goal), `T16b1` (run state), `T16b2` (checkpoints),
+  `T16c`.
+The gate with the skeleton: 611/611 earlier cases OK; only the skeleton's
+lines are open.
+
+**Next:** `tasks/run-task.sh T16a`, then `T16b1`, `T16b2` (check each:
+rebuild with `-Cr`, compare with `work/proto/T16/`, run the gate), then
+`hermes gateway stop` and `QLORA_MODEL=<rehearsal GGUF> tasks/run-task.sh
+T16c`. Then the rest of M2: T15 (`TrainData`), T19 (`qlora_dataset`), T20
+(`qlora_eval`) depend on nothing open; T18 (`GgufMerge`, H47) can start;
+T17 (`qlora_train`) comes last. And the M4 question of local session 13.
 
 ## Local session 14 (2026-11-23): T11 done, H43 holds with the agents' code, M1 complete; T12 prepared
 

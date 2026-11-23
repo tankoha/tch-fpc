@@ -5,7 +5,7 @@
 再開するときは最初にこれを読んでください。決定事項と理由は [DESIGN_jp.md](DESIGN_jp.md) にあります。
 知識パッケージとファインチューニングの作業の状況は [progress_jp.md](progress_jp.md) で一目で見られます。
 
-## ローカルセッション14 の続き（2026-11-23）：T12 完了 — ここから再開
+## ローカルセッション14 の続き（2026-11-23）：T12 完了、T16 を準備 — ここから再開
 
 **T12（`Lora`）完了**（T12a、T12b1〜T12b4、T12c を `tasks/run-task.sh` で。約 4 時間）。
 各段階の後に確認：`-Cr` でビルドし直し、`src/Lora.pas`、`PackedLinear.pas`、`QwenBlocks.pas`、
@@ -24,10 +24,31 @@ ITa ゲート 94/94。
 - T12c の 1 回目は起動を拒否（exit 3）。T12b4 が自動起動した gateway の `QLORA_MODEL` が空だったため。
   `hermes gateway stop` の後に再実行。`QLORA_MODEL` を使う実行の前には毎回 gateway を止めること。
 
-**次：** M2 の残り。T15（`TrainData`）、T19（`qlora_dataset`）、T20（`qlora_eval`）は未完了の依存なし。
-T16（`Checkpoint`）と T18（`GgufMerge`、H47）は T12 が終わったので着手可能。T17（`qlora_train`）が最後。
-それぞれ T08〜T12 のやり方（試作、facts、スケルトン、ITa、タスクファイル）で準備する。
-ほかにローカルセッション13 の M4 の問題。
+**T16（`Checkpoint`）を準備**（T17 への道筋で次に当たる。DESIGN 8.14「T16 で書いた形」）。
+試作は `samples/qwen-lora/work/proto/T16/`（git 対象外。参照テストは `ref/`、壊した版は `mut2/`）。
+途中で決めたこと：モーメントは CPU のストアを通して変数名で保存する（`<変数>.adam_m`、`.adam_v`）。
+T14 のモーメントのストアは位置で番号が付いており、ストアごとのファイルを別のデバイス分割で再開すると
+別の行列のモーメントを読み込み、形が同じところでは黙って誤るため。`state.json` の文字列は表示可能な
+ASCII に限る（fpjson は UTF-8 を二重に符号化して書く）。有限でない検証損失は `null`。測ったこと：
+fpjson は Double を正確に往復させる（`0.1` で一致しないように見えたのは Extended の定数のせい）。
+コミットしたもの：
+- `src/Checkpoint.pas` のスケルトン（インターフェースは確定）。`tests/ut/Checkpoint_test.pas` の
+  スケルトンと補助関数（モデルなし、小さなセットとその AdamW）。
+- `tasks/T16-facts.md`（UT 32 行：001〜012 が実行状態と `state.json`、101〜120 が `TCheckpoints`。
+  どれも試作で実行済み。行カバレッジ 100%。壊した版 7 通りをすべて検出）。
+- ITa `tests/ita/T16-run.sh`、ドライバ `tests/ita/T16/ckpt_check.pas`。4 プロセス（`full`、`part1`、
+  別のシードで再開する `part2`、`compare`）：001 続けた実行と再開した実行の A・B・モーメントすべて 0、
+  002 `state.json` の各欄 0、003 残すもの（直近 3 つと最良）0、004 各更新の損失 0。約 2 分。
+  スケルトンではすべて NG、壊した版 3 通りは想定どおりの箇所で NG。
+- タスク `T16a`（文書、委譲 2 回。各 goal に「ソースは書かない……止まる」を入れた）、`T16b1`
+  （実行状態）、`T16b2`（チェックポイント）、`T16c`。
+スケルトンを入れた状態のゲート：既存 611/611 が OK。未通過はスケルトンの行だけ。
+
+**次：** `tasks/run-task.sh T16a`、続いて `T16b1`、`T16b2`（各段階の後に `-Cr` でビルドし直し、
+`work/proto/T16/` と照合し、ゲートを実行）、`hermes gateway stop` の後に
+`QLORA_MODEL=<リハーサル用 GGUF> tasks/run-task.sh T16c`。その後 M2 の残り：T15（`TrainData`）、
+T19（`qlora_dataset`）、T20（`qlora_eval`）は未完了の依存なし。T18（`GgufMerge`、H47）は着手可能。
+T17（`qlora_train`）が最後。ほかにローカルセッション13 の M4 の問題。
 
 ## ローカルセッション14（2026-11-23）：T11 完了、エージェントのコードで H43 が成り立つ、M1 完了、T12 を準備
 

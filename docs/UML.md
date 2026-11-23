@@ -719,6 +719,12 @@ classDiagram
     +Step() +ZeroGrad()
     +ClipGlobalNorm(Max)
   }
+  class TCheckpoints {
+    root, keep
+    +Save(State, Set, Optim) dir
+    +Load(Dir, Set, Optim) TRunState
+    +Latest() +Best()
+  }
   class TQwenModel {
     stages : TStage[64]
     +EmbedRows(Ids) TTensor
@@ -735,6 +741,8 @@ classDiagram
   Recompute ..> TStage
   Recompute ..> TSavedInputs
   TLoraAdamW ..> TLoraSet
+  TCheckpoints ..> TLoraSet
+  TCheckpoints ..> TLoraAdamW
 ```
 
 One training step on the two GPUs (DESIGN 8.14).

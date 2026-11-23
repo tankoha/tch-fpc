@@ -4593,6 +4593,26 @@ temporary name and renamed; the last three and the best on validation loss
 are kept. Acceptance: ten updates in one go and five + resume + five give
 identical parameters on the CPU.
 
+**As written for T16 (local session 14, 2026-11-23;
+`samples/qwen-lora/tasks/T16-facts.md`).** `TCheckpoints.Create(Root,
+Keep)`; `Save(State, Set, Optim)` writes `<root>/ckpt-<update, 8
+digits>/` (`state.json`, `lora.ot`, `moments.ot`) through
+`tmp-ckpt-<update>/` and a rename, then keeps the last `Keep` and the best
+on validation loss; `Load(Dir, Set, Optim)` restores the adapters, the
+moments and `StepCount` and returns the `TRunState`; `List`, `Latest`,
+`Best`; `ReadRunState(Dir)` for `qlora_merge`. The moments are stored
+**by variable name** (`<variable>.adam_m`, `.adam_v`) through a store on
+the CPU, like the adapters, so a checkpoint does not depend on the device
+map: T14's moment stores are indexed by position within a device's store,
+and a per-store file resumed with another split would load other
+matrices' moments, silently where the shapes agree. `state.json` holds
+update, epoch, position, seed, rank, scale, configuration hash, sha256 of
+the base (both printable ASCII, computed by T17) and the validation loss
+(`null` when not finite); `Load` refuses another rank or scale. The
+schedule position is the update count. The prototype passes on the
+rehearsal model: 10 updates in one go and 5 + checkpoint + resume in a new
+process + 5 give bit-identical adapters, moments and losses.
+
 **One step** (also UML 10):
 
 1. batch → token ids, mask; embedding rows dequantised for the ids only;

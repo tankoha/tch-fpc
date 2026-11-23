@@ -6,7 +6,7 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 Status at a glance of the knowledge-package and fine-tuning work:
 [progress.md](progress.md).
 
-## Local session 14, continued (2026-11-23): T12 done, T16 prepared — resume here
+## Local session 14, continued (2026-11-23): T12 and T16 done — resume here
 
 **T12 (`Lora`) done** (T12a, T12b1–T12b4, T12c through
 `tasks/run-task.sh`, about 4 h). Each step checked: rebuilt with `-Cr`;
@@ -60,10 +60,18 @@ apparent mismatch with `0.1` was the Extended constant). Committed:
 The gate with the skeleton: 611/611 earlier cases OK; only the skeleton's
 lines are open.
 
-**Next:** `tasks/run-task.sh T16a`, then `T16b1`, `T16b2` (check each:
-rebuild with `-Cr`, compare with `work/proto/T16/`, run the gate), then
-`hermes gateway stop` and `QLORA_MODEL=<rehearsal GGUF> tasks/run-task.sh
-T16c`. Then the rest of M2: T15 (`TrainData`), T19 (`qlora_dataset`), T20
+**T16 done** (T16a, T16b1, T16b2, T16c through `tasks/run-task.sh`, about
+3 h, no rework). Each step checked: rebuilt with `-Cr`; the
+implementation of `src/Checkpoint.pas` equals the prototype; the agents'
+UT run against six mutants catches each on the same rows as the
+prototype's reference tests; the result notes match the case titles. UT
+gate 643/643, line coverage 100 % (3024/3024). ITa, rerun by the harness
+owner: 0 / 0 / 0 / 0, equal to the prototype's (10 updates in one go and
+5 + checkpoint + resume in a new process + 5 bit-identical over
+14 745 600 values; the loss 245.9 to 92.7); ITa gate 98/98. The gateway
+was stopped before every run; no refusal this time.
+
+**Next:** the rest of M2: T15 (`TrainData`), T19 (`qlora_dataset`), T20
 (`qlora_eval`) depend on nothing open; T18 (`GgufMerge`, H47) can start;
 T17 (`qlora_train`) comes last. And the M4 question of local session 13.
 

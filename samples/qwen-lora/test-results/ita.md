@@ -119,3 +119,7 @@ When a case is run again, do not edit its row; append a new row below (the last 
 | ITa-T12-003 | OK | - | 2026-11-23 | value 4.8E-005, limit 1.0E-003 |
 | ITa-T12-004 | OK | - | 2026-11-23 | value 0.0E+000, limit 1.0E-004 |
 | ITa-T12-005 | OK | - | 2026-11-23 | value 0.0E+000, limit 0.0E+000 |
+| ITa-T16-001 | OK | - | 2026-11-23 | 10 updates in one go vs 5 + checkpoint + resume in a new process + 5: max \|difference\| over every A, B and moment (14745600 values; updates 6-10 moved them by up to 1.3E-002): value 0.0E+000, limit 0.0E+000 |
+| ITa-T16-002 | OK | - | 2026-11-23 | state.json of full/ckpt-10, part/ckpt-10 and part/ckpt-5 against the states written (count of fields that differ): value 0.0E+000, limit 0.0E+000 |
+| ITa-T16-003 | OK | - | 2026-11-23 | directories left (the last 3 and the best, nothing else): full ckpt-00000002,ckpt-00000008,ckpt-00000009,ckpt-00000010; part ckpt-00000005,ckpt-00000010: value 0.0E+000, limit 0.0E+000 |
+| ITa-T16-004 | OK | - | 2026-11-23 | loss of every update, one go vs resumed (max \|difference\|; loss 245.8632 at update 1, 92.71519 at update 10): value 0.0E+000, limit 0.0E+000 |

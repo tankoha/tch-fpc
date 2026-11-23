@@ -616,3 +616,35 @@ When a case is run again, do not edit its row; append a new row below (the last 
 | UT-QwenModel-205 | OK |  | 2026-11-23 | T12b4 stage 4: AttachLora twice on the same set → ELora 'pair already present: blk.0.attn_qkv', Count 7 |
 | UT-QwenModel-206 | OK |  | 2026-11-23 | T12b4 stage 4: AttachLora on the NextN file → 7 pairs, PairNames = TinyPairs (no MTP block) |
 | UT-QwenModel-207 | OK |  | 2026-11-23 | T12b4 stage 4: AttachLora with split 1 on one device → 7 pairs, 1 store, 14 variables |
+| UT-Checkpoint-001 | OK |  | 2026-11-23 | NewRunState, the defaults |
+| UT-Checkpoint-002 | OK |  | 2026-11-23 | RunStateToJson of FixState, exact text |
+| UT-Checkpoint-003 | OK |  | 2026-11-23 | JSON round trip, big seed, odd config hash |
+| UT-Checkpoint-004 | OK |  | 2026-11-23 | ValLoss NaN, +Inf, −Inf as null |
+| UT-Checkpoint-005 | OK |  | 2026-11-23 | missing the seed key |
+| UT-Checkpoint-006 | OK |  | 2026-11-23 | update written as 5.0 |
+| UT-Checkpoint-007 | OK |  | 2026-11-23 | config_hash as a number |
+| UT-Checkpoint-008 | OK |  | 2026-11-23 | scale null; val_loss a string |
+| UT-Checkpoint-009 | OK |  | 2026-11-23 | text that is not a JSON object |
+| UT-Checkpoint-010 | OK |  | 2026-11-23 | an extra key is ignored |
+| UT-Checkpoint-011 | OK |  | 2026-11-23 | ReadRunState of an empty directory |
+| UT-Checkpoint-012 | OK |  | 2026-11-23 | non-ASCII base_sha256, then config_hash |
+| UT-Checkpoint-101 | OK |  | 2026-11-23 | T16b2 stage 2: Create without trailing delimiter — dir created, Root ends with it, Keep 3, List/Latest/Best empty |
+| UT-Checkpoint-102 | OK |  | 2026-11-23 | T16b2 stage 2: Create, Keep 0 → 'keep must be at least 1, got 0'; root under an existing file → 'cannot create <root>' |
+| UT-Checkpoint-103 | OK |  | 2026-11-23 | T16b2 stage 2: Save writes state.json, lora.ot, moments.ot into ckpt-00000005 (no tmp-…); state reads back FixState (Rank 4, Scale 2); Latest and Best are the checkpoint |
+| UT-Checkpoint-104 | OK |  | 2026-11-23 | T16b2 stage 2: Load restores the set, the moments and StepCount of a different run (S2/O2), exactly |
+| UT-Checkpoint-105 | OK |  | 2026-11-23 | T16b2 stage 2: Save leaves S and O (parameters and moments) unchanged, StepCount stays |
+| UT-Checkpoint-106 | OK |  | 2026-11-23 | T16b2 stage 2: a second Save for the same update → 'checkpoint exists: <dir>' |
+| UT-Checkpoint-107 | OK |  | 2026-11-23 | T16b2 stage 2: Load, the set has rank 3 → '<dir>: rank 4 scale 2, the set rank 3 scale 2' |
+| UT-Checkpoint-108 | OK |  | 2026-11-23 | T16b2 stage 2: Load, the set has scale 0.5 → '<dir>: rank 4 scale 2, the set rank 4 scale 0.5' |
+| UT-Checkpoint-109 | OK |  | 2026-11-23 | T16b2 stage 2: Load, an optimiser with the store twice → 'the optimiser has 2 stores, the set 1' |
+| UT-Checkpoint-110 | OK |  | 2026-11-23 | T16b2 stage 2: Load of a directory without state.json → 'not a checkpoint: <dir>' |
+| UT-Checkpoint-111 | OK |  | 2026-11-23 | T16b2 stage 2: Load with moments.ot deleted → ETorchNativeError 'open file failed because of errno 2 on fopen: No such file or directory, file path: <D>/moments.ot' |
+| UT-Checkpoint-112 | OK |  | 2026-11-23 | T16b2 stage 2: Prune with Keep 2: the last two updates and the best (lowest finite ValLoss) survive |
+| UT-Checkpoint-113 | OK |  | 2026-11-23 | T16b2 stage 2: Prune Keep 1 with NaN losses: only the last survives, Best ''; a tie on the finite loss keeps the earlier update |
+| UT-Checkpoint-114 | OK |  | 2026-11-23 | T16b2 stage 2: Save removes the tmp-ckpt-* entries left by an interrupted save (directory with sub-directory and a bare file) |
+| UT-Checkpoint-115 | OK |  | 2026-11-23 | T16b2 stage 2: List returns only complete checkpoints (ckpt-<8 digits> directories with a state.json); empty dir, 9-digit, double-dash, non-digit and a bare file are all excluded |
+| UT-Checkpoint-116 | OK |  | 2026-11-23 | T16b2 stage 2: a file named ckpt-00000007 blocks the rename → 'cannot rename <Root>tmp-ckpt-00000007'; nothing is listed |
+| UT-Checkpoint-117 | OK |  | 2026-11-23 | T16b2 stage 2: a read-only root (mode 555, restored to 755 in finally) → 'cannot create <Root>tmp-ckpt-00000005' |
+| UT-Checkpoint-118 | OK |  | 2026-11-23 | T16b2 stage 2: exact resume — 10 updates in one go give the same parameters and moments as 5 updates, save, load into a fresh run (seed 18) and 5 more; StepCount 10 |
+| UT-Checkpoint-119 | OK |  | 2026-11-23 | T16b2 stage 2: moments live in the file by variable name, so a set with the pairs in the other order loads them to the right variables (q↔p both directions) |
+| UT-Checkpoint-120 | OK |  | 2026-11-23 | T16b2 stage 2: a pair added after the optimiser was created → 'store 0: the optimiser has 8 moments, the set 6 variables'; nothing is listed |

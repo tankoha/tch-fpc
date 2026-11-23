@@ -123,3 +123,8 @@ When a case is run again, do not edit its row; append a new row below (the last 
 | ITa-T16-002 | OK | - | 2026-11-23 | state.json of full/ckpt-10, part/ckpt-10 and part/ckpt-5 against the states written (count of fields that differ): value 0.0E+000, limit 0.0E+000 |
 | ITa-T16-003 | OK | - | 2026-11-23 | directories left (the last 3 and the best, nothing else): full ckpt-00000002,ckpt-00000008,ckpt-00000009,ckpt-00000010; part ckpt-00000005,ckpt-00000010: value 0.0E+000, limit 0.0E+000 |
 | ITa-T16-004 | OK | - | 2026-11-23 | loss of every update, one go vs resumed (max \|difference\|; loss 245.8632 at update 1, 92.71519 at update 10): value 0.0E+000, limit 0.0E+000 |
+| ITa-T15-001 | OK | - | 2026-11-24 | 37 samples: tokens = Encode(text rendered here); decode of [0, LossFrom) = the prompt part, of [LossFrom, LossTo) = the trimmed answer + im_end, of the rest = one newline (count of mismatches): value 0.0E+000, limit 0.0E+000 |
+| ITa-T15-002 | OK | - | 2026-11-24 | admitted 37, skipped by class 3 (file 3), too long 2 (file 2), of 42 records (count of mismatches): value 0.0E+000, limit 0.0E+000 |
+| ITa-T15-003 | OK | - | 2026-11-24 | epochs 0-2, pool 64, budget 2048: 33 batches, 3.4 samples per batch, 96 % of the padded positions are tokens (count of batches over the budget or empty, and of samples not seen exactly once): value 0.0E+000, limit 0.0E+000 |
+| ITa-T15-004 | OK | - | 2026-11-24 | the batches of epochs 0-2 (33 lines), two processes: 0 when equal: value 0, limit 0 |
+| ITa-T15-005 | OK | - | 2026-11-24 | epoch 0: in every row of every batch, the targets under the mask decode to the trimmed answer + im_end (count of rows that differ): value 0.0E+000, limit 0.0E+000 |

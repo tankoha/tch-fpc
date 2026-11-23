@@ -648,3 +648,27 @@ When a case is run again, do not edit its row; append a new row below (the last 
 | UT-Checkpoint-118 | OK |  | 2026-11-23 | T16b2 stage 2: exact resume — 10 updates in one go give the same parameters and moments as 5 updates, save, load into a fresh run (seed 18) and 5 more; StepCount 10 |
 | UT-Checkpoint-119 | OK |  | 2026-11-23 | T16b2 stage 2: moments live in the file by variable name, so a set with the pairs in the other order loads them to the right variables (q↔p both directions) |
 | UT-Checkpoint-120 | OK |  | 2026-11-23 | T16b2 stage 2: a pair added after the optimiser was created → 'store 0: the optimiser has 8 moments, the set 6 variables'; nothing is listed |
+| UT-TrainData-001 | OK |  | 2026-11-24 | T15b1 stage 1: EncodeSample, plain Q/A |
+| UT-TrainData-002 | OK |  | 2026-11-24 | T15b1 stage 1: EncodeSample, trimmed answer |
+| UT-TrainData-003 | OK |  | 2026-11-24 | T15b1 stage 1: EncodeSample, UTF-8 prompt/answer |
+| UT-TrainData-004 | OK |  | 2026-11-24 | T15b1 stage 1: Create, both classes admitted |
+| UT-TrainData-005 | OK |  | 2026-11-24 | T15b1 stage 1: Create, drops samples over MaxLen |
+| UT-TrainData-006 | OK |  | 2026-11-24 | T15b1 stage 1: Create, blank lines + empty class list |
+| UT-TrainData-007 | OK |  | 2026-11-24 | T15b1 stage 1: Create, missing answer/id/class |
+| UT-TrainData-008 | OK |  | 2026-11-24 | T15b1 stage 1: Create, id/dialect/prompt not a string |
+| UT-TrainData-009 | OK |  | 2026-11-24 | T15b1 stage 1: Create, line not a JSON object |
+| UT-TrainData-010 | OK |  | 2026-11-24 | T15b1 stage 1: Create, duplicate id |
+| UT-TrainData-011 | OK |  | 2026-11-24 | T15b1 stage 1: Create, wide \u escape |
+| UT-TrainData-012 | OK |  | 2026-11-24 | T15b1 stage 1: Create, missing file + MaxLen 0 |
+| UT-TrainData-013 | OK |  | 2026-11-24 | T15b1 stage 1: Samples, out of range |
+| UT-TrainData-014 | OK |  | 2026-11-24 | T15b1 stage 1: Samples, loss span decodes to answer |
+| UT-TrainData-101 | OK |  | 2026-11-24 | EpochOrder, permutation per (seed, epoch) |
+| UT-TrainData-102 | OK |  | 2026-11-24 | EpochOrder, large N, negative seed |
+| UT-TrainData-103 | OK |  | 2026-11-24 | EpochBatches, pool split + shuffle |
+| UT-TrainData-104 | OK |  | 2026-11-24 | EpochBatches, 200 samples, one pool each |
+| UT-TrainData-105 | OK |  | 2026-11-24 | EpochBatches, pool 0 / budget below longest |
+| UT-TrainData-106 | OK |  | 2026-11-24 | EpochBatches, empty set |
+| UT-TrainData-107 | OK |  | 2026-11-24 | SkipBatches, by sample position |
+| UT-TrainData-108 | OK |  | 2026-11-24 | BatchTensors, padded batch |
+| UT-TrainData-109 | OK |  | 2026-11-24 | BatchTensors, masked targets decode to answer |
+| UT-TrainData-110 | OK |  | 2026-11-24 | BatchTensors, empty batch / out-of-range sample |

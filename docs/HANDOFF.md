@@ -6,7 +6,7 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 Status at a glance of the knowledge-package and fine-tuning work:
 [progress.md](progress.md).
 
-## Local session 14, continued (2026-11-23/24): T12 and T16 done, T15 prepared — resume here
+## Local session 14, continued (2026-11-23/24): T12, T16 and T15 done — resume here
 
 **T12 (`Lora`) done** (T12a, T12b1–T12b4, T12c through
 `tasks/run-task.sh`, about 4 h). Each step checked: rebuilt with `-Cr`;
@@ -106,10 +106,16 @@ size in dequantisation, 3.4 samples per batch on the ITa's records) or
 the blocks gain a batch dimension (DeltaRule, attention, RoPE; a change
 to T08–T11 with their tests). To be decided before T17 is prepared.
 
-**Next:** `tasks/run-task.sh T15a`, then `T15b1`, `T15b2` (check each:
-rebuild with `-Cr`, compare with `work/proto/T15/`, run the gate; stop the
-gateway before every run), then `QLORA_MODEL=<rehearsal GGUF>
-tasks/run-task.sh T15c`. Then the question above, T18 (`GgufMerge`,
+**T15 done** (T15a, T15b1, T15b2, T15c through `tasks/run-task.sh`, about
+2.5 h, no rework). Each step checked: rebuilt with `-Cr`; the
+implementation of `src/TrainData.pas` equals the prototype; the agents'
+UT run against nine mutants catches each on the same rows as the
+prototype's reference tests; no tag written literally in the tests; the
+result notes match the case titles. UT gate 667/667, line coverage 100 %
+(3227/3227). ITa, rerun by the harness owner: 0 / 0 / 0 / 0 / 0, equal to
+the prototype's; ITa gate 103/103.
+
+**Next:** the question above, T18 (`GgufMerge`,
 H47), T19 (`qlora_dataset`), T20 (`qlora_eval`); T17 (`qlora_train`)
 last. And the M4 question of local session 13.
 

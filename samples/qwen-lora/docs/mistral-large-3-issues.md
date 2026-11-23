@@ -7,7 +7,8 @@ This is a record of what went wrong while Mistral Large 3 on Bedrock
 SDLC process (`tasks/run-task.sh`) for this sample. It covers T06, T01 and
 T02 (2026-11-17 to 2026-11-21) and one harness end-to-end test run on
 2026-11-21. Written 2026-11-24 from the run records; nothing here was
-re-run.
+re-run. A later section lists main-agent issues of the models that
+followed (GPT-OSS-120B, GLM 5) that Mistral could cause as well.
 
 Each item says whether it is **confirmed** (the record shows it) or
 **inferred** (a reading of the record that is not shown directly). Items
@@ -297,6 +298,144 @@ main agents (see "Changes made afterwards").
   while keeping it in the history. Mistral triggered it; another model
   that sends parallel delegations would probably trigger it too.
 - **Why the false reports happened** (M-01 to M-05): not known.
+
+## After Mistral: main-agent issues that Mistral could cause too
+
+Main-agent issues from 2026-11-21 19:42 (GPT-OSS-120B, T03a to the first
+T03b1 run) and from 2026-11-21 20:38 on (GLM 5, `zai.glm-5`), with the
+model of each run taken from `agent.log.1` / `agent.log`. Only issues
+caused by the main agent are listed, and only those Mistral could also
+cause; "Mistral" in each item says why, and whether that is confirmed
+(Mistral did the same or a closely related thing, item above) or
+inferred. Added 2026-11-24.
+
+### A-01 Tool call printed as text; turn ended without the call (GPT-OSS-120B)
+
+- **Symptom.** In T03b1 the reply ends with the planned call written as
+  raw JSON (`{"tasks":[{"goal":"Implement stage 1 of
+  GgufQuantT.DequantizeT ...`); no delegation happened. In T03b the reply
+  ends "Proceeding to stage 2." without a call.
+- **Task and date.** T03b1, 2026-11-21 19:57–19:59 (session `89041c7f`);
+  T03b, 2026-11-21 19:47–19:56 (session `936570b8`).
+- **Evidence.** `work/tasks/T03b1-20261121-195659.txt` lines 21–23;
+  `work/tasks/T03b-20261121-194700.txt` lines 1–3; commit 13fd344:
+  "run-task.sh: the leak check also catches raw JSON tool calls"; HANDOFF
+  model table: "GPT-OSS-120B (Bedrock) | main | printed tool calls as text
+  (run-task.sh exits 5)".
+- **Impact.** Runs ended early and looked finished; T03b1 was rerun with
+  GLM 5 (`T03b1-20261121-204638.txt`).
+- **Mistral.** Confirmed: M-07 is the same fault. The "Proceeding…" ending
+  without a call was not seen with Mistral.
+- **Afterwards.** The leak check of `run-task.sh` also matches raw JSON
+  (13fd344); main agent GLM 5 from T03b1's second run, the default from
+  1cece1a.
+
+### A-02 Restored a committed answer with git and reported the step done (GLM 5)
+
+- **Symptom.** In a trial run of T04b1 with devstral-small-2 as the
+  sub-agent, which wrote nothing, the main agent ran
+  `git -C <proj> checkout HEAD -- src/GgufWriter.pas tests/ut/GgufWriter_test.pas ...`
+  ("The HEAD already has the implementation but the working tree has been
+  reverted to skeleton. Let me restore from HEAD") and reported the step
+  as done.
+- **Task and date.** T04b1 trial in the copy `tch-fpc-trial-devstral`,
+  2026-11-22 02:41–02:51 (session `1cf0fa3c`, model `zai.glm-5` per
+  `agent.log.1` line 34563).
+- **Evidence.** `state.db`: the `terminal` call and the sentence quoted
+  above (session `local-1cf0fa3c…`, 2026-11-22 02:50:35). hermes-agent-setup
+  4881659: "主担当が `git -C <proj> checkout HEAD -- src/...` でコミット済みの
+  答えを戻し「完了」と報告したため". HANDOFF, "Harness changes" ("a main
+  agent had restored a committed answer").
+- **Impact.** The sub-agent's failure was hidden behind the committed
+  answer; only a trial copy was affected.
+- **Mistral.** Inferred: Mistral had the same `terminal` tool and reported
+  work it had not checked (M-01, M-04); no record shows it using git.
+- **Afterwards.** The guard blocks every git subcommand that changes the
+  work tree, index or history, for parent and child, also through
+  `git -C` and `bash -c` (4881659, test `sdlc/tests/guard-git.sh`).
+
+### A-03 Own "First read <task>" in the goal suppressed the hook's rules (GLM 5)
+
+- **Symptom.** The main agent began its delegation goal with "First read
+  <task file>" itself. The delegate hook then added nothing, so the
+  sub-agent did not get the hook's sentences on the skills to load and
+  "do only this step".
+- **Task and date.** T05 runs, 2026-11-22 (before 05:48). The record does
+  not name the run; every T05 main run used GLM 5 (`agent.log.1`).
+- **Evidence.** hermes-agent-setup a2da3f0 (2026-11-22 05:48): "主担当が
+  自分で書いた "First read <task>" のせいで、スキルと「この段階だけ」の文が
+  抜けていた". HANDOFF, "Harness changes" ("a main agent's own 'First
+  read <task>' had suppressed the skills and 'only this step'
+  sentences").
+- **Impact.** Sub-agents worked without the skills and the step limit.
+- **Mistral.** Inferred, strongly: in T06c Mistral wrote "First read
+  …/tasks/T06c.md (whole file) …" itself (request dump of session
+  `6e145022`, message 1), as `tasks/T06c.md` told it to. With the hook as
+  it then was, that would have had the same effect.
+- **Afterwards.** The hook adds its whole sentence unless the goal already
+  holds all of it (a2da3f0, test `sdlc/tests/delegate-sentence.sh`).
+
+### A-04 Accepted OK rows for tests that did not exist (GLM 5)
+
+- **Symptom.** The report says "Gate shows rows UT-QwenTokenizer-101 to
+  127 OK" and "330/330 … OK 330 / NG 0", and puts the failed coverage run
+  (a compile error in `TokenizeCli_test.pas`) down to a later stage. 19
+  OK rows for `UT-TokenizeCli` had been recorded before any of their tests
+  existed; the main agent did not notice.
+- **Task and date.** T05b2, 2026-11-22 04:21–04:46 (session `005897ba`,
+  GLM 5; sub-agent GPT-OSS-120B).
+- **Evidence.** `work/tasks/T05b2-20261122-042053.txt` lines 14–21;
+  `tasks/T05b3.md` lines 11–16 ("In T05b2, 19 OK rows were added for
+  `UT-TokenizeCli` before any of its tests existed; the harness owner
+  removed them"); HANDOFF model table (GPT-OSS-120B as sub: "recorded 19
+  OK rows for tests that did not exist (T05b2)").
+- **Impact.** The gate passed on records without tests; the harness owner
+  removed the rows.
+- **Mistral.** Confirmed: M-05 (passing verdict over NG rows) and M-04
+  (reported "complete" over a failed edit) are the same failure to check.
+- **Afterwards.** Gate ut counts a row as OK only when its test passed in
+  the last run (hermes-agent-setup a2da3f0; `.sdlc/config.edn`, commit
+  93c3b07).
+
+### A-05 Misread a value in the report (GLM 5)
+
+- **Symptom.** The report gives the failing value as "Actual
+  (DequantizeT): 0x7FDC0000 (finite)". 0x7FDC0000 has all exponent bits
+  set and a non-zero mantissa: it is a NaN, like the expected 0xFFE20000.
+  The report then guesses "a subtle numerical difference".
+- **Task and date.** T03b1b, 2026-11-21 21:35–22:01 (session `0fe26cb4`,
+  GLM 5; the run ended at the turn limit 40/40).
+- **Evidence.** `work/tasks/T03b1b-20261121-213510.txt` lines 27–32;
+  `agent.log.1`: `max_iterations_reached(40/40)` for `local-0fe26cb4`.
+  The next run found the failure to be a NaN comparison
+  (`work/tasks/T03b1c-20261121-220224.txt` line 58).
+- **Impact.** A wrong lead for the next run; caught in T03b1c.
+- **Mistral.** Confirmed in kind: M-03 (an invented cause for an ITa NG).
+- **Afterwards.** None specific to this run; AGENTS.md already said not
+  to record unproven causes (b7eb75b).
+
+### A-06 Attributed the harness owner's skeleton to the sub-agent (GLM 5)
+
+- **Symptom.** A report named the sub-agent as the author of a skeleton
+  the harness owner had placed.
+- **Task and date.** Not recorded (GLM 5 main runs, from T03).
+- **Evidence.** HANDOFF model table: "GLM 5 (Bedrock) | main | honest
+  reports from T03 on; once misattributed the harness owner's skeleton to
+  the sub-agent". The transcript was not identified.
+- **Impact.** A wrong record of who wrote what; no code was affected.
+- **Mistral.** Confirmed in kind: M-01 (files reported as written by a
+  delegation that never ran).
+- **Afterwards.** None recorded.
+
+### Not listed here
+
+- GLM 5's own tags: writing `<think>` / `<tool_call>` made Bedrock reject
+  the request (HANDOFF, "GLM 5 and Qwen's special tokens"). It follows
+  from GLM 5's template; nothing in the records shows it for Mistral.
+- T11a's overrun and T12b3's notes: the sub-agent's doing, reported by the
+  main agent (HANDOFF, local session 14).
+- Runs that ended at the turn limit (T03b1c, T04b3) and reported their
+  state correctly.
 
 ## Not counted as Mistral issues
 

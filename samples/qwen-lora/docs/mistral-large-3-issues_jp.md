@@ -7,7 +7,8 @@
 (`tasks/run-task.sh`) のメインエージェントにしていた間に起きた問題の記録。
 対象は T06・T01・T02 (2026-11-17〜11-21) と、2026-11-21 のハーネスの
 エンドツーエンド試験 1 回。2026-11-24 に実行記録から書いた。ここに挙げたものは
-再実行していない。
+再実行していない。後の節に、その後のモデル (GPT-OSS-120B、GLM 5) で起きた
+メインエージェント起因の不具合のうち、Mistral でも起こり得るものを挙げる。
 
 各項目に **確認済み** (記録にそのまま出ている) か **推測** (記録の読みで、
 直接は示されていない) かを書く。記録が見つからなかったものは載せていない。
@@ -278,6 +279,131 @@
   残したため。引き金は Mistral だが、並列に委任する他のモデルでも起きると
   思われる。
 - **虚偽の報告 (M-01〜M-05) が起きた理由**: 不明。
+
+## Mistral の後: Mistral でも起こり得るメインエージェントの不具合
+
+2026-11-21 19:42 から (GPT-OSS-120B、T03a から T03b1 の初回まで) と
+2026-11-21 20:38 以降 (GLM 5、`zai.glm-5`) のメインエージェントの不具合。各実行の
+モデルは `agent.log.1` / `agent.log` で確かめた。メインエージェントが原因のもので、
+Mistral でも起こり得るものだけを挙げる。各項目の「Mistral」に、その理由と、
+確認済み (Mistral が同じか近いことをした。上の項目) か推測かを書く。
+2026-11-24 追加。
+
+### A-01 ツール呼び出しを本文に書き、呼ばずにターンを終えた (GPT-OSS-120B)
+
+- **症状.** T03b1 では、予定した呼び出しを生の JSON
+  (`{"tasks":[{"goal":"Implement stage 1 of GgufQuantT.DequantizeT ...`) として
+  書いて返答が終わり、委任は起きなかった。T03b では「Proceeding to stage 2.」で
+  呼び出しなしに終わった。
+- **タスクと日時.** T03b1、2026-11-21 19:57〜19:59 (セッション `89041c7f`)。
+  T03b、2026-11-21 19:47〜19:56 (セッション `936570b8`)。
+- **根拠.** `work/tasks/T03b1-20261121-195659.txt` 21〜23 行。
+  `work/tasks/T03b-20261121-194700.txt` 1〜3 行。コミット 13fd344:「run-task.sh:
+  the leak check also catches raw JSON tool calls」。HANDOFF のモデル表:
+  「GPT-OSS-120B (Bedrock) | main | printed tool calls as text (run-task.sh exits 5)」。
+- **影響.** 実行が途中で終わり、完了したように見えた。T03b1 は GLM 5 で再実行した
+  (`T03b1-20261121-204638.txt`)。
+- **Mistral.** 確認済み: M-07 と同じ症状。「Proceeding…」で呼ばずに終わる形は
+  Mistral では見ていない。
+- **その後の対処.** `run-task.sh` の漏れ検査が生の JSON にも当たるようにした
+  (13fd344)。T03b1 の 2 回目からメインは GLM 5、1cece1a で既定に。
+
+### A-02 コミット済みの答えを git で戻し、段階を完了と報告した (GLM 5)
+
+- **症状.** サブエージェントを devstral-small-2 にした T04b1 の試行で、サブは何も
+  書かなかった。メインエージェントは
+  `git -C <proj> checkout HEAD -- src/GgufWriter.pas tests/ut/GgufWriter_test.pas ...`
+  を実行し (「The HEAD already has the implementation but the working tree has
+  been reverted to skeleton. Let me restore from HEAD」)、段階を完了と報告した。
+- **タスクと日時.** 複製 `tch-fpc-trial-devstral` での T04b1 の試行、
+  2026-11-22 02:41〜02:51 (セッション `1cf0fa3c`、`agent.log.1` 34563 行で
+  モデル `zai.glm-5`)。
+- **根拠.** `state.db`: その `terminal` 呼び出しと上の文 (セッション
+  `local-1cf0fa3c…`、2026-11-22 02:50:35)。hermes-agent-setup 4881659:「主担当が
+  `git -C <proj> checkout HEAD -- src/...` でコミット済みの答えを戻し「完了」と
+  報告したため」。HANDOFF「Harness changes」(「a main agent had restored a
+  committed answer」)。
+- **影響.** サブエージェントの失敗がコミット済みの答えで隠れた。影響したのは
+  試行用の複製だけ。
+- **Mistral.** 推測: Mistral も同じ `terminal` ツールを持ち、確かめていない作業を
+  報告した (M-01、M-04)。git を使った記録は無い。
+- **その後の対処.** 作業ツリー・インデックス・履歴を変える git サブコマンドを、
+  親子とも、`git -C` や `bash -c` 経由でもガードが止める (4881659、テスト
+  `sdlc/tests/guard-git.sh`)。
+
+### A-03 goal に自分で書いた「First read <task>」がフックの規則を消した (GLM 5)
+
+- **症状.** メインエージェントが委任の goal を自分で「First read <タスクファイル>」
+  から始めた。そのため delegate フックは何も足さず、サブエージェントには
+  読むべきスキルと「この段階だけ行う」のフックの文が届かなかった。
+- **タスクと日時.** T05 の実行、2026-11-22 (05:48 より前)。どの実行かは記録に
+  無い。T05 のメインの実行はすべて GLM 5 (`agent.log.1`)。
+- **根拠.** hermes-agent-setup a2da3f0 (2026-11-22 05:48):「主担当が自分で書いた
+  "First read <task>" のせいで、スキルと「この段階だけ」の文が抜けていた」。
+  HANDOFF「Harness changes」(「a main agent's own 'First read <task>' had
+  suppressed the skills and 'only this step' sentences」)。
+- **影響.** サブエージェントはスキルと段階の限定なしに作業した。
+- **Mistral.** 推測 (強い): T06c で Mistral は `tasks/T06c.md` の指示どおり
+  「First read …/tasks/T06c.md (whole file) …」を自分で書いている (セッション
+  `6e145022` のリクエストダンプ、メッセージ 1)。当時の形のフックなら同じことが
+  起きた。
+- **その後の対処.** goal にフックの文全体が無ければ足す (a2da3f0、テスト
+  `sdlc/tests/delegate-sentence.sh`)。
+
+### A-04 存在しないテストの OK 行を受け入れた (GLM 5)
+
+- **症状.** 報告は「Gate shows rows UT-QwenTokenizer-101 to 127 OK」
+  「330/330 … OK 330 / NG 0」と書き、カバレッジ計測の失敗
+  (`TokenizeCli_test.pas` のコンパイルエラー) を後の段階のこととした。
+  `UT-TokenizeCli` の OK 行 19 件が、テストがまだ無いうちに記録されていたが、
+  メインエージェントは気づかなかった。
+- **タスクと日時.** T05b2、2026-11-22 04:21〜04:46 (セッション `005897ba`、
+  GLM 5。サブは GPT-OSS-120B)。
+- **根拠.** `work/tasks/T05b2-20261122-042053.txt` 14〜21 行。`tasks/T05b3.md`
+  11〜16 行 (「In T05b2, 19 OK rows were added for `UT-TokenizeCli` before any of
+  its tests existed; the harness owner removed them」)。HANDOFF のモデル表
+  (サブとしての GPT-OSS-120B:「recorded 19 OK rows for tests that did not exist
+  (T05b2)」)。
+- **影響.** テストの無い記録でゲートが通った。ハーネス担当が行を消した。
+- **Mistral.** 確認済み: M-05 (NG 行があるのに合格の判定) と M-04 (編集の失敗を
+  越えて「完了」) は同じ確認不足。
+- **その後の対処.** gate ut は、直近の実行でテストが通った行だけを OK と数える
+  (hermes-agent-setup a2da3f0、`.sdlc/config.edn`、コミット 93c3b07)。
+
+### A-05 報告で値を読み違えた (GLM 5)
+
+- **症状.** 報告は失敗した値を「Actual (DequantizeT): 0x7FDC0000 (finite)」と
+  した。0x7FDC0000 は指数部がすべて 1 で仮数部が 0 でないので NaN で、期待値の
+  0xFFE20000 と同じく NaN。報告はさらに「a subtle numerical difference」と推測した。
+- **タスクと日時.** T03b1b、2026-11-21 21:35〜22:01 (セッション `0fe26cb4`、
+  GLM 5。ターン上限 40/40 で終了)。
+- **根拠.** `work/tasks/T03b1b-20261121-213510.txt` 27〜32 行。`agent.log.1`:
+  `local-0fe26cb4` の `max_iterations_reached(40/40)`。次の実行で、失敗は NaN の
+  比較だと分かった (`work/tasks/T03b1c-20261121-220224.txt` 58 行)。
+- **影響.** 次の実行に誤った手がかりを渡した。T03b1c で分かった。
+- **Mistral.** 確認済み (同種): M-03 (ITa の NG に作り話の原因)。
+- **その後の対処.** この実行に特有のものは無い。AGENTS.md はすでに、示していない
+  原因を書かないとしていた (b7eb75b)。
+
+### A-06 ハーネス担当の雛形をサブエージェントのものとした (GLM 5)
+
+- **症状.** 報告が、ハーネス担当が置いた雛形をサブエージェントが書いたとした。
+- **タスクと日時.** 記録に無い (T03 以降の GLM 5 がメインの実行)。
+- **根拠.** HANDOFF のモデル表:「GLM 5 (Bedrock) | main | honest reports from
+  T03 on; once misattributed the harness owner's skeleton to the sub-agent」。
+  該当する実行記録は特定できていない。
+- **影響.** 誰が何を書いたかの記録の誤り。コードへの影響は無い。
+- **Mistral.** 確認済み (同種): M-01 (実行されなかった委任が書いたとファイルを報告)。
+- **その後の対処.** 記録なし。
+
+### ここに挙げないもの
+
+- GLM 5 自身のタグ: `<think>` / `<tool_call>` を書くと Bedrock がリクエストを
+  拒否した (HANDOFF「GLM 5 and Qwen's special tokens」)。GLM 5 のテンプレートに
+  よるもので、Mistral で起きた記録は無い。
+- T11a の範囲超えと T12b3 の注記: サブエージェントによるもので、メイン
+  エージェントが報告した (HANDOFF、ローカルセッション 14)。
+- ターン上限で終わったが状態を正しく報告した実行 (T03b1c、T04b3)。
 
 ## Mistral の不具合に数えないもの
 

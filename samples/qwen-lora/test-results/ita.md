@@ -114,3 +114,8 @@ When a case is run again, do not edit its row; append a new row below (the last 
 | ITa-T11-002 | OK | - | 2026-11-23 | value 1.3E-003, limit 2.0E-002 |
 | ITa-T11-003 | OK | - | 2026-11-23 | value 1.4E-003, limit 2.0E-002 |
 | ITa-T11-004 | OK | - | 2026-11-23 | value 0.0E+000, limit 0.0E+000 |
+| ITa-T12-001 | OK | - | 2026-11-23 | value 0.0E+000, limit 0.0E+000 |
+| ITa-T12-002 | OK | - | 2026-11-23 | value 0.0E+000, limit 0.0E+000 |
+| ITa-T12-003 | OK | - | 2026-11-23 | value 4.8E-005, limit 1.0E-003 |
+| ITa-T12-004 | OK | - | 2026-11-23 | value 0.0E+000, limit 1.0E-004 |
+| ITa-T12-005 | OK | - | 2026-11-23 | value 0.0E+000, limit 0.0E+000 |

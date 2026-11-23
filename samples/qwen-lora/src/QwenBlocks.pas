@@ -168,6 +168,7 @@ begin
   inherited Create;
   FDims := ADims;
   FDevice := ADevice;
+  FIndex := ABlock;
   P := 'blk.' + IntToStr(ABlock) + '.';
   FAttnNorm := LoadDense(G, P + 'attn_norm.weight', ADevice);
   FPostNorm := LoadDense(G, P + 'post_attention_norm.weight', ADevice);
@@ -178,8 +179,14 @@ end;
 
 function TQwenBlock.Target(const AName: string): TPackedLinear;
 begin
-  Result := nil;
-  raise EQwenBlock.Create('TQwenBlock.Target: not implemented yet');
+  if AName = 'ffn_gate' then
+    Result := FFfnGate
+  else if AName = 'ffn_up' then
+    Result := FFfnUp
+  else if AName = 'ffn_down' then
+    Result := FFfnDown
+  else
+    raise EQwenBlock.CreateFmt('blk.%d has no matrix %s', [FIndex, AName]);
 end;
 
 destructor TQwenBlock.Destroy;
@@ -233,14 +240,27 @@ end;
 
 function TLinearBlock.Target(const AName: string): TPackedLinear;
 begin
-  Result := nil;
-  raise EQwenBlock.Create('TLinearBlock.Target: not implemented yet');
+  if AName = 'attn_qkv' then
+    Result := FQkv
+  else if AName = 'attn_gate' then
+    Result := FGate
+  else if AName = 'ssm_beta' then
+    Result := FBeta
+  else if AName = 'ssm_alpha' then
+    Result := FAlpha
+  else if AName = 'ssm_out' then
+    Result := FSsmOut
+  else
+    Result := inherited Target(AName);
 end;
 
 function TLinearBlock.LoraTargets: TStringArray;
 begin
   Result := nil;
-  raise EQwenBlock.Create('TLinearBlock.LoraTargets: not implemented yet');
+  SetLength(Result, 3);
+  Result[0] := 'attn_qkv';
+  Result[1] := 'attn_gate';
+  Result[2] := 'ssm_out';
 end;
 
 function TLinearBlock.Attn(const X: TTensor): TTensor;
@@ -305,14 +325,26 @@ end;
 
 function TFullBlock.Target(const AName: string): TPackedLinear;
 begin
-  Result := nil;
-  raise EQwenBlock.Create('TFullBlock.Target: not implemented yet');
+  if AName = 'attn_q' then
+    Result := FQ
+  else if AName = 'attn_k' then
+    Result := FK
+  else if AName = 'attn_v' then
+    Result := FV
+  else if AName = 'attn_output' then
+    Result := FOut
+  else
+    Result := inherited Target(AName);
 end;
 
 function TFullBlock.LoraTargets: TStringArray;
 begin
   Result := nil;
-  raise EQwenBlock.Create('TFullBlock.LoraTargets: not implemented yet');
+  SetLength(Result, 4);
+  Result[0] := 'attn_q';
+  Result[1] := 'attn_k';
+  Result[2] := 'attn_v';
+  Result[3] := 'attn_output';
 end;
 
 function TFullBlock.Attn(const X: TTensor): TTensor;

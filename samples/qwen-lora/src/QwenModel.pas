@@ -207,9 +207,22 @@ begin
 end;
 
 function TQwenModel.AttachLora(ASet: TLoraSet): Integer;
+var
+  I, J: Integer;
+  Names: TStringArray;
+  L: TPackedLinear;
 begin
   Result := 0;
-  raise EQwenModel.Create('TQwenModel.AttachLora: not implemented yet');
+  for I := 0 to FTrunk - 1 do
+  begin
+    Names := FBlocks[I].LoraTargets;
+    for J := 0 to High(Names) do
+    begin
+      L := FBlocks[I].Target(Names[J]);
+      L.Lora := ASet.Add('blk.' + IntToStr(I) + '.' + Names[J], L.InDim, L.OutDim, L.Device);
+      Inc(Result);
+    end;
+  end;
 end;
 
 end.

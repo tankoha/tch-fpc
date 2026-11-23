@@ -95,11 +95,16 @@ begin
   if (Length(S) = 0) or (S[High(S)] <> FInDim) then
     raise EPackedLinear.CreateFmt('X must end in %d, got %s', [FInDim, ShapeStr(X)]);
   Result := X.matmul(Weight.transpose(0, 1));
+  if FLora <> nil then
+    Result := Result + FLora.Delta(X);
 end;
 
 procedure TPackedLinear.SetLora(AValue: TLoraPair);
 begin
-  raise EPackedLinear.Create('TPackedLinear.SetLora: not implemented yet');
+  if (AValue <> nil) and ((AValue.InDim <> FInDim) or (AValue.OutDim <> FOutDim)) then
+    raise EPackedLinear.CreateFmt('LoRA pair %s is %d -> %d, the matrix %d -> %d',
+      [AValue.Name, AValue.InDim, AValue.OutDim, FInDim, FOutDim]);
+  FLora := AValue;
 end;
 
 function TPackedLinear.Device: TDevice;

@@ -38,6 +38,13 @@ type
     procedure TestUT_PackedLinear_013;
     procedure TestUT_PackedLinear_014;
     procedure TestUT_PackedLinear_015;
+    procedure TestUT_PackedLinear_101;
+    procedure TestUT_PackedLinear_102;
+    procedure TestUT_PackedLinear_103;
+    procedure TestUT_PackedLinear_104;
+    procedure TestUT_PackedLinear_105;
+    procedure TestUT_PackedLinear_106;
+    procedure TestUT_PackedLinear_107;
   end;
 
 var
@@ -425,6 +432,148 @@ begin
         T.AssertEquals(AMessage, E.Message);
     end;
     T.AssertTrue(L.Lora = nil);
+  finally
+    L.Free;
+    P.Free;
+    S.Free;
+  end;
+end;
+
+{ UT-PackedLinear-101: Lora, default. }
+procedure TPackedLinearTest.TestUT_PackedLinear_101;
+var
+  L: TPackedLinear;
+begin
+  L := NewLinear;
+  try
+    AssertTrue('L.Lora = nil', L.Lora = nil);
+  finally
+    L.Free;
+  end;
+end;
+
+{ UT-PackedLinear-102: Forward with a pair, B zero. }
+procedure TPackedLinearTest.TestUT_PackedLinear_102;
+var
+  L: TPackedLinear;
+  S: TVarStore;
+  P: TLoraPair;
+  Y0, Y1: TTensor;
+begin
+  L := NewLinear;
+  S := TVarStore.Create(TDevice.Cpu);
+  P := NewPair(S, 8, 6);
+  try
+    Y0 := L.Forward(FixX);
+    L.Lora := P;
+    AssertTrue('L.Lora = P', L.Lora = P);
+    Y1 := L.Forward(FixX);
+    AssertTrue('equals Y0 (exact)', DiffArr(Arr(Y0), Arr(Y1)) = 0);
+  finally
+    L.Free;
+    P.Free;
+    S.Free;
+  end;
+end;
+
+{ UT-PackedLinear-103: Forward, the delta vs the references. }
+procedure TPackedLinearTest.TestUT_PackedLinear_103;
+var
+  L: TPackedLinear;
+  S: TVarStore;
+  P: TLoraPair;
+  X, Y: TTensor;
+  G: IInterface;
+begin
+  ManualSeed(2);
+  L := NewLinear;
+  S := TVarStore.Create(TDevice.Cpu);
+  P := NewPair(S, 8, 6);
+  SetB(P);
+  L.Lora := P;
+  try
+    G := NoGradGuard;
+    X := FixX;
+    Y := L.Forward(X);
+    AssertTrue('vs X@W + P.Delta(X)',
+      DiffArr(Arr(Y), Arr(X.matmul(L.Weight.t) + P.Delta(X))) <= 1.0e-6);
+    AssertTrue('vs X@(W + MergedDelta)',
+      DiffArr(Arr(Y), Arr(X.matmul((L.Weight + P.MergedDelta).t))) <= 1.0e-5);
+    AssertTrue('differs from the base forward',
+      DiffArr(Arr(Y), Arr(X.matmul(L.Weight.t))) > 0.1);
+  finally
+    L.Free;
+    P.Free;
+    S.Free;
+  end;
+end;
+
+{ UT-PackedLinear-104: SetLora, InDim differs. }
+procedure TPackedLinearTest.TestUT_PackedLinear_104;
+begin
+  CheckSetLora(Self, 7, 6, 'LoRA pair q is 7 -> 6, the matrix 8 -> 6');
+end;
+
+{ UT-PackedLinear-105: SetLora, OutDim differs. }
+procedure TPackedLinearTest.TestUT_PackedLinear_105;
+begin
+  CheckSetLora(Self, 8, 5, 'LoRA pair q is 8 -> 5, the matrix 8 -> 6');
+end;
+
+{ UT-PackedLinear-106: Lora := nil removes the pair. }
+procedure TPackedLinearTest.TestUT_PackedLinear_106;
+var
+  L: TPackedLinear;
+  S: TVarStore;
+  P: TLoraPair;
+  Y0, Y1: TTensor;
+begin
+  L := NewLinear;
+  S := TVarStore.Create(TDevice.Cpu);
+  P := NewPair(S, 8, 6);
+  try
+    Y0 := L.Forward(FixX);
+    SetB(P);
+    L.Lora := P;
+    L.Lora := nil;
+    AssertTrue('L.Lora = nil', L.Lora = nil);
+    Y1 := L.Forward(FixX);
+    AssertTrue('equals Y0 (exact)', DiffArr(Arr(Y0), Arr(Y1)) = 0);
+  finally
+    L.Free;
+    P.Free;
+    S.Free;
+  end;
+end;
+
+{ UT-PackedLinear-107: Backward through Forward. }
+procedure TPackedLinearTest.TestUT_PackedLinear_107;
+var
+  L: TPackedLinear;
+  S: TVarStore;
+  P: TLoraPair;
+  V: TDoubleArray;
+  M: Double;
+  I: Integer;
+begin
+  ManualSeed(2);
+  L := NewLinear;
+  S := TVarStore.Create(TDevice.Cpu);
+  P := NewPair(S, 8, 6);
+  try
+    L.Lora := P;
+    L.Forward(FixX).sum(kNone).Backward;
+    AssertEquals('B.grad shape', '[6, 3]', ShapeText(P.B.grad));
+    V := Arr(P.B.grad);
+    M := 0;
+    for I := 0 to High(V) do
+      M := Max(M, Abs(V[I]));
+    AssertTrue('max |B.grad| > 0.1', M > 0.1);
+    V := Arr(P.A.grad);
+    M := 0;
+    for I := 0 to High(V) do
+      M := Max(M, Abs(V[I]));
+    AssertTrue('max |A.grad| 0 (exact)', M = 0);
   finally
     L.Free;
     P.Free;

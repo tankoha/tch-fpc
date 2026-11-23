@@ -40,6 +40,14 @@ type
     procedure TestUT_QwenBlocks_214;
     procedure TestUT_QwenBlocks_215;
     procedure TestUT_QwenBlocks_216;
+    procedure TestUT_QwenBlocks_301;
+    procedure TestUT_QwenBlocks_302;
+    procedure TestUT_QwenBlocks_303;
+    procedure TestUT_QwenBlocks_304;
+    procedure TestUT_QwenBlocks_305;
+    procedure TestUT_QwenBlocks_306;
+    procedure TestUT_QwenBlocks_307;
+    procedure TestUT_QwenBlocks_308;
   end;
 
 var
@@ -483,6 +491,118 @@ begin
       on E: EQwenBlock do
         T.AssertEquals(AMessage, E.Message);
     end;
+  finally
+    B.Free;
+    G.Free;
+  end;
+end;
+
+{ UT-QwenBlocks-301: Target, block 0 (linear). }
+procedure TQwenBlocksTest.TestUT_QwenBlocks_301;
+var
+  G: TGgufFile;
+  B: TQwenBlock;
+begin
+  B := TinyBlock(0, G);
+  try
+    AssertEquals('Index', 0, B.Index);
+    AssertEquals('attn_qkv', 'attn_qkv 64 -> 128', TargetText(B, 'attn_qkv'));
+    AssertEquals('attn_gate', 'attn_gate 64 -> 64', TargetText(B, 'attn_gate'));
+    AssertEquals('ssm_beta', 'ssm_beta 64 -> 4', TargetText(B, 'ssm_beta'));
+    AssertEquals('ssm_alpha', 'ssm_alpha 64 -> 4', TargetText(B, 'ssm_alpha'));
+    AssertEquals('ssm_out', 'ssm_out 64 -> 64', TargetText(B, 'ssm_out'));
+    AssertEquals('ffn_gate', 'ffn_gate 64 -> 96', TargetText(B, 'ffn_gate'));
+    AssertEquals('ffn_up', 'ffn_up 64 -> 96', TargetText(B, 'ffn_up'));
+    AssertEquals('ffn_down', 'ffn_down 96 -> 64', TargetText(B, 'ffn_down'));
+  finally
+    B.Free;
+    G.Free;
+  end;
+end;
+
+{ UT-QwenBlocks-302: Target, block 1 (full). }
+procedure TQwenBlocksTest.TestUT_QwenBlocks_302;
+var
+  G: TGgufFile;
+  B: TQwenBlock;
+begin
+  B := TinyBlock(1, G);
+  try
+    AssertEquals('Index', 1, B.Index);
+    AssertEquals('attn_q', 'attn_q 64 -> 256', TargetText(B, 'attn_q'));
+    AssertEquals('attn_k', 'attn_k 64 -> 64', TargetText(B, 'attn_k'));
+    AssertEquals('attn_v', 'attn_v 64 -> 64', TargetText(B, 'attn_v'));
+    AssertEquals('attn_output', 'attn_output 128 -> 64', TargetText(B, 'attn_output'));
+    AssertEquals('ffn_gate', 'ffn_gate 64 -> 96', TargetText(B, 'ffn_gate'));
+    AssertEquals('ffn_up', 'ffn_up 64 -> 96', TargetText(B, 'ffn_up'));
+    AssertEquals('ffn_down', 'ffn_down 96 -> 64', TargetText(B, 'ffn_down'));
+  finally
+    B.Free;
+    G.Free;
+  end;
+end;
+
+{ UT-QwenBlocks-303: Target, name not of the kind. }
+procedure TQwenBlocksTest.TestUT_QwenBlocks_303;
+begin
+  CheckTarget(Self, 0, 'attn_q', 'blk.0 has no matrix attn_q');
+end;
+
+{ UT-QwenBlocks-304: Target, upper-case name. }
+procedure TQwenBlocksTest.TestUT_QwenBlocks_304;
+begin
+  CheckTarget(Self, 1, 'ATTN_Q', 'blk.1 has no matrix ATTN_Q');
+end;
+
+{ UT-QwenBlocks-305: Target, name with .weight. }
+procedure TQwenBlocksTest.TestUT_QwenBlocks_305;
+begin
+  CheckTarget(Self, 1, 'attn_q.weight', 'blk.1 has no matrix attn_q.weight');
+end;
+
+{ UT-QwenBlocks-306: Target, empty name. }
+procedure TQwenBlocksTest.TestUT_QwenBlocks_306;
+begin
+  CheckTarget(Self, 1, '', 'blk.1 has no matrix ');
+end;
+
+{ UT-QwenBlocks-307: LoraTargets of both kinds. }
+procedure TQwenBlocksTest.TestUT_QwenBlocks_307;
+var
+  G: TGgufFile;
+  B: TQwenBlock;
+  N: TStringArray;
+  S: string;
+  I: Integer;
+begin
+  B := TinyBlock(0, G);
+  N := B.LoraTargets;
+  B.Free;
+  G.Free;
+  S := N[0];
+  for I := 1 to High(N) do
+    S := S + ',' + N[I];
+  AssertEquals('block 0', 'attn_qkv,attn_gate,ssm_out', S);
+  B := TinyBlock(1, G);
+  N := B.LoraTargets;
+  B.Free;
+  G.Free;
+  S := N[0];
+  for I := 1 to High(N) do
+    S := S + ',' + N[I];
+  AssertEquals('block 1', 'attn_q,attn_k,attn_v,attn_output', S);
+end;
+
+{ UT-QwenBlocks-308: Target returns the same matrix. }
+procedure TQwenBlocksTest.TestUT_QwenBlocks_308;
+var
+  G: TGgufFile;
+  B: TQwenBlock;
+begin
+  B := TinyBlock(1, G);
+  try
+    AssertTrue('attn_v = attn_v', B.Target('attn_v') = B.Target('attn_v'));
+    AssertTrue('attn_v <> attn_k', B.Target('attn_v') <> B.Target('attn_k'));
   finally
     B.Free;
     G.Free;

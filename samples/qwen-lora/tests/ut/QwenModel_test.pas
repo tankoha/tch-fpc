@@ -53,6 +53,13 @@ type
     procedure TestUT_QwenModel_108;
     procedure TestUT_QwenModel_109;
     procedure TestUT_QwenModel_110;
+    procedure TestUT_QwenModel_201;
+    procedure TestUT_QwenModel_202;
+    procedure TestUT_QwenModel_203;
+    procedure TestUT_QwenModel_204;
+    procedure TestUT_QwenModel_205;
+    procedure TestUT_QwenModel_206;
+    procedure TestUT_QwenModel_207;
   end;
 
 const
@@ -666,6 +673,205 @@ end;
 
 const
   TinyPairs = 'blk.0.attn_qkv,blk.0.attn_gate,blk.0.ssm_out,blk.1.attn_q,blk.1.attn_k,blk.1.attn_v,blk.1.attn_output';
+
+{ UT-QwenModel-207: AttachLora, split 1 on one device. }
+procedure TQwenModelTest.TestUT_QwenModel_207;
+var
+  G: TGgufFile;
+  M: TQwenModel;
+  S: TLoraSet;
+begin
+  G := TGgufFile.Open(TiedPath);
+  M := TQwenModel.Load(G, TDevice.Cpu, TDevice.Cpu, 1);
+  S := TLoraSet.Create(4, 2.0);
+  try
+    AssertEquals(7, M.AttachLora(S));
+    AssertEquals(1, Length(S.Stores));
+    AssertEquals(14, S.Stores[0].Count);
+  finally
+    M.Free;
+    S.Free;
+    G.Free;
+  end;
+end;
+
+{ UT-QwenModel-206: AttachLora, NextN file (no MTP block). }
+procedure TQwenModelTest.TestUT_QwenModel_206;
+var
+  G: TGgufFile;
+  M: TQwenModel;
+  S: TLoraSet;
+begin
+  M := LoadCpu(NextPath, G);
+  S := TLoraSet.Create(4, 2.0);
+  try
+    AssertEquals(7, M.AttachLora(S));
+    AssertEquals(TinyPairs, PairNames(S));
+  finally
+    M.Free;
+    S.Free;
+    G.Free;
+  end;
+end;
+
+{ UT-QwenModel-205: AttachLora twice on the same set. }
+procedure TQwenModelTest.TestUT_QwenModel_205;
+var
+  G: TGgufFile;
+  M: TQwenModel;
+  S: TLoraSet;
+begin
+  M := LoadCpu(TiedPath, G);
+  S := TLoraSet.Create(4, 2.0);
+  try
+    M.AttachLora(S);
+    try
+      M.AttachLora(S);
+      Fail('no ELora');
+    except
+      on E: ELora do
+        AssertEquals('pair already present: blk.0.attn_qkv', E.Message);
+    end;
+    AssertEquals(7, S.Count);
+  finally
+    M.Free;
+    S.Free;
+    G.Free;
+  end;
+end;
+
+{ UT-QwenModel-204: AttachLora, block-wise grads vs the whole graph. }
+procedure TQwenModelTest.TestUT_QwenModel_204;
+var
+  G: TGgufFile;
+  M: TQwenModel;
+  S: TLoraSet;
+  H: TTensor;
+  Saved: TSavedInputs;
+  GA, GB: array of TDoubleArray;
+  V: TDoubleArray;
+  D, BMax: Double;
+  I, J: Integer;
+begin
+  M := LoadCpu(TiedPath, G);
+  S := TLoraSet.Create(4, 2.0);
+  Saved := TSavedInputs.Create(True);
+  try
+    M.AttachLora(S);
+    RandomB(S);
+    M.Logits(M.Trunk(M.Embed(Ids8))).log_softmax(-1).sum(kNone).Backward;
+    SetLength(GA, S.Count);
+    SetLength(GB, S.Count);
+    for I := 0 to S.Count - 1 do
+    begin
+      GA[I] := Arr(S.Pair(I).A.grad);
+      GB[I] := Arr(S.Pair(I).B.grad);
+      S.Pair(I).A.ZeroGrad;
+      S.Pair(I).B.ZeroGrad;
+    end;
+    H := RecomputeForward(M.Stages, M.Embed(Ids8), Saved).detach.requires_grad_(True);
+    M.Logits(H).log_softmax(-1).sum(kNone).Backward;
+    RecomputeBackward(M.Stages, Saved, H.grad);
+    for I := 0 to S.Count - 1 do
+    begin
+      V := Arr(S.Pair(I).B.grad);
+      BMax := 0;
+      for J := 0 to High(V) do
+        if Abs(V[J]) > BMax then BMax := Abs(V[J]);
+      AssertTrue(Format('pair %d: B.grad max |.| = %.3e > 0', [I, BMax]), BMax > 0);
+      D := DiffArr(Arr(S.Pair(I).A.grad), GA[I]);
+      AssertTrue(Format('pair %d: A.grad diff %.3e', [I, D]), D <= 1.0e-6);
+      D := DiffArr(Arr(S.Pair(I).B.grad), GB[I]);
+      AssertTrue(Format('pair %d: B.grad diff %.3e', [I, D]), D <= 1.0e-6);
+    end;
+  finally
+    M.Free;
+    S.Free;
+    Saved.Free;
+    G.Free;
+  end;
+end;
+
+{ UT-QwenModel-203: AttachLora, random B changes the output. }
+procedure TQwenModelTest.TestUT_QwenModel_203;
+var
+  G: TGgufFile;
+  M, M0: TQwenModel;
+  S: TLoraSet;
+  H: TTensor;
+  Saved: TSavedInputs;
+begin
+  M := LoadCpu(TiedPath, G);
+  M0 := TQwenModel.Load(G, TDevice.Cpu, TDevice.Cpu, 0);
+  S := TLoraSet.Create(4, 2.0);
+  Saved := TSavedInputs.Create(True);
+  try
+    M.AttachLora(S);
+    RandomB(S);
+    H := RecomputeForward(M.Stages, M.Embed(Ids8), Saved);
+    AssertTrue('random B moves the logits by more than 0.1',
+      DiffArr(Arr(NoGradLogits(M)), Arr(NoGradLogits(M0))) > 0.1);
+    AssertTrue('RecomputeForward equals Trunk (exact)',
+      DiffArr(Arr(H), Arr(M.Trunk(M.Embed(Ids8)))) = 0);
+  finally
+    M.Free;
+    M0.Free;
+    S.Free;
+    Saved.Free;
+    G.Free;
+  end;
+end;
+
+{ UT-QwenModel-202: AttachLora, output unchanged with B zero. }
+procedure TQwenModelTest.TestUT_QwenModel_202;
+var
+  G: TGgufFile;
+  M, M0: TQwenModel;
+  S: TLoraSet;
+begin
+  M := LoadCpu(TiedPath, G);
+  M0 := TQwenModel.Load(G, TDevice.Cpu, TDevice.Cpu, 0);
+  S := TLoraSet.Create(4, 2.0);
+  try
+    M.AttachLora(S);
+    AssertTrue('zero B leaves the logits unchanged (exact)',
+      DiffArr(Arr(NoGradLogits(M)), Arr(NoGradLogits(M0))) = 0);
+  finally
+    M.Free;
+    M0.Free;
+    S.Free;
+    G.Free;
+  end;
+end;
+
+{ UT-QwenModel-201: AttachLora, counts, names and attachment. }
+procedure TQwenModelTest.TestUT_QwenModel_201;
+var
+  G: TGgufFile;
+  M: TQwenModel;
+  S: TLoraSet;
+  B0, B1: TQwenBlock;
+begin
+  M := LoadCpu(TiedPath, G);
+  S := TLoraSet.Create(4, 2.0);
+  try
+    AssertEquals(7, M.AttachLora(S));
+    AssertEquals(7, S.Count);
+    AssertEquals(TinyPairs, PairNames(S));
+    AssertEquals(4864, S.ParameterCount);
+    B0 := M.Stages[0] as TQwenBlock;
+    B1 := M.Stages[1] as TQwenBlock;
+    AssertTrue('blk.0 attn_qkv has pair 0', B0.Target('attn_qkv').Lora = S.Pair(0));
+    AssertTrue('blk.0 ssm_out has pair 2', B0.Target('ssm_out').Lora = S.Pair(2));
+    AssertTrue('blk.0 ssm_beta untouched', B0.Target('ssm_beta').Lora = nil);
+    AssertTrue('blk.0 ffn_gate untouched', B0.Target('ffn_gate').Lora = nil);
+    AssertTrue('blk.1 attn_output has pair 6', B1.Target('attn_output').Lora = S.Pair(6));
+  finally
+    M.Free;
+    S.Free;
+    G.Free;
+  end;
+end;
 
 var
   App: TTestRunner;

@@ -6,7 +6,39 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 Status at a glance of the knowledge-package and fine-tuning work:
 [progress.md](progress.md).
 
-## Local session 14 (2026-11-23): T11 done, H43 holds with the agents' code, M1 complete; T12 prepared — resume here
+## Local session 14, continued (2026-11-23): T12 done — resume here
+
+**T12 (`Lora`) done** (T12a, T12b1–T12b4, T12c through
+`tasks/run-task.sh`, about 4 h). Each step checked: rebuilt with `-Cr`;
+the implementation sections of `src/Lora.pas`, `PackedLinear.pas`,
+`QwenBlocks.pas` and `QwenModel.pas` equal the prototype in
+`work/proto/T12/` (no difference but white space); the new UT rows run
+against mutants (Delta or MergedDelta without the scale, A's bound
+doubled, B not loaded, duplicate check removed, no LoRA in `Forward`,
+`Target('attn_v')` returning K, last trunk block skipped): each caught.
+UT gate 611/611, line coverage 100 % (2778/2778). ITa, rerun by the
+harness owner: ITa-T12-001 0, 002 0, 003 4.8e-5, 004 0, 005 0 (limits 0,
+0, 1e-3, 1e-4, 0), equal to the prototype's; ITa gate 94/94.
+
+What happened on the way:
+- T12a stayed in scope: the "no source code ... stop" sentence in each
+  delegation's goal (after T11a) worked.
+- T12b1's first start found the `aws login` session expired (the script
+  refused, exit 4; nothing changed); rerun after `aws login`.
+- T12b3 wrote result notes in `test-results/ut.md` that did not describe
+  its rows (the main agent reported it); the tests and verdicts were
+  right; the 15 notes were replaced with the case titles by hand.
+- T12c's first start was refused (exit 3): the gateway auto-started by
+  T12b4 had `QLORA_MODEL` empty. `hermes gateway stop`, then rerun. Before
+  every run with `QLORA_MODEL`, stop the gateway first.
+
+**Next:** the rest of M2. T15 (`TrainData`), T19 (`qlora_dataset`) and
+T20 (`qlora_eval`) depend on nothing open; T16 (`Checkpoint`) and T18
+(`GgufMerge`, H47) can start now that T12 is done; T17 (`qlora_train`)
+comes last. Prepare each with the method of T08–T12 (prototype, facts,
+skeletons, ITa, task files). And the M4 question of local session 13.
+
+## Local session 14 (2026-11-23): T11 done, H43 holds with the agents' code, M1 complete; T12 prepared
 
 **T11 done** (T11a, T11b1–T11b3, T11c through `tasks/run-task.sh`, about
 4 h including the stop below). Each step checked: rebuilt with `-Cr`; the

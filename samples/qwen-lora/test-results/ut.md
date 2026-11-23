@@ -564,3 +564,55 @@ When a case is run again, do not edit its row; append a new row below (the last 
 | UT-LogprobsCli-215 | OK |  | 2026-11-23 | T11b3 stage 3: model file TinyPath.missing → exit 1, 'qlora_logprobs: Unable to open file "<TinyPath>.missing": No such file or directory' |
 | UT-LogprobsCli-216 | OK |  | 2026-11-23 | T11b3 stage 3: {"tokens": [274]} → exit 1, 'qlora_logprobs: token id 274 outside 0..273' |
 | UT-LogprobsCli-217 | OK |  | 2026-11-23 | T11b3 stage 3: --split 1 (the GPUs are hidden) → exit 1, no output, 'qlora_logprobs: No CUDA GPUs are available' |
+| UT-Lora-001 | OK |  | 2026-11-23 | T12b1 stage 1: LoraPath 3-segment name 'blk.3.attn_q.lora_a' → S.Root / 'blk' / '3' / 'attn_q' / 'lora_a' |
+| UT-Lora-002 | OK |  | 2026-11-23 | T12b1 stage 1: LoraPath single segment 'x.y' → S.Root / 'x' / 'y' |
+| UT-Lora-003 | OK |  | 2026-11-23 | T12b1 stage 1: LoraPath 'blk..q' → ETorchError 'sub name cannot be empty or contain "." or "\|": ""' |
+| UT-Lora-004 | OK |  | 2026-11-23 | T12b1 stage 1: NewPair: Name p, InDim 8, OutDim 6, Rank 3, Scale 2; A [3,8], B [6,3] both RequiresGrad; S.Variables 2 (p.lora_a, p.lora_b), 2 trainable |
+| UT-Lora-005 | OK |  | 2026-11-23 | T12b1 stage 1: ManualSeed(1), NewPair: max \|A\| ≤ 1/√8 (> 0.3); max \|B\| exactly 0 |
+| UT-Lora-006 | OK |  | 2026-11-23 | T12b1 stage 1: Create InDim 0 → ELora 'p: dimensions must be positive, got 0 -> 6', S.Count 0 |
+| UT-Lora-007 | OK |  | 2026-11-23 | T12b1 stage 1: Create OutDim -1 → ELora 'p: dimensions must be positive, got 8 -> -1', S.Count 0 |
+| UT-Lora-008 | OK |  | 2026-11-23 | T12b1 stage 1: Delta(X[5,8]) with B zero → [5,6], max \|·\| exactly 0 |
+| UT-Lora-009 | OK |  | 2026-11-23 | T12b1 stage 1: Delta(X[5,8]) vs 2·X·Aᵀ·Bᵀ in Double ≤ 1e-6 |
+| UT-Lora-010 | OK |  | 2026-11-23 | T12b1 stage 1: Delta(X[6,8].view([2,3,8])) → [2,3,6], vs Double 2·X·Aᵀ·Bᵀ ≤ 1e-6 |
+| UT-Lora-011 | OK |  | 2026-11-23 | T12b1 stage 1: Delta(X[5,7]) → ELora 'p: X must end in 8' |
+| UT-Lora-012 | OK |  | 2026-11-23 | T12b1 stage 1: Delta of 0-dim X (zeros([5,7]).sum(kNone)) → ELora 'p: X must end in 8' |
+| UT-Lora-013 | OK |  | 2026-11-23 | T12b1 stage 1: MergedDelta → [6,8], RequiresGrad False, kFloat, vs 2·B·A in Double ≤ 1e-6 |
+| UT-Lora-014 | OK |  | 2026-11-23 | T12b1 stage 1: X.matmul(MergedDelta.t) vs Delta(X) ≤ 1e-5 |
+| UT-Lora-015 | OK |  | 2026-11-23 | T12b1 stage 1: B zero, Delta.sum Backward → max \|A.grad\| exactly 0; B.grad[o,k] vs 2·Σₜ(X·Aᵀ)[t,k] in Double ≤ 1e-5 (all 6×3) |
+| UT-Lora-016 | OK |  | 2026-11-23 | T12b1 stage 1: X kDouble → Delta kDouble (A still kFloat), vs 2·X·Aᵀ·Bᵀ in Double ≤ 1e-12 |
+| UT-Lora-101 | OK |  | 2026-11-23 | T12b2 stage 2: Create(4, 2.0) → Rank 4, Scale 2, Count 0, Length(Stores) 0, ParameterCount 0 |
+| UT-Lora-102 | OK |  | 2026-11-23 | T12b2 stage 2: Create(0, 2.0) → ELora 'rank must be positive, got 0' |
+| UT-Lora-103 | OK |  | 2026-11-23 | T12b2 stage 2: NewSet → Count 2, Pair(0)/Pair(1) names blk.0.attn_qkv / blk.1.attn_q; Pair(1) Rank 4, Scale 2, OutDim 256; 1 store (cpu) with variables blk.0.attn_qkv.lora_a/.lora_b, blk.1.attn_q.lora_a/.lora_b; ParameterCount 2048 |
+| UT-Lora-104 | OK |  | 2026-11-23 | T12b2 stage 2: Add 'blk.0.attn_qkv' on NewSet → ELora 'pair already present: blk.0.attn_qkv', Count 2 |
+| UT-Lora-105 | OK |  | 2026-11-23 | T12b2 stage 2: Find literal ('BLK.1.ATTN_Q' and '' → nil, 'blk.1.attn_q' → Pair(1)); Add 'BLK.1.ATTN_Q' → Count 3, Find = Pair(2) |
+| UT-Lora-106 | OK |  | 2026-11-23 | T12b2 stage 2: Pair(2) / Pair(-1) on NewSet → ELora 'pair 2 outside 0..1', 'pair -1 outside 0..1' |
+| UT-Lora-107 | OK |  | 2026-11-23 | T12b2 stage 2: Pair(0) on the empty set → ELora 'pair 0 outside 0..-1' |
+| UT-Lora-108 | OK |  | 2026-11-23 | T12b2 stage 2: ManualSeed(3), both B := randn, Save a.ot, Load into a fresh NewSet → <TmpDir>a.ot exists; every A and B of S2 equals S's exactly |
+| UT-Lora-109 | OK |  | 2026-11-23 | T12b2 stage 2: S (rank 4) Save b.ot, S2 (same names, rank 3) Load → ETorchNativeError 'The size of tensor a (3) must match the size of tensor b (4) at non-singleton dimension 0' |
+| UT-Lora-110 | OK |  | 2026-11-23 | T12b2 stage 2: NewSet.Load missing.ot → ETorchNativeError 'open file failed because of errno 2 on fopen: No such file or directory, file path: <TmpDir>missing.ot' |
+| UT-Lora-111 | OK |  | 2026-11-23 | T12b2 stage 2: S (NewSet) Save c.ot, S2 (NewSet + blk.2.attn_qkv 64->128) Load → ETorchError 'variable blk.2.attn_qkv.lora_a not found in <TmpDir>c.ot' |
+| UT-Lora-112 | OK |  | 2026-11-23 | T12b2 stage 2: ManualSeed(4), SetCurrentDir(TmpDir), Save 'rel.ot', Load 'rel.ot', old dir restored in finally → <TmpDir>rel.ot exists, Pair(1).A exact |
+| UT-Lora-113 | OK |  | 2026-11-23 | T12b2 stage 2: A0 := S2.Pair(0).A; S Save d.ot, S2.Load → S2.Pair(0).A keeps the handle (SameHandle), A and B still RequiresGrad, A0 equals S's A exactly |
+| UT-Lora-114 | OK |  | 2026-11-23 | T12b2 stage 2: Add '' → ETorchError 'sub name cannot be empty or contain \".\" or \"\\|\": \"\"' |
+| UT-PackedLinear-101 | OK |  | 2026-11-23 | T12b3 stage 3: Lora, default |
+| UT-PackedLinear-102 | OK |  | 2026-11-23 | T12b3 stage 3: Forward with a pair, B zero |
+| UT-PackedLinear-103 | OK |  | 2026-11-23 | T12b3 stage 3: Forward, the delta vs the references |
+| UT-PackedLinear-104 | OK |  | 2026-11-23 | T12b3 stage 3: SetLora, InDim differs |
+| UT-PackedLinear-105 | OK |  | 2026-11-23 | T12b3 stage 3: SetLora, OutDim differs |
+| UT-PackedLinear-106 | OK |  | 2026-11-23 | T12b3 stage 3: Lora := nil removes the pair |
+| UT-PackedLinear-107 | OK |  | 2026-11-23 | T12b3 stage 3: Backward through Forward |
+| UT-QwenBlocks-301 | OK |  | 2026-11-23 | T12b3 stage 3: Target, block 0 (linear) |
+| UT-QwenBlocks-302 | OK |  | 2026-11-23 | T12b3 stage 3: Target, block 1 (full) |
+| UT-QwenBlocks-303 | OK |  | 2026-11-23 | T12b3 stage 3: Target, name not of the kind |
+| UT-QwenBlocks-304 | OK |  | 2026-11-23 | T12b3 stage 3: Target, upper-case name |
+| UT-QwenBlocks-305 | OK |  | 2026-11-23 | T12b3 stage 3: Target, name with .weight |
+| UT-QwenBlocks-306 | OK |  | 2026-11-23 | T12b3 stage 3: Target, empty name |
+| UT-QwenBlocks-307 | OK |  | 2026-11-23 | T12b3 stage 3: LoraTargets of both kinds |
+| UT-QwenBlocks-308 | OK |  | 2026-11-23 | T12b3 stage 3: Target returns the same matrix |
+| UT-QwenModel-201 | OK |  | 2026-11-23 | T12b4 stage 4: AttachLora → 7 pairs, PairNames = TinyPairs, ParameterCount 4864, blk.0 attn_qkv/ssm_out and blk.1 attn_output attached (ssm_beta, ffn_gate nil) |
+| UT-QwenModel-202 | OK |  | 2026-11-23 | T12b4 stage 4: AttachLora, zero B leaves NoGradLogits unchanged (exact) |
+| UT-QwenModel-203 | OK |  | 2026-11-23 | T12b4 stage 4: RandomB moves the logits by > 0.1 vs the adapter-free model; RecomputeForward equals Trunk (exact) |
+| UT-QwenModel-204 | OK |  | 2026-11-23 | T12b4 stage 4: after ZeroGrad, block-wise grads (RecomputeBackward) equal the whole-graph grads on every A and B (diff <= 1e-6); every B.grad max > 0 |
+| UT-QwenModel-205 | OK |  | 2026-11-23 | T12b4 stage 4: AttachLora twice on the same set → ELora 'pair already present: blk.0.attn_qkv', Count 7 |
+| UT-QwenModel-206 | OK |  | 2026-11-23 | T12b4 stage 4: AttachLora on the NextN file → 7 pairs, PairNames = TinyPairs (no MTP block) |
+| UT-QwenModel-207 | OK |  | 2026-11-23 | T12b4 stage 4: AttachLora with split 1 on one device → 7 pairs, 1 store, 14 variables |

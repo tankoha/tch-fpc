@@ -4080,8 +4080,9 @@ Roles, binding for everything below:
 |---|---|---|
 | Design session (Claude) | this design; reviews | committed code, training samples |
 | Opus / Sonnet | the data specification (instructions, 8.16), the held-out evaluation tasks (8.17) | training samples |
-| Mistral Large 3 | generates the training samples (external); as the main agent of the Hermes SDLC process, the external design and the IT cases of every task of 8.18 | changes to the formulas and decisions of this section |
-| Qwen3.8 27B (Hermes sub-agent) | detailed design, unit tests and code of the sample | — |
+| Mistral Large 3 | generates the training samples (external); was the main agent of the Hermes SDLC process for T06, T01 and T02, replaced for its false reports (`samples/qwen-lora/docs/mistral-large-3-issues.md`) | changes to the formulas and decisions of this section |
+| GLM 5 (`zai.glm-5`, Bedrock; Hermes main agent from T03) | the external design and the IT cases of every task of 8.18 | changes to the formulas and decisions of this section |
+| Hermes sub-agent: the local Qwen3.8 27B (128k) until T02 and again from T14; GLM 5 on Bedrock T05b3–T13, other models in between | detailed design, unit tests and code of the sample | — |
 | User | downloads, every GPU run, `ollama create`, decisions | — |
 
 New hypotheses of this session:
@@ -4882,8 +4883,10 @@ a measured one and joins the aggregate, with a new "before".
 
 ### 8.18 Hand-off to the Hermes process
 
-Per task: Mistral (main agent) writes the external design and the IT cases
-from the named sections of this design; Qwen (sub-agent) writes the
+Per task: the main agent (GLM 5 from T03; Mistral Large 3 for T06, T01
+and T02) writes the external design and the IT cases
+from the named sections of this design; the sub-agent (the local Qwen3.8
+27B until T02 and from T14; GLM 5 T05b3–T13) writes the
 detailed design, the unit tests and the code; the gate is the SDLC
 harness's (unit coverage, all cases run). One task is one unit or one
 program, sized for a 64k context. Every numeric task has an oracle that is

@@ -4888,6 +4888,47 @@ because a wrong sample cannot be detected without one and a model
 trained on it copies the generator's errors. The class list of the
 training configuration, default `compiled-run`, `fpc-approx`, stays.)*
 
+**As written for T19 (local session 15, 2026-11-25;
+`samples/qwen-lora/tasks/T19-facts.md`).** Two units and a thin program:
+`DatasetFilter` (pure: the schema, the fenced blocks, the normalised
+source, tokens, shingles, Jaccard, the split) and `DatasetCli` (the
+command line and the run); `qlora_dataset [options] RAW OUTDIR`. Choices
+left open above:
+- the schema of item 2 checked in a fixed order (strings `id`, `dialect`
+  of the five names, `task_type` of `write`, `extend`, `fix`, `convert`,
+  `unit`, `topic`, `language`, `prompt`, `answer`, `expected_stdout`; the
+  array `features`; the object `generator`; at least one fenced block).
+  The program block is the first that is not a unit; units are written
+  next to it under their own names;
+- per record, the first failing check is the reason, in this order:
+  schema, a program block, a unique id, the dialect detected in the
+  source equal to the record's, leak against the evaluation tasks (source
+  against reference, prompt against prompt), leak against the example
+  files, exact duplicate, near duplicate (both against earlier accepted
+  records), the tokenizer, the verification (the slowest, last);
+- the source hash is **MD5** of the normalised source (no comments, lower
+  case outside strings, white space collapsed): stock FPC 3.2.2 has no
+  sha256 (as T17); the manifest says MD5;
+- near duplicates and leaks: Jaccard of FNV-1a 64 hashes of 5-grams of
+  lexical tokens (words, numbers, single characters), at 0.5 or more;
+- the tokenizer check reads a reference file made with `llama-server`'s
+  `/tokenize` (a Babashka script, `tests/ita/T19/make-ref.bb`) instead of
+  calling it from Pascal; the same script makes the reference of a real
+  data set at M3;
+- accepted means the verifier's `accepted` with class `compiled-run` or
+  `fpc-approx` and no `expect-error:` marker (the verifier accepts a
+  pitfall file without running it);
+- the valid split: per dialect × task type, ordered by MD5 of
+  `<seed>:<id>`, the first (n · percent + 50) div 100.
+- **Oxygene's filter row is not part of T19**: it is a change of
+  `DialectVerify` (T06) to be done at M3; until then Oxygene records are
+  `static-only` and rejected (`verify: static-ok`).
+Measured with the prototype: UT 19 rows, 100 % line coverage (191 + 356
+lines), eleven mutants caught; ITa on a synthetic raw set of 33 records
+(16 good in four dialects, 17 planted faults): exactly the planted ones
+rejected, the split, records, manifest and card as recomputed by the
+driver, two runs byte-identical, 3 s per run.
+
 ### 8.17 Evaluation
 
 **Tasks.** 200 held-out tasks, 40 per dialect (30 write from a

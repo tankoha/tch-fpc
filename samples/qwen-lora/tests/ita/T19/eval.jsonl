@@ -1,0 +1,2 @@
+{"id":"eval-collatz","prompt":"Print the number of Collatz steps of 27.","reference":"program Collatz;\n{$mode objfpc}{$H+}\nvar\n  N, Steps: Integer;\nbegin\n  N := 27;\n  Steps := 0;\n  while N <> 1 do\n  begin\n    if Odd(N) then N := 3 * N + 1 else N := N div 2;\n    Inc(Steps);\n  end;\n  WriteLn(Steps);\nend.\n"}
+{"id":"eval-seven","prompt":"Write a program that prints the multiplication table of seven from one to ten, one product per line.","reference":"program Seven;\n{$mode objfpc}{$H+}\nvar\n  K: Integer;\nbegin\n  for K := 1 to 10 do\n    WriteLn(7 * K);\nend.\n"}

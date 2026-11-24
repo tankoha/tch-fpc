@@ -4434,6 +4434,38 @@ data-spec/（Opus/Sonnet、リポジトリ内）  ──►  Mistral Large 3（�
 である。学習の設定にある受け入れる区分の一覧（既定は `compiled-run` と `fpc-approx`）
 はそのまま。）*
 
+**T19 での形（ローカルセッション15、2026-11-25。
+`samples/qwen-lora/tasks/T19-facts.md`）。** 2 つのユニットと薄いプログラム：
+`DatasetFilter`（純粋：スキーマ、fenced block、正規化したソース、トークン、shingle、
+Jaccard、振り分け）と `DatasetCli`（コマンドラインと実行）。`qlora_dataset [options]
+RAW OUTDIR`。上で決めていなかったこと：
+- 項目 2 のスキーマを決まった順に確かめる（文字列 `id`、5 つの名前の `dialect`、
+  `write`・`extend`・`fix`・`convert`・`unit` の `task_type`、`topic`、`language`、
+  `prompt`、`answer`、`expected_stdout`。配列 `features`。オブジェクト `generator`。
+  fenced block が 1 つ以上）。プログラムのブロックはユニットでない最初のもの。ユニットは
+  その横に自分の名前で書く。
+- レコードごとに、最初に失敗した確認が理由になる。順番：スキーマ、プログラムのブロック、
+  一意の id、ソースから検出した方言がレコードのものと同じ、評価タスクとのリーク（ソースと
+  参照解、プロンプトとプロンプト）、例のファイルとのリーク、完全重複、近似重複（どちらも
+  先に受け入れたレコードに対して）、トークナイザ、検証（いちばん遅いので最後）。
+- ソースのハッシュは正規化したソース（コメントなし、文字列の外は小文字、空白はまとめる）の
+  **MD5**：標準の FPC 3.2.2 に sha256 はない（T17 と同じ）。manifest に MD5 と書く。
+- 近似重複とリーク：字句トークン（単語、数、1 文字）の 5-gram の FNV-1a 64 ハッシュの
+  Jaccard が 0.5 以上。
+- トークナイザの確認は、Pascal から呼ぶ代わりに `llama-server` の `/tokenize` で作った
+  参照ファイルを読む（Babashka のスクリプト `tests/ita/T19/make-ref.bb`）。M3 では
+  同じスクリプトで本物のデータセットの参照を作る。
+- 受け入れは、検証器の `accepted` で区分が `compiled-run` か `fpc-approx`、かつ
+  `expect-error:` の印がないこと（検証器は落とし穴のファイルを実行せずに受け入れるため）。
+- valid の振り分け：方言 × タスク種別ごとに `<seed>:<id>` の MD5 の順に並べ、先頭の
+  (n · percent + 50) div 100 件。
+- **Oxygene のフィルタ行は T19 に含めない**：`DialectVerify`（T06）の変更として M3 で
+  行う。それまで Oxygene のレコードは `static-only` で落ちる（`verify: static-ok`）。
+試作での測定：UT 19 行、行カバレッジ 100%（191 + 356 行）、変異体 11 個が捕まる。
+33 レコードの合成 raw セット（4 方言の正しい 16 件、仕込んだ欠陥 17 件）での ITa：
+仕込んだものだけがちょうど落ち、振り分け・レコード・manifest・card はドライバの再計算と
+一致し、2 回の実行はバイト単位で同じ、1 回 3 秒。
+
 ### 8.17 評価
 
 **課題。** 取り分けた課題 200 個。方言ごとに 40 個（説明から書く 30、コンパイル

@@ -721,3 +721,13 @@ When a case is run again, do not edit its row; append a new row below (the last 
 | UT-GgufMerge-104 | OK |  | 2026-11-25 | empty directory as the checkpoint |
 | UT-GgufMerge-105 | OK |  | 2026-11-25 | base's sha256 against the checkpoint's |
 | UT-GgufMerge-106 | OK |  | 2026-11-25 | `lora.ot` missing at run time |
+| UT-DatasetFilter-001 | OK |  | 2026-11-25 | A record with a fenced block passes |
+| UT-DatasetFilter-002 | OK |  | 2026-11-25 | Schema violations (in the order of the checks) |
+| UT-DatasetFilter-003 | OK |  | 2026-11-25 | Fenced blocks |
+| UT-DatasetFilter-004 | OK |  | 2026-11-25 | Normalized source |
+| UT-DatasetFilter-005 | OK |  | 2026-11-25 | Source key |
+| UT-DatasetFilter-006 | OK |  | 2026-11-25 | Tokens (lex) |
+| UT-DatasetFilter-007 | OK |  | 2026-11-25 | Shingles |
+| UT-DatasetFilter-008 | OK |  | 2026-11-25 | Jaccard |
+| UT-DatasetFilter-009 | OK |  | 2026-11-25 | Valid count |
+| UT-DatasetFilter-010 | OK |  | 2026-11-25 | Split key |

@@ -4971,6 +4971,44 @@ the thinking-off series improves, the result is reported and the choice
 text) is the user's. (Oxygene is in the aggregate since its compiler
 arrived, 2026-11-22, before any "before" was measured.)
 
+**As written for T20 (local session 15, 2026-11-25;
+`samples/qwen-lora/tasks/T20-facts.md`).** Two units and a thin program:
+`EvalReport` (pure: counts per column, paired flips, the exact sign test,
+the adoption rule, the first fenced block) and `EvalCli` (the command
+line, the tasks, judging the replies, the report);
+`qlora_eval [options] TASKS BEFORE [AFTER] OUTDIR` writes `results.tsv`
+and `report.md`. Choices left open above:
+- **the replies are recorded outside the program**: a Babashka script
+  (`tests/ita/T20/ask.bb`: Ollama's `/api/chat`, the model's own renderer
+  and parser, seeds 1 and 2, thinking on and off, the tool `get_weather`
+  for a tool-call task) writes one reply per line; `qlora_eval` judges
+  the recorded file, so the judgement is repeatable without generating
+  again. The user runs the same script at M3 and M5;
+- a task per line: `id`, `dialect` (a Pascal dialect or `regression`),
+  `prompt`, and `expected_stdout`, or `check` `tool-call` with `tool`, or
+  `contains` with `text`;
+- a Pascal reply's first closed fenced block is verified as the task's
+  dialect; compiled unless there is no block or the outcome is
+  `compile-error`, `static-ok`, `static-reject` or `skipped`; passed when
+  `accepted` and the block has no `expect-error:` marker. A regression
+  reply passes when a tool call has the task's tool name, or the content
+  contains the text literally;
+- columns: each dialect present, `verified` (objfpc, fpc-delphi,
+  unleashed, oxygene), `tool-call`, `contains`; flips pair the two
+  models' replies by task and seed within a thinking mode; the sign test
+  is exact and two-sided;
+- the adoption rule per thinking mode, one line per condition, verdict
+  `yes`, `no` or `undecided` (H49 not measured); the speed ratio of H49
+  is an input (`--speed-ratio`), not measured by the program; an empty
+  series neither rises nor falls.
+Measured with the prototype: UT 16 rows, 100 % line coverage (123 + 238
+lines), thirteen mutants caught; ITa on eleven Pascal tasks in four
+dialects and three regression tasks, with 56 recorded replies each of
+`qlora-m2-base` and `qlora-m2` (M2's merged rehearsal model): every
+judgement, table row and adoption line as recomputed by the driver, two
+runs byte-identical, 5 s per run. The 0.8B rehearsal model passes none of
+the Pascal tasks; its 14 passes are regression checks.
+
 ### 8.18 Hand-off to the Hermes process
 
 Per task: the main agent (GLM 5 from T03; Mistral Large 3 for T06, T01

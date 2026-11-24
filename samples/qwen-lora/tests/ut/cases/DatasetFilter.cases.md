@@ -1,0 +1,16 @@
+# UT cases — unit `DatasetFilter` (T19, stage 1 / task T19b1)
+
+Error rows compare the whole message (`AssertEquals`).
+
+| Case ID | Title | Target function | Input (short) | Expected result | Notes |
+|---|---|---|---|---|---|
+| UT-DatasetFilter-001 | ParseRecord of a well-formed record with one Code block | ParseRecord | `ParseRecord(RecLine('a1', 'fpc-delphi', 'convert', 'Do it.', 'Text'#10'```pascal'#10'program P;'#10'begin end.'#10'```'#10))` | ''; Id, Dialect, TaskType, Prompt as given; Expected `1`#10; one block `program P;`#10`begin end.`#10 | |
+| UT-DatasetFilter-002 | ParseRecord schema errors, one at a time | ParseRecord (via test helper `ReasonOf`) | `ReasonOf` of: `{"id": `; `[1, 2]`; `RecWith` id removed, `""`, `7`; dialect `"turbo"`, `"OBJFPC"`; task_type `"other"`; topic removed; language `1`; prompt `""`; answer removed; expected_stdout `null`; features `"a"`; generator `[]`; answer `"no fence"`; topic `""` | `schema: not a JSON object` (twice); `schema: id` (three times); `schema: dialect` (twice); `schema: task_type`; `schema: topic`; `schema: language`; `schema: prompt`; `schema: answer`; `schema: expected_stdout`; `schema: features`; `schema: generator`; `schema: answer has no fenced block`; '' | |
+| UT-DatasetFilter-003 | ExtractBlocks: closed, unclosed and no blocks | ExtractBlocks | `ExtractBlocks` of `intro`, a block `a`/`  b` closed by ```` ```   ````, `between`, a block `c`, an unclosed block `open`; of `no blocks`#10; of ```` ``` ````#10```` ``` ```` | two blocks `a`#10`  b`#10 and `c`#10; none; one empty block | |
+| UT-DatasetFilter-004 | NormalizeSource: comments, case, CRLF, unterminated strings and comments | NormalizeSource | `NormalizeSource` of `Program P; { note }`#10`(* old *)Begin  // tail`#10#9`WriteLn('A {b} // C');`#13#10`End.`; of `  a{x}b  `; of `'open`; of `x (* unclosed`; of '' | `program p; begin writeln('A {b} // C'); end.`; `a b`; `'open`; `x`; '' | |
+| UT-DatasetFilter-005 | SourceKey: normalization, change, case sensitivity | SourceKey | `SourceKey` of [`Program P;`#10`begin end.`#10, `unit U; end.`] and [`program   p; { c }`#10#10`BEGIN END.`, `Unit u;  end.`]; then the second unit `unit v; end.`; of [`x := 'a';`] and [`x := 'A';`] | equal; = `MD5Print(MD5String('program p; begin end.'#10'unit u; end.'))`; differs; differ | |
+| UT-DatasetFilter-006 | LexTokens: lower case, punctuation, skip | LexTokens | `LexTokens` of `Foo_1 := 42+X;`; of #9`A1b`#13#10` 7 _Z `; of `  ` | `foo_1`, `:`, `=`, `42`, `+`, `x`, `;`; `a1b`, `7`, `_z`; none | |
+| UT-DatasetFilter-007 | Shingles: sizes, runs, known hash | Shingles | `Shingles` of 4 tokens; of `a`..`f`; of six `x` then `y`; of six `x`; of `a`..`e` | none; 2, ascending; 2; 1; one, `$E22588B27BD8C58C` | |
+| UT-DatasetFilter-008 | Jaccard: equal, disjoint, partial, empty | Jaccard | `Jaccard` of [1,2,3]/[1,2,3]; [1,2]/[3,4]; [1,2,3]/[2,3,4]; [1,5]/[1,2,3,4]; []/[]; [1]/[] | 1; 0; 0.5; 0.2; 0; 0 | |
+| UT-DatasetFilter-009 | ValidCount: rounding and bounds | ValidCount | `ValidCount` (0,5), (9,5), (10,5), (29,5), (30,5), (1,25), (2,25), (6,25), (5,100), (5,0) | 0, 0, 1, 1, 2, 0, 1, 2, 5, 0 | |
+| UT-DatasetFilter-010 | SplitKey: seed and id, negative seed, empty id | SplitKey | `SplitKey(1, 'o1')`; `SplitKey(-3, 'Id')`; `SplitKey(0, '')` | `MD5Print(MD5String('1:o1'))`; of `'-3:Id'`; 32 characters | |

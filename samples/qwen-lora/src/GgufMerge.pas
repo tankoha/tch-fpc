@@ -194,9 +194,84 @@ begin
 end;
 
 function RunMergeCLI(const AArgs: array of string; AOut, AErr: TStrings): Integer;
+var
+  Args: array of string;
+  Sha, A: string;
+  I, N: Integer;
+  G: TGgufFile;
+  St: TRunState;
+  T: TMergeTargets;
+  S: TLoraSet;
 begin
-  Result := 0;
-  raise EGgufMerge.Create('RunMergeCLI: not implemented yet');
+  Args := nil;
+  Sha := '';
+  I := 0;
+  while I <= High(AArgs) do
+  begin
+    A := AArgs[I];
+    if A = '--base-sha256' then
+    begin
+      if I = High(AArgs) then
+      begin
+        AErr.Add('--base-sha256: value missing');
+        Exit(2);
+      end;
+      Sha := AArgs[I + 1];
+      Inc(I, 2);
+      Continue;
+    end;
+    if (Length(A) > 1) and (A[1] = '-') then
+    begin
+      AErr.Add('unknown option ' + A);
+      Exit(2);
+    end;
+    SetLength(Args, Length(Args) + 1);
+    Args[High(Args)] := A;
+    Inc(I);
+  end;
+  if Length(Args) <> 3 then
+  begin
+    AErr.Add(Format('expected BASE CKPT OUT, got %d arguments', [Length(Args)]));
+    Exit(2);
+  end;
+  Result := 1;
+  if not FileExists(Args[0]) then
+  begin
+    AErr.Add('no model file ' + Args[0]);
+    Exit;
+  end;
+  if ExpandFileName(Args[2]) = ExpandFileName(Args[0]) then
+  begin
+    AErr.Add('the output must not be the base model');
+    Exit;
+  end;
+  if Sha = '' then
+    Sha := ShaFromName(Args[0]);
+  G := nil;
+  S := nil;
+  try
+    try
+      St := ReadRunState(Args[1]);
+      if (St.BaseSha256 <> '') and (Sha <> '') and (St.BaseSha256 <> Sha) then
+      begin
+        AErr.Add('the base model differs from the checkpoint''s: ' + Args[1]);
+        Exit;
+      end;
+      G := TGgufFile.Open(Args[0]);
+      T := MergeTargets(G);
+      S := LoadAdapters(T, Args[1], St);
+      N := WriteMerged(G, T, S, Args[2]);
+      AOut.Add(Format('merged %d tensors (rank %d, scale %g) into %s',
+        [N, St.Rank, St.Scale, Args[2]]));
+      Result := 0;
+    except
+      on E: Exception do
+        AErr.Add(E.Message);
+    end;
+  finally
+    S.Free;
+    G.Free;
+  end;
 end;
 
 end.

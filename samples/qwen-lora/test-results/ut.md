@@ -715,3 +715,9 @@ When a case is run again, do not edit its row; append a new row below (the last 
 | UT-GgufMerge-012 | OK |  | 2026-11-25 | a set that does not contain blk.0.attn_gate |
 | UT-GgufMerge-013 | OK |  | 2026-11-25 | fail before write; rename fails; overwrite on rename |
 | UT-GgufMerge-014 | OK |  | 2026-11-25 | effect and fidelity on the tiny model |
+| UT-GgufMerge-101 | OK |  | 2026-11-25 | success: BASE CKPT OUT |
+| UT-GgufMerge-102 | OK |  | 2026-11-25 | usage errors, exit 2 |
+| UT-GgufMerge-103 | OK |  | 2026-11-25 | no base; output is the base |
+| UT-GgufMerge-104 | OK |  | 2026-11-25 | empty directory as the checkpoint |
+| UT-GgufMerge-105 | OK |  | 2026-11-25 | base's sha256 against the checkpoint's |
+| UT-GgufMerge-106 | OK |  | 2026-11-25 | `lora.ot` missing at run time |

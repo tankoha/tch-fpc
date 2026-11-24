@@ -29,6 +29,12 @@ type
     procedure TestUT_GgufMerge_012;
     procedure TestUT_GgufMerge_013;
     procedure TestUT_GgufMerge_014;
+    procedure TestUT_GgufMerge_101;
+    procedure TestUT_GgufMerge_102;
+    procedure TestUT_GgufMerge_103;
+    procedure TestUT_GgufMerge_104;
+    procedure TestUT_GgufMerge_105;
+    procedure TestUT_GgufMerge_106;
   end;
 
 { ---- helpers (harness owner's; nobody changes them) ---- }
@@ -764,6 +770,178 @@ begin
     G.Free;
     MM.Free;
     M0.Free;
+  end;
+end;
+
+{ UT-GgufMerge-101 — success: BASE CKPT OUT. }
+procedure TGgufMergeTest.TestUT_GgufMerge_101;
+var
+  D: string;
+  G: TGgufFile;
+  T: TMergeTargets;
+  S: TLoraSet;
+  N: Integer;
+  O, E: string;
+  A, B: TBytes;
+begin
+  D := NewDir;
+  G := TGgufFile.Open(TinyPath);
+  T := MergeTargets(G);
+  S := NewSet(T, 6);
+  try
+    N := WriteMerged(G, T, S, D + 'ref.gguf');
+    AssertEquals(7, N);
+    SaveCkpt(D + 'c', S, '');
+    AssertEquals(0, RunCli([TinyPath, D + 'c', D + 'm.gguf'], O, E));
+    AssertEquals('merged 7 tensors (rank 4, scale 2) into ' + D + 'm.gguf', O);
+    AssertEquals('', E);
+    A := FileBytes(D + 'm.gguf');
+    B := FileBytes(D + 'ref.gguf');
+    AssertTrue(SameBytes(A, B));
+  finally
+    S.Free;
+    G.Free;
+  end;
+end;
+
+{ UT-GgufMerge-102 — usage errors, exit 2. }
+procedure TGgufMergeTest.TestUT_GgufMerge_102;
+var
+  A: array of string;
+  O, E: string;
+begin
+  A := nil;
+  AssertEquals(2, RunCli(A, O, E));
+  AssertEquals('expected BASE CKPT OUT, got 0 arguments', E);
+  AssertEquals('', O);
+  AssertEquals(2, RunCli(['a', 'b'], O, E));
+  AssertEquals('expected BASE CKPT OUT, got 2 arguments', E);
+  AssertEquals('', O);
+  AssertEquals(2, RunCli(['a', 'b', 'c', 'd'], O, E));
+  AssertEquals('expected BASE CKPT OUT, got 4 arguments', E);
+  AssertEquals('', O);
+  AssertEquals(2, RunCli(['--frob', 'a', 'b', 'c'], O, E));
+  AssertEquals('unknown option --frob', E);
+  AssertEquals('', O);
+  AssertEquals(2, RunCli(['a', 'b', 'c', '--base-sha256'], O, E));
+  AssertEquals('--base-sha256: value missing', E);
+  AssertEquals('', O);
+  AssertEquals(2, RunCli(['--BASE-SHA256', 'x', 'a', 'b', 'c'], O, E));
+  AssertEquals('unknown option --BASE-SHA256', E);
+  AssertEquals('', O);
+end;
+
+{ UT-GgufMerge-103 — no base; output is the base. }
+procedure TGgufMergeTest.TestUT_GgufMerge_103;
+var
+  D: string;
+  O, E: string;
+  Cwd: string;
+begin
+  D := NewDir;
+  AssertEquals(1, RunCli([TmpDir + 'none.gguf', D + 'c', D + 'm.gguf'], O, E));
+  AssertEquals('no model file ' + TmpDir + 'none.gguf', E);
+  AssertEquals('', O);
+  AssertFalse(FileExists(D + 'm.gguf'));
+  AssertEquals(1, RunCli([TinyPath, D + 'c', TinyPath], O, E));
+  AssertEquals('the output must not be the base model', E);
+  AssertFalse(FileExists(D + 'm.gguf'));
+  AssertEquals(1, RunCli([TinyPath, D + 'c', D + '../tiny.gguf'], O, E));
+  AssertEquals('the output must not be the base model', E);
+  AssertFalse(FileExists(D + 'm.gguf'));
+  Cwd := GetCurrentDir;
+  SetCurrentDir(TmpDir);
+  try
+    AssertEquals(1, RunCli([TinyPath, D + 'c', 'tiny.gguf'], O, E));
+    AssertEquals('the output must not be the base model', E);
+    AssertEquals('', O);
+  finally
+    SetCurrentDir(Cwd);
+  end;
+  AssertFalse(FileExists(D + 'm.gguf'));
+end;
+
+{ UT-GgufMerge-104 — an empty directory as the checkpoint. }
+procedure TGgufMergeTest.TestUT_GgufMerge_104;
+var
+  D: string;
+  O, E: string;
+begin
+  D := NewDir;
+  AssertEquals(1, RunCli([TinyPath, D, D + 'm.gguf'], O, E));
+  AssertEquals('not a checkpoint: ' + D, E);
+  AssertEquals('', O);
+  AssertFalse(FileExists(D + 'm.gguf'));
+end;
+
+{ UT-GgufMerge-105 — the base''s sha256 against the checkpoint''s. }
+procedure TGgufMergeTest.TestUT_GgufMerge_105;
+var
+  D: string;
+  G: TGgufFile;
+  T: TMergeTargets;
+  S: TLoraSet;
+  O, E: string;
+  Ha, Hb, Hu: string;
+begin
+  D := NewDir;
+  Ha := StringOfChar('a', 64);
+  Hb := StringOfChar('b', 64);
+  Hu := StringOfChar('A', 64);
+  G := TGgufFile.Open(TinyPath);
+  T := MergeTargets(G);
+  S := NewSet(T, 6);
+  try
+    SaveCkpt(D + 'c', S, Ha);
+    SaveCkpt(D + 'e', S, '');
+    SaveBytes(D + 'sha256-' + Ha, FileBytes(TinyPath));
+    SaveBytes(D + 'sha256-' + Hb, FileBytes(TinyPath));
+    AssertEquals(1, RunCli(['--base-sha256', Hb, D + 'sha256-' + Ha, D + 'c', D + 'o1.gguf'], O, E));
+    AssertEquals('the base model differs from the checkpoint''s: ' + D + 'c', E);
+    AssertFalse(FileExists(D + 'o1.gguf'));
+    AssertEquals(1, RunCli(['--base-sha256', Hu, D + 'sha256-' + Ha, D + 'c', D + 'o2.gguf'], O, E));
+    AssertEquals('the base model differs from the checkpoint''s: ' + D + 'c', E);
+    AssertFalse(FileExists(D + 'o2.gguf'));
+    AssertEquals(1, RunCli([D + 'sha256-' + Hb, D + 'c', D + 'o3.gguf'], O, E));
+    AssertEquals('the base model differs from the checkpoint''s: ' + D + 'c', E);
+    AssertFalse(FileExists(D + 'o3.gguf'));
+    AssertEquals(0, RunCli(['--base-sha256', Ha, D + 'sha256-' + Ha, D + 'c', D + 'o4.gguf'], O, E));
+    AssertEquals('', E);
+    AssertEquals(0, RunCli([D + 'sha256-' + Ha, D + 'c', D + 'o5.gguf'], O, E));
+    AssertEquals('', E);
+    AssertEquals(0, RunCli([TinyPath, D + 'c', D + 'o6.gguf'], O, E));
+    AssertEquals('', E);
+    AssertEquals(0, RunCli(['--base-sha256', Hb, TinyPath, D + 'e', D + 'o7.gguf'], O, E));
+    AssertEquals('', E);
+  finally
+    S.Free;
+    G.Free;
+  end;
+end;
+
+{ UT-GgufMerge-106 — lora.ot missing at run time. }
+procedure TGgufMergeTest.TestUT_GgufMerge_106;
+var
+  D: string;
+  G: TGgufFile;
+  T: TMergeTargets;
+  S: TLoraSet;
+  O, E: string;
+begin
+  D := NewDir;
+  G := TGgufFile.Open(TinyPath);
+  T := MergeTargets(G);
+  S := NewSet(T, 6);
+  try
+    SaveCkpt(D + 'c', S, '');
+    DeleteFile(D + 'c/lora.ot');
+    AssertEquals(1, RunCli([TinyPath, D + 'c', D + 'm.gguf'], O, E));
+    AssertEquals('open file failed because of errno 2 on fopen: No such file or directory, file path: ' + D + 'c/lora.ot', E);
+    AssertEquals('', O);
+    AssertFalse(FileExists(D + 'm.gguf'));
+  finally
+    S.Free;
+    G.Free;
   end;
 end;
 

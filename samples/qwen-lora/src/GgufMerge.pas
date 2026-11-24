@@ -60,31 +60,137 @@ function RunMergeCLI(const AArgs: array of string; AOut, AErr: TStrings): Intege
 
 implementation
 
+uses
+  TrainCli;   { ShaFromName }
+
+procedure AddTarget(AGguf: TGgufFile; const AName: string; var R: TMergeTargets);
+var
+  T, N: Integer;
+  Info: TGgufTensorInfo;
+begin
+  T := AGguf.FindTensor(AName + '.weight');
+  if T < 0 then
+    raise EGgufMerge.CreateFmt('no tensor %s.weight', [AName]);
+  Info := AGguf.Tensor[T];
+  if Info.NDims <> 2 then
+    raise EGgufMerge.CreateFmt('%s.weight has %d dimensions, expected 2', [AName, Info.NDims]);
+  N := Length(R);
+  SetLength(R, N + 1);
+  R[N].Name := AName;
+  R[N].Tensor := T;
+  R[N].InDim := Info.Dims[0];
+  R[N].OutDim := Info.Dims[1];
+end;
+
 function MergeTargets(AGguf: TGgufFile): TMergeTargets;
+var
+  D: TQwenDims;
+  Trunk, B, K: Integer;
+  P: string;
 begin
   Result := nil;
-  raise EGgufMerge.Create('MergeTargets: not implemented yet');
+  D := ReadQwenDims(AGguf);
+  Trunk := D.Blocks;
+  K := AGguf.FindKey('qwen35.nextn_predict_layers');
+  if K >= 0 then
+    Trunk := D.Blocks - AGguf.KV[K].IntVal;
+  for B := 0 to Trunk - 1 do
+  begin
+    P := 'blk.' + IntToStr(B) + '.';
+    if IsFullBlock(D, B) then
+    begin
+      AddTarget(AGguf, P + 'attn_q', Result);
+      AddTarget(AGguf, P + 'attn_k', Result);
+      AddTarget(AGguf, P + 'attn_v', Result);
+      AddTarget(AGguf, P + 'attn_output', Result);
+    end
+    else
+    begin
+      AddTarget(AGguf, P + 'attn_qkv', Result);
+      AddTarget(AGguf, P + 'attn_gate', Result);
+      AddTarget(AGguf, P + 'ssm_out', Result);
+    end;
+  end;
 end;
 
 function LoadAdapters(const ATargets: TMergeTargets; const ADir: string;
   const AState: TRunState): TLoraSet;
+var
+  I: Integer;
 begin
-  Result := nil;
-  raise EGgufMerge.Create('LoadAdapters: not implemented yet');
+  Result := TLoraSet.Create(AState.Rank, AState.Scale);
+  try
+    for I := 0 to High(ATargets) do
+      Result.Add(ATargets[I].Name, ATargets[I].InDim, ATargets[I].OutDim, TDevice.Cpu);
+    Result.Load(IncludeTrailingPathDelimiter(ADir) + 'lora.ot');
+  except
+    Result.Free;
+    raise;
+  end;
 end;
 
 function MergeTensor(ATType: Cardinal; const ABytes: TBytes; AIn, AOut: Int64;
   AP: TLoraPair): TBytes;
+var
+  W: TSingleArray;
+  NG: IInterface;
 begin
-  Result := nil;
-  raise EGgufMerge.Create('MergeTensor: not implemented yet');
+  if (AP.InDim <> AIn) or (AP.OutDim <> AOut) then
+    raise EGgufMerge.CreateFmt('%s: adapter %d -> %d, tensor %d -> %d',
+      [AP.Name, AP.InDim, AP.OutDim, AIn, AOut]);
+  NG := NoGradGuard;
+  W := DequantizeBytes(ATType, ABytes, AIn * AOut);
+  W := (TTensor.FromSingleArray(W).reshape([AOut, AIn]) + AP.MergedDelta).ToSingleArray;
+  Result := QuantizeQ8_0(W);
 end;
 
 function WriteMerged(AGguf: TGgufFile; const ATargets: TMergeTargets; ASet: TLoraSet;
   const AOutPath: string): Integer;
+var
+  W: TGgufWriter;
+  Pairs: array of TLoraPair;
+  I: Integer;
+  Part: string;
+  B: TBytes;
+  Info: TGgufTensorInfo;
 begin
   Result := 0;
-  raise EGgufMerge.Create('WriteMerged: not implemented yet');
+  Pairs := nil;
+  SetLength(Pairs, AGguf.TensorCount);
+  if ASet <> nil then
+    for I := 0 to High(ATargets) do
+    begin
+      Pairs[ATargets[I].Tensor] := ASet.Find(ATargets[I].Name);
+      if Pairs[ATargets[I].Tensor] = nil then
+        raise EGgufMerge.CreateFmt('no adapter %s', [ATargets[I].Name]);
+    end;
+  Part := AOutPath + '.part';
+  W := TGgufWriter.Create(AGguf);
+  try
+    for I := 0 to High(Pairs) do
+      if Pairs[I] <> nil then
+        W.SetTensorType(AGguf.Tensor[I].Name, GgufTypeQ8_0);
+    W.BeginWrite(Part);
+    for I := 0 to AGguf.TensorCount - 1 do
+    begin
+      AGguf.ReadTensorBytes(I, B);
+      if Pairs[I] <> nil then
+      begin
+        Info := AGguf.Tensor[I];
+        B := MergeTensor(Info.TType, B, Info.Dims[0], Info.Dims[1], Pairs[I]);
+        Inc(Result);
+      end;
+      W.WriteTensor(B);
+    end;
+    W.Finish;
+  finally
+    W.Free;   { removes the part file when not finished }
+  end;
+  if not RenameFile(Part, AOutPath) then   { rename(2): replaces a file }
+  begin
+    DeleteFile(Part);
+    raise EGgufMerge.CreateFmt('cannot rename %s to %s', [Part, AOutPath]);
+  end;
 end;
 
 function RunMergeCLI(const AArgs: array of string; AOut, AErr: TStrings): Integer;

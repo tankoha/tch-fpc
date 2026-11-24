@@ -701,3 +701,17 @@ When a case is run again, do not edit its row; append a new row below (the last 
 | UT-TrainCli-210 | OK |  | 2026-11-24 | --batches-per-update 3, --keep 1, --max-updates |
 | UT-TrainCli-211 | OK |  | 2026-11-24 | run without --valid |
 | UT-TrainCli-212 | OK |  | 2026-11-24 | --split with no GPU / out of range |
+| UT-GgufMerge-001 | OK |  | 2026-11-25 | TinyPath, the 7 targets |
+| UT-GgufMerge-002 | OK |  | 2026-11-25 | NextNPath, one MTP block |
+| UT-GgufMerge-003 | OK |  | 2026-11-25 | patched copy: missing tensor, 1-dim tensor |
+| UT-GgufMerge-004 | OK |  | 2026-11-25 | Q8_0 merge of blk.0.attn_qkv |
+| UT-GgufMerge-005 | OK |  | 2026-11-25 | F16 merge of blk.0.attn_gate |
+| UT-GgufMerge-006 | OK |  | 2026-11-25 | all-delta B of zero: the bytes are unchanged / round trip |
+| UT-GgufMerge-007 | OK |  | 2026-11-25 | adapter dimensions of another tensor |
+| UT-GgufMerge-008 | OK |  | 2026-11-25 | load from the written checkpoint |
+| UT-GgufMerge-009 | OK |  | 2026-11-25 | lora.ot does not exist |
+| UT-GgufMerge-010 | OK |  | 2026-11-25 | ASet is nil: a byte-identical copy |
+| UT-GgufMerge-011 | OK |  | 2026-11-25 | all 7 targets are merged |
+| UT-GgufMerge-012 | OK |  | 2026-11-25 | a set that does not contain blk.0.attn_gate |
+| UT-GgufMerge-013 | OK |  | 2026-11-25 | fail before write; rename fails; overwrite on rename |
+| UT-GgufMerge-014 | OK |  | 2026-11-25 | effect and fidelity on the tiny model |

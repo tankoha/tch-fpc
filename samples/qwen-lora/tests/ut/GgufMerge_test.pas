@@ -15,6 +15,20 @@ uses
 type
   TGgufMergeTest = class(TTestCase)
   published
+    procedure TestUT_GgufMerge_001;
+    procedure TestUT_GgufMerge_002;
+    procedure TestUT_GgufMerge_003;
+    procedure TestUT_GgufMerge_004;
+    procedure TestUT_GgufMerge_005;
+    procedure TestUT_GgufMerge_006;
+    procedure TestUT_GgufMerge_007;
+    procedure TestUT_GgufMerge_008;
+    procedure TestUT_GgufMerge_009;
+    procedure TestUT_GgufMerge_010;
+    procedure TestUT_GgufMerge_011;
+    procedure TestUT_GgufMerge_012;
+    procedure TestUT_GgufMerge_013;
+    procedure TestUT_GgufMerge_014;
   end;
 
 { ---- helpers (harness owner's; nobody changes them) ---- }
@@ -223,6 +237,533 @@ begin
   finally
     O.Free;
     E.Free;
+  end;
+end;
+
+{ UT-GgufMerge-001 — TinyPath, the 7 targets. }
+procedure TGgufMergeTest.TestUT_GgufMerge_001;
+const
+  InD: array[0..6] of Int64 = (64, 64, 64, 64, 64, 64, 128);
+  OutD: array[0..6] of Int64 = (128, 64, 64, 256, 64, 64, 64);
+var
+  G: TGgufFile;
+  T: TMergeTargets;
+  I: Integer;
+begin
+  G := TGgufFile.Open(TinyPath);
+  try
+    T := MergeTargets(G);
+    AssertEquals(7, Length(T));
+    AssertEquals('blk.0.attn_qkv', T[0].Name);
+    AssertEquals('blk.0.attn_gate', T[1].Name);
+    AssertEquals('blk.0.ssm_out', T[2].Name);
+    AssertEquals('blk.1.attn_q', T[3].Name);
+    AssertEquals('blk.1.attn_k', T[4].Name);
+    AssertEquals('blk.1.attn_v', T[5].Name);
+    AssertEquals('blk.1.attn_output', T[6].Name);
+    for I := 0 to 6 do
+    begin
+      AssertEquals(G.FindTensor(T[I].Name + '.weight'), T[I].Tensor);
+      AssertEquals(InD[I], T[I].InDim);
+      AssertEquals(OutD[I], T[I].OutDim);
+    end;
+  finally
+    G.Free;
+  end;
+end;
+
+{ UT-GgufMerge-002 — NextNPath, one MTP block. }
+procedure TGgufMergeTest.TestUT_GgufMerge_002;
+var
+  G: TGgufFile;
+  T: TMergeTargets;
+begin
+  G := TGgufFile.Open(NextNPath);
+  try
+    T := MergeTargets(G);
+    AssertEquals(7, Length(T));
+    AssertEquals('blk.0.attn_qkv', T[0].Name);
+    AssertEquals('blk.1.attn_output', T[6].Name);
+  finally
+    G.Free;
+  end;
+end;
+
+{ UT-GgufMerge-003 — patched copy: missing tensor, 1-dim tensor. }
+procedure TGgufMergeTest.TestUT_GgufMerge_003;
+var
+  D: string;
+  G: TGgufFile;
+begin
+  D := NewDir;
+  PatchedCopy(TinyPath, D + 'pk.gguf',
+    ['blk.1.attn_k.weight'], ['blk.1.attn_X.weight']);
+  G := TGgufFile.Open(D + 'pk.gguf');
+  try
+    try
+      MergeTargets(G);
+      Fail('no EGgufMerge');
+    except
+      on E: EGgufMerge do
+        AssertEquals('no tensor blk.1.attn_k.weight', E.Message);
+    end;
+  finally
+    G.Free;
+  end;
+  PatchedCopy(TinyPath, D + 'p1d.gguf',
+    ['blk.0.attn_gate.weight', 'blk.0.attn_norm.weight'],
+    ['blk.0.attn_XXXX.weight', 'blk.0.attn_gate.weight']);
+  G := TGgufFile.Open(D + 'p1d.gguf');
+  try
+    try
+      MergeTargets(G);
+      Fail('no EGgufMerge');
+    except
+      on E: EGgufMerge do
+        AssertEquals('blk.0.attn_gate.weight has 1 dimensions, expected 2', E.Message);
+    end;
+  finally
+    G.Free;
+  end;
+end;
+
+{ UT-GgufMerge-004 — Q8_0 merge of blk.0.attn_qkv. }
+procedure TGgufMergeTest.TestUT_GgufMerge_004;
+var
+  G: TGgufFile;
+  T: TMergeTargets;
+  S: TLoraSet;
+  P: TLoraPair;
+  B, Q: TBytes;
+  R: TDoubleArray;
+begin
+  G := TGgufFile.Open(TinyPath);
+  try
+    T := MergeTargets(G);
+    S := NewSet(T, 6);
+    try
+      AssertEquals(8, G.Tensor[T[0].Tensor].TType);
+      P := S.Find('blk.0.attn_qkv');
+      AssertTrue(P <> nil);
+      B := TensorBytes(G, 'blk.0.attn_qkv.weight');
+      Q := MergeTensor(8, B, 64, 128, P);
+      AssertEquals(8704, Length(Q));
+      R := RefMerged(8, B, 64, 128, P);
+      AssertTrue(StepErr(Q, R) <= 0.6);
+      AssertFalse(SameBytes(Q, B));
+    finally
+      S.Free;
+    end;
+  finally
+    G.Free;
+  end;
+end;
+
+{ UT-GgufMerge-005 — F16 merge of blk.0.attn_gate. }
+procedure TGgufMergeTest.TestUT_GgufMerge_005;
+var
+  G: TGgufFile;
+  T: TMergeTargets;
+  S: TLoraSet;
+  P: TLoraPair;
+  B, Q: TBytes;
+  R: TDoubleArray;
+begin
+  G := TGgufFile.Open(TinyPath);
+  try
+    T := MergeTargets(G);
+    S := NewSet(T, 6);
+    try
+      AssertEquals(1, G.Tensor[T[1].Tensor].TType);
+      P := S.Find('blk.0.attn_gate');
+      AssertTrue(P <> nil);
+      B := TensorBytes(G, 'blk.0.attn_gate.weight');
+      Q := MergeTensor(1, B, 64, 64, P);
+      AssertEquals(4352, Length(Q));
+      R := RefMerged(1, B, 64, 64, P);
+      AssertTrue(StepErr(Q, R) <= 0.6);
+    finally
+      S.Free;
+    end;
+  finally
+    G.Free;
+  end;
+end;
+
+{ UT-GgufMerge-006 — all-delta B of zero: the bytes are unchanged / round trip. }
+procedure TGgufMergeTest.TestUT_GgufMerge_006;
+var
+  G: TGgufFile;
+  T: TMergeTargets;
+  S: TLoraSet;
+  P: TLoraPair;
+  BQ, QQ, BF, QF: TBytes;
+  QRef: TBytes;
+begin
+  G := TGgufFile.Open(TinyPath);
+  try
+    T := MergeTargets(G);
+    S := NewSet(T, -1);
+    try
+      P := S.Find('blk.0.attn_qkv');
+      AssertTrue(P <> nil);
+      BQ := TensorBytes(G, 'blk.0.attn_qkv.weight');
+      QQ := MergeTensor(8, BQ, 64, 128, P);
+      AssertTrue(SameBytes(QQ, BQ));
+      P := S.Find('blk.0.attn_gate');
+      AssertTrue(P <> nil);
+      BF := TensorBytes(G, 'blk.0.attn_gate.weight');
+      QF := MergeTensor(1, BF, 64, 64, P);
+      QRef := QuantizeQ8_0(DequantizeBytes(1, BF, 4096));
+      AssertTrue(SameBytes(QF, QRef));
+    finally
+      S.Free;
+    end;
+  finally
+    G.Free;
+  end;
+end;
+
+{ UT-GgufMerge-007 — adapter dimensions of another tensor. }
+procedure TGgufMergeTest.TestUT_GgufMerge_007;
+var
+  G: TGgufFile;
+  T: TMergeTargets;
+  S: TLoraSet;
+  P: TLoraPair;
+  B: TBytes;
+begin
+  G := TGgufFile.Open(TinyPath);
+  try
+    T := MergeTargets(G);
+    S := NewSet(T, 6);
+    try
+      P := S.Find('blk.0.attn_gate');
+      AssertTrue(P <> nil);
+      B := TensorBytes(G, 'blk.0.attn_qkv.weight');
+      try
+        MergeTensor(8, B, 64, 128, P);
+        Fail('no EGgufMerge');
+      except
+        on E: EGgufMerge do
+          AssertEquals('blk.0.attn_gate: adapter 64 -> 64, tensor 64 -> 128', E.Message);
+      end;
+    finally
+      S.Free;
+    end;
+  finally
+    G.Free;
+  end;
+end;
+
+{ UT-GgufMerge-008 — load from the written checkpoint. }
+procedure TGgufMergeTest.TestUT_GgufMerge_008;
+var
+  D: string;
+  G: TGgufFile;
+  T: TMergeTargets;
+  S, L: TLoraSet;
+  S0: TLoraSet;
+  St: TRunState;
+  I, IA: Integer;
+  AA, BB: TSingleArray;
+  M: Double;
+begin
+  D := NewDir;
+  G := TGgufFile.Open(TinyPath);
+  try
+    T := MergeTargets(G);
+    S := NewSet(T, 6);
+    try
+      SaveCkpt(D, S, '');
+      St := ReadRunState(D);
+      L := LoadAdapters(T, D, St);
+      try
+        AssertEquals(7, L.Count);
+        AssertEquals(4, L.Rank);
+        AssertEquals(2.0, L.Scale);
+        S0 := NewSet(T, 6);
+        try
+          for I := 0 to L.Count - 1 do
+          begin
+            AssertEquals(T[I].Name, L.Pair(I).Name);
+            AA := L.Pair(I).A.ToSingleArray;
+            BB := S0.Pair(I).A.ToSingleArray;
+            M := 0.0;
+            for IA := 0 to High(AA) do
+              M := Max(M, Abs(AA[IA] - BB[IA]));
+            AssertEquals(0.0, M);
+            AA := L.Pair(I).B.ToSingleArray;
+            BB := S0.Pair(I).B.ToSingleArray;
+            M := 0.0;
+            for IA := 0 to High(AA) do
+              M := Max(M, Abs(AA[IA] - BB[IA]));
+            AssertEquals(0.0, M);
+          end;
+        finally
+          S0.Free;
+        end;
+      finally
+        L.Free;
+      end;
+    finally
+      S.Free;
+    end;
+  finally
+    G.Free;
+  end;
+end;
+
+{ UT-GgufMerge-009 — lora.ot does not exist. }
+procedure TGgufMergeTest.TestUT_GgufMerge_009;
+var
+  D: string;
+  G: TGgufFile;
+  T: TMergeTargets;
+  S: TLoraSet;
+  St: TRunState;
+begin
+  D := NewDir;
+  G := TGgufFile.Open(TinyPath);
+  try
+    T := MergeTargets(G);
+    S := NewSet(T, 6);
+    try
+      SaveCkpt(D, S, '');
+      DeleteFile(D + 'lora.ot');
+      St := ReadRunState(D);
+      try
+        LoadAdapters(T, D, St);
+        Fail('no ETorchNativeError');
+      except
+        on E: ETorchNativeError do
+          AssertEquals('open file failed because of errno 2 on fopen: No such file or directory, file path: ' + D + 'lora.ot', E.Message);
+      end;
+    finally
+      S.Free;
+    end;
+  finally
+    G.Free;
+  end;
+end;
+
+{ UT-GgufMerge-010 — ASet is nil: a byte-identical copy. }
+procedure TGgufMergeTest.TestUT_GgufMerge_010;
+var
+  D: string;
+  G: TGgufFile;
+  T: TMergeTargets;
+  N: Integer;
+  A, B: TBytes;
+begin
+  D := NewDir;
+  G := TGgufFile.Open(TinyPath);
+  try
+    T := MergeTargets(G);
+    N := WriteMerged(G, T, nil, D + 'id.gguf');
+    AssertEquals(0, N);
+    AssertFalse(FileExists(D + 'id.gguf.part'));
+    A := FileBytes(D + 'id.gguf');
+    B := FileBytes(TinyPath);
+    AssertTrue(SameBytes(A, B));
+  finally
+    G.Free;
+  end;
+end;
+
+{ UT-GgufMerge-011 — all 7 targets are merged. }
+procedure TGgufMergeTest.TestUT_GgufMerge_011;
+var
+  D: string;
+  G, H: TGgufFile;
+  T: TMergeTargets;
+  S: TLoraSet;
+  N: Integer;
+  I, J: Integer;
+  Name: RawByteString;
+  IsTarget: Boolean;
+  B, E: TBytes;
+begin
+  D := NewDir;
+  G := TGgufFile.Open(TinyPath);
+  try
+    T := MergeTargets(G);
+    S := NewSet(T, 6);
+    try
+      N := WriteMerged(G, T, S, D + 'm.gguf');
+      AssertEquals(7, N);
+      AssertFalse(FileExists(D + 'm.gguf.part'));
+      H := TGgufFile.Open(D + 'm.gguf');
+      try
+        AssertEquals(G.TensorCount, H.TensorCount);
+        AssertEquals(G.KVCount, H.KVCount);
+        AssertEquals(G.KVStart, H.KVStart);
+        AssertEquals(G.KVEnd, H.KVEnd);
+        AssertTrue(CompareMem(@FileBytes(G.Path)[Cardinal(G.KVStart)],
+          @FileBytes(D + 'm.gguf')[Cardinal(H.KVStart)],
+          Cardinal(G.KVEnd - G.KVStart)));
+        for I := 0 to G.TensorCount - 1 do
+        begin
+          Name := G.Tensor[I].Name;
+          AssertEquals(Name, H.Tensor[I].Name);
+          IsTarget := False;
+          for J := 0 to High(T) do
+            if T[J].Tensor = I then
+              IsTarget := True;
+          if IsTarget then
+          begin
+            AssertEquals(8, H.Tensor[I].TType);
+            E := MergeTensor(G.Tensor[I].TType, TensorBytes(G, Name),
+              G.Tensor[I].Dims[0], G.Tensor[I].Dims[1],
+              S.Find(Copy(Name, 1, Length(Name) - 7)));
+            B := TensorBytes(H, Name);
+            AssertTrue(SameBytes(B, E));
+          end
+          else
+          begin
+            AssertEquals(G.Tensor[I].TType, H.Tensor[I].TType);
+            AssertTrue(SameBytes(TensorBytes(H, Name), TensorBytes(G, Name)));
+          end;
+        end;
+      finally
+        H.Free;
+      end;
+    finally
+      S.Free;
+    end;
+  finally
+    G.Free;
+  end;
+end;
+
+{ UT-GgufMerge-012 — a set that does not contain blk.0.attn_gate. }
+procedure TGgufMergeTest.TestUT_GgufMerge_012;
+var
+  D: string;
+  G: TGgufFile;
+  T: TMergeTargets;
+  P: TLoraSet;
+begin
+  D := NewDir;
+  G := TGgufFile.Open(TinyPath);
+  try
+    T := MergeTargets(G);
+    P := TLoraSet.Create(4, 2.0);
+    try
+      P.Add('blk.0.attn_qkv', 64, 128, TDevice.Cpu);
+      try
+        WriteMerged(G, T, P, D + 'm.gguf');
+        Fail('no EGgufMerge');
+      except
+        on E: EGgufMerge do
+          AssertEquals('no adapter blk.0.attn_gate', E.Message);
+      end;
+      AssertFalse(FileExists(D + 'm.gguf'));
+      AssertFalse(FileExists(D + 'm.gguf.part'));
+    finally
+      P.Free;
+    end;
+  finally
+    G.Free;
+  end;
+end;
+
+{ UT-GgufMerge-013 — fail before write; rename fails; overwrite on rename. }
+procedure TGgufMergeTest.TestUT_GgufMerge_013;
+const
+  MB: array[0..2] of Byte = (1, 2, 3);
+  NB: array[0..2] of Byte = (4, 5, 6);
+var
+  D: string;
+  G: TGgufFile;
+  T: TMergeTargets;
+  S: TLoraSet;
+  N: Integer;
+  A, B: TBytes;
+begin
+  D := NewDir;
+  G := TGgufFile.Open(TinyPath);
+  try
+    T := MergeTargets(G);
+    S := NewSet(T, 6);
+    try
+      try
+        WriteMerged(G, T, S, D + 'none/m.gguf');
+        Fail('no EGgufError');
+      except
+        on E: EGgufError do
+          AssertEquals('TGgufWriter.BeginWrite: cannot create file ' + D + 'none/m.gguf.part', E.Message);
+      end;
+      ForceDirectories(D + 'dir');
+      try
+        WriteMerged(G, T, S, D + 'dir');
+        Fail('no EGgufMerge');
+      except
+        on E: EGgufMerge do
+        begin
+          AssertEquals('cannot rename ' + D + 'dir.part to ' + D + 'dir', E.Message);
+          AssertFalse(FileExists(D + 'dir.part'));
+        end;
+      end;
+      SaveBytes(D + 'm.gguf', MB);
+      N := WriteMerged(G, T, S, D + 'm.gguf');
+      AssertEquals(7, N);
+      SaveBytes(D + 'n.gguf', NB);
+      N := WriteMerged(G, T, S, D + 'n.gguf');
+      AssertEquals(7, N);
+      A := FileBytes(D + 'm.gguf');
+      B := FileBytes(D + 'n.gguf');
+      AssertTrue(SameBytes(A, B));
+    finally
+      S.Free;
+    end;
+  finally
+    G.Free;
+  end;
+end;
+
+{ UT-GgufMerge-014 — effect and fidelity on the tiny model. }
+procedure TGgufMergeTest.TestUT_GgufMerge_014;
+var
+  D: string;
+  G, G0, GMA, GMM: TGgufFile;
+  T: TMergeTargets;
+  S, SA: TLoraSet;
+  St: TRunState;
+  M0, MA, MM: TQwenModel;
+  Effect, Fid: Double;
+begin
+  D := NewDir;
+  G0 := TGgufFile.Open(TinyPath);
+  M0 := TQwenModel.Load(G0, TDevice.Cpu, TDevice.Cpu, 0);
+  G0.Free;
+  G := TGgufFile.Open(TinyPath);
+  T := MergeTargets(G);
+  S := NewSet(T, 6);
+  try
+    SaveCkpt(D, S, '');
+    WriteMerged(G, T, S, D + 'mm.gguf');
+    GMM := TGgufFile.Open(D + 'mm.gguf');
+    MM := TQwenModel.Load(GMM, TDevice.Cpu, TDevice.Cpu, 0);
+    GMM.Free;
+    GMA := TGgufFile.Open(TinyPath);
+    MA := TQwenModel.Load(GMA, TDevice.Cpu, TDevice.Cpu, 0);
+    GMA.Free;
+    St := ReadRunState(D);
+    SA := TLoraSet.Create(St.Rank, St.Scale);
+    MA.AttachLora(SA);
+    SA.Load(IncludeTrailingPathDelimiter(D) + 'lora.ot');
+    Effect := TopDiff(M0, MA);
+    AssertTrue(Effect > 0.5);
+    Fid := TopDiff(MA, MM);
+    AssertTrue(Fid <= 0.1 * Effect);
+    MA.Free;
+    SA.Free;
+  finally
+    S.Free;
+    G.Free;
+    MM.Free;
+    M0.Free;
   end;
 end;
 

@@ -67,7 +67,7 @@ Last updated: 2026-11-24, local session 14 continued (T17 `qlora_train` prepared
 - Split 36/28 (the 9070 holds the head): peak 14.7 of 15.9 GiB at
   T = 2048 with saved inputs in host memory.
 - Design numbers (DESIGN 8.13–8.15): LoRA rank 16 on 208 tensors, 39.58 M
-  parameters; merged file 20.08 GB (about 24.3 GB in Ollama); about 6 h per
-  epoch of 3.4 M positions.
+  parameters; merged file 20.08 GB (about 24.3 GB in Ollama); about 7 h per
+  epoch of 4.25 M positions (five dialects, Oxygene included).
 - Never train on a card that drives the display: it hung the gfx ring and
   restarted the desktop session. The display is on the iGPU now.

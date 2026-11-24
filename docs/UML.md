@@ -811,11 +811,10 @@ From data specification to the deployed model (DESIGN 8.15–8.17).
 flowchart TD
   SPEC["data-spec/<br/>(Opus/Sonnet)"] --> GEN["Mistral Large 3<br/>generate, compile, repair"]
   GEN --> RAW["raw JSONL (outside the repo)"]
-  RAW --> VER["qlora_verify<br/>compiled-run / fpc-approx / static-only"]
+  RAW --> VER["qlora_verify<br/>compiled-run / fpc-approx"]
   VER --> DS["qlora_dataset<br/>dedup, leak check, split, card"]
   TASKS["eval/tasks/ (held out)"] -. "leak check" .-> DS
   DS --> TRAINSET["work/dataset-v1<br/>train / valid"]
-  DS --> HOLD["Oxygene, static-only:<br/>stored, held back"]
   TRAINSET --> TRAIN["qlora_train<br/>base GGUF Q4_K_M + LoRA"]
   TRAIN --> CKPT["checkpoints"]
   CKPT --> MERGE["qlora_merge<br/>adapted tensors as Q8_0"]
@@ -825,9 +824,9 @@ flowchart TD
   TASKS --> EVAL["qlora_eval<br/>before / after, thinking on / off"]
   OLL --> EVAL
   BASE["original model in Ollama"] --> EVAL
-  EVAL --> REP["report: verified aggregate,<br/>Delphi (FPC approx.), Oxygene (unverified),<br/>regression, MTP speed (H49)"]
+  EVAL --> REP["report: verified aggregate,<br/>Delphi (FPC approx.),<br/>regression, MTP speed (H49)"]
   classDef planned stroke-dasharray: 5 5
-  class SPEC,GEN,RAW,VER,DS,TASKS,TRAINSET,HOLD,TRAIN,CKPT,MERGE,GGUF,H47,OLL,EVAL,REP planned
+  class SPEC,GEN,RAW,VER,DS,TASKS,TRAINSET,TRAIN,CKPT,MERGE,GGUF,H47,OLL,EVAL,REP planned
 ```
 ## 11. Status
 

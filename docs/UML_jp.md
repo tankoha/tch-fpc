@@ -803,11 +803,10 @@ sequenceDiagram
 flowchart TD
   SPEC["data-spec/<br/>(Opus/Sonnet)"] --> GEN["Mistral Large 3<br/>生成、コンパイル、修復"]
   GEN --> RAW["生の JSONL（リポジトリの外）"]
-  RAW --> VER["qlora_verify<br/>compiled-run / fpc-approx / static-only"]
+  RAW --> VER["qlora_verify<br/>compiled-run / fpc-approx"]
   VER --> DS["qlora_dataset<br/>重複の除去、漏れの検査、分割、カード"]
   TASKS["eval/tasks/（取り分け）"] -. "漏れの検査" .-> DS
   DS --> TRAINSET["work/dataset-v1<br/>train / valid"]
-  DS --> HOLD["Oxygene（static-only）：<br/>保管し、学習から外す"]
   TRAINSET --> TRAIN["qlora_train<br/>土台の GGUF Q4_K_M + LoRA"]
   TRAIN --> CKPT["チェックポイント"]
   CKPT --> MERGE["qlora_merge<br/>アダプタを足したテンソルは Q8_0"]
@@ -817,9 +816,9 @@ flowchart TD
   TASKS --> EVAL["qlora_eval<br/>前 / 後、思考あり / なし"]
   OLL --> EVAL
   BASE["Ollama にある元のモデル"] --> EVAL
-  EVAL --> REP["報告：検証済みの合計、<br/>Delphi（FPC 近似）、Oxygene（未検証）、<br/>退行、MTP の速さ（H49）"]
+  EVAL --> REP["報告：検証済みの合計、<br/>Delphi（FPC 近似）、<br/>退行、MTP の速さ（H49）"]
   classDef planned stroke-dasharray: 5 5
-  class SPEC,GEN,RAW,VER,DS,TASKS,TRAINSET,HOLD,TRAIN,CKPT,MERGE,GGUF,H47,OLL,EVAL,REP planned
+  class SPEC,GEN,RAW,VER,DS,TASKS,TRAINSET,TRAIN,CKPT,MERGE,GGUF,H47,OLL,EVAL,REP planned
 ```
 ## 11. 状況
 

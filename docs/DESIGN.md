@@ -4048,7 +4048,9 @@ of the gate are met; the remaining Theme B conditions are C1, C3 and C4.
   "compiles and runs" rule, so the next design session must say how
   Oxygene samples are gated and reported meanwhile (held back, or a
   separate unverified class). Delphi via FPC stays a separately reported
-  class.
+  class. *(2026-11-22: the compiler arrived before the data set was
+  frozen; Oxygene is compiled and run like the other dialects and is in
+  the first run — 8.16, 8.17.)*
 - **C3, blob read access: done** (the user set read-only ACLs: traverse
   on the Ollama directories, list on `blobs/`, read on the two blobs of
   `qwen3.8:27b`). Both start with `GGUF`: the text model (16,810,714,464
@@ -4335,7 +4337,7 @@ git-ignored `build/models/`. *Measured* from the file: GGUF v3, 46 keys,
 | M3 | Data: specification, generation, filter, frozen data set v1; evaluation tasks; **baseline evaluation** of the unmodified 27B; one captured Ollama-rendered prompt | external + Ollama | data set card written; "before" numbers recorded |
 | M4 | 27B: reference log-probabilities, **H43** on the GPUs, 20-step smoke, the full run | GPUs, by the user, 1–2 days; Qwen down | run finished, best checkpoint chosen on validation loss |
 | M5 | Deploy and evaluate: merge, `ollama create` under a new name, **H45**, "after" evaluation, **H49** | CPU merge, then Ollama | the adoption rule of 8.17 is evaluated |
-| M6 | Afterwards: Oxygene verification when a compiler arrives; a second run (the bf16 original, FFN targets, reasoning text, tool-call format) | — | separate decisions |
+| M6 | Afterwards: a second run (the bf16 original, FFN targets, reasoning text, tool-call format) | — | separate decisions |
 
 M3 runs in parallel with M1 and M2 (different actors); it needs task T06
 (the verifier) early. M2g is the only GPU use before M4 and exists because
@@ -4652,9 +4654,11 @@ process + 5 give bit-identical adapters, moments and losses.
    stop on a non-finite loss.
 
 Planning numbers (*computed* from the gate's 167–172 tokens/s; real data,
-RoPE and the update will cost some of it): four dialects × 1000 samples ×
-about 850 positions = 3.4 M positions per epoch, about 6 h; three epochs
-17–20 h.
+RoPE and the update will cost some of it): five dialects × 1000 samples ×
+about 850 positions = 4.25 M positions per epoch, about 7 h; three epochs
+21–25 h. (Four dialects, 3.4 M positions and 17–20 h while Oxygene was to
+be held back; it is in since 2026-11-22, 8.16. T17's one sample per
+forward adds the 27B's dequantisation per sample, not yet measured.)
 
 **As written for T17 (local session 14, 2026-11-24;
 `samples/qwen-lora/tasks/T17-facts.md`).** Units `TrainStep`
@@ -4799,7 +4803,7 @@ each dialect × task-type cell goes to `valid` (loss curve only).
 | FPC `{$mode delphi}` | stock FPC 3.2.2 | `compiled-run` |
 | Unleashed Pascal | the Unleashed `fpc` | `compiled-run` |
 | Delphi | the Unleashed `fpc` with `-Mdelphiunicode` plus the anonymous-function, function-reference and inline-variable mode switches, on a copy whose dotted unit names are mapped to FPC's (the method of the `pascal-dialects` skills) | `fpc-approx` |
-| Oxygene | none yet: static checks only (a `namespace` header, one extractable source, no construct from a short list of things that are not Oxygene) | `static-only` |
+| Oxygene | RemObjects Elements 14.0.0.3157, EBuild in the Earth flatpak, a .NET Core (Echoes) `.elements` project without an `Echoes` reference; build, then run `dotnet Bin/X.dll` (verified 2026-11-22 on the `pascal-oxygene` skill's examples; the filter row is written at M3) | `compiled-run` |
 
 A record is accepted when the source compiles without error, runs within
 the limit with exit code 0, and prints `expected_stdout` exactly. The
@@ -4823,20 +4827,19 @@ type × class, the reject reasons with counts, the yield **(H48)**, the
 generator's licence as stated by the user (Mistral Large 3, Apache-2.0)
 and that no record was written by Claude.
 
-**Oxygene until a compiler is here (decision).** Oxygene records are
-generated, statically checked, stored with class `static-only`, and
-**held back from training**: the first run trains on four dialects unless
-a compiler arrives before the data set is frozen. Reason: an Oxygene
-sample that is wrong cannot be detected, a model trained on it copies the
-generator's errors, and the evaluation could not show the damage; waiting
-costs one further run of under a day, which is planned anyway. The
-training configuration has an explicit list of admitted classes
-(default `compiled-run`, `fpc-approx`), so the user can admit
-`static-only` knowingly. **Once a compiler is available:** add its row to
-the table (compile, and run on one target chosen then), re-verify the
-stored records, move the passing ones to `compiled-run`, generate to fill
-the quota, verify the Oxygene evaluation tasks' reference solutions, and
-measure the unmodified model on them before the next run.
+**Oxygene: compiled and run, in the first run (decision, 2026-11-22).**
+The compiler arrived before the data set was frozen (M3 not started), so
+by the rule decided on 2026-11-17 Oxygene is verified like the other
+dialects (the table above: build with EBuild, run on .NET Core) and its
+records are `compiled-run`; the first run trains on five dialects. No
+`static-only` records are needed. At M3: write the Oxygene filter row,
+verify the Oxygene evaluation tasks' reference solutions with it, and
+include Oxygene in the baseline evaluation. *(Superseded rule, kept for
+the reason: Oxygene records were to be checked statically only, stored
+as `static-only` and held back from training until a compiler arrived,
+because a wrong sample cannot be detected without one and a model
+trained on it copies the generator's errors. The class list of the
+training configuration, default `compiled-run`, `fpc-approx`, stays.)*
 
 ### 8.17 Evaluation
 
@@ -4845,8 +4848,8 @@ description, 5 fix a compile error, 5 convert), each a prompt, the
 expected standard output and a reference solution that the dialect's
 verifier accepts. They are written by Opus/Sonnet, are not training data,
 are never shown to the generator, and are protected by the leak check of
-8.16. Oxygene's reference solutions stay unverified until a compiler is
-here.
+8.16. Oxygene's reference solutions are verified with its compiler
+(8.16) like the others.
 
 **Runs.** Through Ollama's chat endpoint, that is through the renderer and
 parser the deployed model really uses; the deployed sampling parameters;
@@ -4860,16 +4863,15 @@ fenced block of the answer is the source; `DialectVerify` judges it.
 
 | Column | Content |
 |---|---|
-| `objfpc`, FPC `delphi`, Unleashed | compile rate and run-pass rate (compiles, runs, exact output), each of 80 |
-| **verified aggregate** | the three above together, of 240; the headline number |
+| `objfpc`, FPC `delphi`, Unleashed, Oxygene | compile rate and run-pass rate (compiles, runs, exact output), each of 80 |
+| **verified aggregate** | the four above together, of 320; the headline number |
 | Delphi (FPC approximation) | the same two rates, reported separately and marked as an approximation; not in the aggregate |
-| Oxygene (unverified) | static-check pass rate only, marked "not a correctness measure"; not in the aggregate |
 | paired flips | per column, tasks that went fail → pass and pass → fail |
 | regression | 20 non-Pascal tasks (shell, another language, plain questions) and 10 tool-call prompts (the reply must parse as a tool call) |
 | speed | tokens/s and the MTP draft acceptance from the server's log, same prompts **(H49)** |
 
 With 80 generations a single dialect's rate has a 95 % interval of about
-±11 points, the aggregate of 240 about ±6 (*computed*); per-dialect
+±11 points, the aggregate of 320 about ±5.5 (*computed*); per-dialect
 numbers are descriptive, decisions use the aggregate and the flips.
 
 **Adoption rule.** The merged model replaces the original for Pascal work
@@ -4878,8 +4880,8 @@ significant in an exact sign test at 5 %, no verified dialect falls by more
 than 5 points, the tool-call check loses nothing, and H49 holds. If only
 the thinking-off series improves, the result is reported and the choice
 (use it with thinking off for Pascal tasks, or a second run with reasoning
-text) is the user's. When the Oxygene compiler arrives its column becomes
-a measured one and joins the aggregate, with a new "before".
+text) is the user's. (Oxygene is in the aggregate since its compiler
+arrived, 2026-11-22, before any "before" was measured.)
 
 ### 8.18 Hand-off to the Hermes process
 
@@ -4947,7 +4949,7 @@ reloaded.
 | R12 | training without reasoning text does not help with thinking on | the two evaluation series | report; second run with reasoning text, or thinking off for Pascal tasks |
 | R13 | low yield or low diversity from the generator (H48 fails) | data set card | revise the specification before generating more; never relax the filter |
 | R14 | the generator reproduces existing code | cannot be fully detected | the prohibition in the specification and the near-duplicate check against the known skill examples; recorded as a limit on the card |
-| R15 | unverified Oxygene | — | held back (8.16); the user may admit the class knowingly |
+| R15 | ~~unverified Oxygene~~ closed 2026-11-22: the compiler is here, Oxygene is compiled and run (8.16) | — | — |
 | R16 | no coverage tool for FPC (H50 fails; the chosen tool is kcov, lines only, `:coverage-kind :c0`) | M0 | the user changes the gate's criterion for this project before T01 |
 | R17 | an Ollama update changes the bundled `llama-server` or the import | version check at M0 and M5 | pin Ollama 0.40.13 for the duration |
 | R18 | a long run is interrupted | — | checkpoints every 50 updates, exact resume (T16) |

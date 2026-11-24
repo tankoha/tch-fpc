@@ -128,3 +128,9 @@ When a case is run again, do not edit its row; append a new row below (the last 
 | ITa-T15-003 | OK | - | 2026-11-24 | epochs 0-2, pool 64, budget 2048: 33 batches, 3.4 samples per batch, 96 % of the padded positions are tokens (count of batches over the budget or empty, and of samples not seen exactly once): value 0.0E+000, limit 0.0E+000 |
 | ITa-T15-004 | OK | - | 2026-11-24 | the batches of epochs 0-2 (33 lines), two processes: 0 when equal: value 0, limit 0 |
 | ITa-T15-005 | OK | - | 2026-11-24 | epoch 0: in every row of every batch, the targets under the mask decode to the trimmed answer + im_end (count of rows that differ): value 0.0E+000, limit 0.0E+000 |
+| ITa-T17-001 | OK | - | 2026-11-24 | 8 samples: loss 3.3965 at update 1, 0.3044 at update 8 (last / first): value 8.96E-002, limit 1.00E-001 |
+| ITa-T17-002 | OK | - | 2026-11-24 | update 1: logged 3.396511, whole graph without adapters 3.396511 (relative difference): value 3.21E-009, limit 1.00E-004 |
+| ITa-T17-003 | OK | - | 2026-11-24 | validation loss 1.8365 at ckpt-00000002 (update 2), 2.4660 without adapters (best / base): value 7.45E-001, limit 9.90E-001 |
+| ITa-T17-004 | OK | - | 2026-11-24 | recorded 1.836529, whole graph 1.836529 (relative difference): value 4.67E-009, limit 1.00E-004 |
+| ITa-T17-005 | OK | - | 2026-11-24 | ckpt-00000010: one process vs 3 updates + --resume in a new process (inside epoch 0) + the rest: max |difference| over 14745600 adapter and moment values; logs equal: value 0.00E+000, limit 0.00E+000 |
+| ITa-T17-006 | OK | - | 2026-11-24 | lr 1e30: exit code 3, two log lines (the second nan), no checkpoint (count of mismatches): value 0.00E+000, limit 0.00E+000 |

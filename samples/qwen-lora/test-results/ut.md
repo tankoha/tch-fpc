@@ -689,3 +689,15 @@ When a case is run again, do not edit its row; append a new row below (the last 
 | UT-TrainCli-106 | OK |  | 2026-11-24 | BaseSha256 from the model name or --base-sha256 |
 | UT-TrainCli-107 | OK |  | 2026-11-24 | ConfigHash: stable and sensitive fields |
 | UT-TrainCli-108 | OK |  | 2026-11-24 | TotalUpdates per epoch |
+| UT-TrainCli-201 | OK |  | 2026-11-24 | full run: exit code, log, keep policy |
+| UT-TrainCli-202 | OK |  | 2026-11-24 | checkpoint state: epoch end, ValLoss |
+| UT-TrainCli-203 | OK |  | 2026-11-24 | logged loss and lr against the oracle |
+| UT-TrainCli-204 | OK |  | 2026-11-24 | resume after --max-updates inside an epoch |
+| UT-TrainCli-205 | OK |  | 2026-11-24 | resume at an epoch's end |
+| UT-TrainCli-206 | OK |  | 2026-11-24 | resume: config, base and empty-directory refusals |
+| UT-TrainCli-207 | OK |  | 2026-11-24 | non-finite loss stops the run |
+| UT-TrainCli-208 | OK |  | 2026-11-24 | missing model, missing or empty data, warm-up too large |
+| UT-TrainCli-209 | OK |  | 2026-11-24 | usage error: message plus usage line |
+| UT-TrainCli-210 | OK |  | 2026-11-24 | --batches-per-update 3, --keep 1, --max-updates |
+| UT-TrainCli-211 | OK |  | 2026-11-24 | run without --valid |
+| UT-TrainCli-212 | OK |  | 2026-11-24 | --split with no GPU / out of range |

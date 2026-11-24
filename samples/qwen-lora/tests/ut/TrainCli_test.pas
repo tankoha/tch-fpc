@@ -47,6 +47,18 @@ type
     procedure TestUT_TrainCli_106;
     procedure TestUT_TrainCli_107;
     procedure TestUT_TrainCli_108;
+    procedure TestUT_TrainCli_201;
+    procedure TestUT_TrainCli_202;
+    procedure TestUT_TrainCli_203;
+    procedure TestUT_TrainCli_204;
+    procedure TestUT_TrainCli_205;
+    procedure TestUT_TrainCli_206;
+    procedure TestUT_TrainCli_207;
+    procedure TestUT_TrainCli_208;
+    procedure TestUT_TrainCli_209;
+    procedure TestUT_TrainCli_210;
+    procedure TestUT_TrainCli_211;
+    procedure TestUT_TrainCli_212;
   end;
 
 var
@@ -473,6 +485,320 @@ begin
     Tok.Free;
     G.Free;
   end;
+end;
+
+procedure TTrainCliTest.TestUT_TrainCli_201;
+var
+  O, Out, Err: string;
+begin
+  O := NewOut;
+  AssertEquals('exit code', 0, Run(RunArgs(O, []), Out, Err));
+  AssertEquals('out', 'done: 8 updates, best ' + O + 'ckpt' + PathDelim + 'ckpt-00000008', Out);
+  AssertEquals('err', '', Err);
+  AssertEquals('Steps', '1 0 2|2 0 4|3 0 6|4 0 8|5 1 2|6 1 4|7 1 6|8 1 8', Steps(O));
+  AssertEquals('CkptUpdates', '3 4 6 8', CkptUpdates(O));
+  AssertTrue('ckpt-00000004 kept', DirectoryExists(O + 'ckpt' + PathDelim + 'ckpt-00000004'));
+  AssertTrue('ckpt-00000006 kept', DirectoryExists(O + 'ckpt' + PathDelim + 'ckpt-00000006'));
+  AssertTrue('ckpt-00000008 kept', DirectoryExists(O + 'ckpt' + PathDelim + 'ckpt-00000008'));
+  AssertTrue('ckpt-00000003 gone', not DirectoryExists(O + 'ckpt' + PathDelim + 'ckpt-00000003'));
+end;
+
+procedure TTrainCliTest.TestUT_TrainCli_202;
+var
+  O, Dir: string;
+  Out, Err: string;
+  C: TTrainConfig;
+  St8, St4: TRunState;
+  G: TGgufFile;
+  Tok: TQwenTokenizer;
+  M: TQwenModel;
+  S: TLoraSet;
+  Opt: TLoraAdamW;
+  Ck: TCheckpoints;
+  V: TTrainSet;
+  Computed, Rel: Double;
+begin
+  O := NewOut;
+  AssertEquals('exit code', 0, Run(RunArgs(O, []), Out, Err));
+  AssertEquals('no error', '', ParseTrainArgs(RunArgs(O, []), C));
+  Dir := O + 'ckpt' + PathDelim;
+  St8 := ReadRunState(Dir + 'ckpt-00000008');
+  AssertTrue('update 8', St8.Update = 8);
+  AssertTrue('epoch 2', St8.Epoch = 2);
+  AssertTrue('position 0', St8.Position = 0);
+  AssertTrue('seed 1', St8.Seed = 1);
+  AssertTrue('rank 4', St8.Rank = 4);
+  AssertTrue('scale 2', St8.Scale = 2.0);
+  AssertEquals('ConfigHash', ConfigHash(C), St8.ConfigHash);
+  AssertEquals('base', '', St8.BaseSha256);
+  St4 := ReadRunState(Dir + 'ckpt-00000004');
+  AssertTrue('update 4', St4.Update = 4);
+  AssertTrue('epoch 1', St4.Epoch = 1);
+  AssertTrue('position 0', St4.Position = 0);
+  G := TGgufFile.Open(TinyPath);
+  M := TQwenModel.Load(G, TDevice.Cpu, TDevice.Cpu, 0);
+  S := TLoraSet.Create(4, 2.0);
+  Opt := nil;
+  Ck := nil;
+  V := nil;
+  Tok := nil;
+  try
+    Tok := TQwenTokenizer.Create(G);
+    V := TTrainSet.Create(Tok, C.Valid, C.Classes, C.Budget);
+    M.AttachLora(S);
+    Opt := TLoraAdamW.Create(S.Stores, DefaultAdamWConfig);
+    Ck := TCheckpoints.Create(Dir, 1000);
+    Ck.Load(Dir + 'ckpt-00000008', S, Opt);
+    Computed := ValidationLoss(M, V, 256);
+    Rel := Abs(St8.ValLoss - Computed) / Max(Abs(Computed), 1e-30);
+    AssertTrue('ValLoss relative 1e-9 of the computed one', Rel <= 1e-9);
+  finally
+    Ck.Free;
+    Opt.Free;
+    V.Free;
+    M.Free;
+    S.Free;
+    Tok.Free;
+    G.Free;
+  end;
+end;
+
+procedure TTrainCliTest.TestUT_TrainCli_203;
+var
+  O, Out, Err: string;
+  L, U: TStringList;
+  FS: TFormatSettings;
+  F, F8: TStringArray;
+  G: TGgufFile;
+  Tok: TQwenTokenizer;
+  M: TQwenModel;
+  S: TTrainSet;
+  B: TBatches;
+  I: Integer;
+  R: TSampleLoss;
+  Loss1, Lr1, Lr8, Mean, Sum, Count, Rel: Double;
+begin
+  O := NewOut;
+  AssertEquals('exit code', 0, Run(RunArgs(O, []), Out, Err));
+  L := LogLines(O);
+  U := TStringList.Create;
+  try
+    for I := 0 to L.Count - 1 do
+      if Copy(L[I], 1, 4) <> 'ckpt' then
+        U.Add(L[I]);
+    AssertEquals('8 update lines', 8, U.Count);
+    F := U[0].Split([#9]);
+    F8 := U[7].Split([#9]);
+    AssertEquals('the first update line has 8 fields', 8, Length(F));
+    AssertEquals('the eighth update line has 8 fields', 8, Length(F8));
+    FS := DefaultFormatSettings;
+    FS.DecimalSeparator := '.';
+    AssertTrue('the first loss parses', TryStrToFloat(F[3], Loss1, FS));
+    AssertTrue('the lr of update 1 parses', TryStrToFloat(F[4], Lr1, FS));
+    AssertTrue('the lr of update 8 parses', TryStrToFloat(F8[4], Lr8, FS));
+    G := TGgufFile.Open(TinyPath);
+    M := TQwenModel.Load(G, TDevice.Cpu, TDevice.Cpu, 0);
+    S := nil;
+    Tok := nil;
+    try
+      Tok := TQwenTokenizer.Create(G);
+      S := TTrainSet.Create(Tok, TrainFile, DefaultTrainConfig.Classes, 120);
+      B := EpochBatches(S, 1, 0, 4, 120);
+      Sum := 0;
+      Count := 0;
+      for I := 0 to High(B[0]) do
+      begin
+        R := SampleLoss(M, S[B[0][I]], 256);
+        Sum := Sum + R.Sum;
+        Count := Count + R.Count;
+      end;
+      Mean := Sum / Count;
+      Rel := Abs(Loss1 - Mean) / Max(Abs(Mean), 1e-30);
+      AssertTrue('logged loss relative 1e-6 of the batch mean', Rel <= 1e-6);
+      AssertTrue('lr of update 1 within 1e-15',
+        Abs(Lr1 - ScheduleLR(1e-2, 1, 1, 8, 0.1)) <= 1e-15);
+      AssertTrue('lr of update 8 within 1e-15',
+        Abs(Lr8 - ScheduleLR(1e-2, 8, 1, 8, 0.1)) <= 1e-15);
+    finally
+      S.Free;
+      M.Free;
+      Tok.Free;
+      G.Free;
+    end;
+  finally
+    U.Free;
+    L.Free;
+  end;
+end;
+
+procedure TTrainCliTest.TestUT_TrainCli_204;
+var
+  A, B, Out, Err: string;
+  StA, StB: TRunState;
+  RA, RB: TDoubleArray;
+begin
+  A := NewOut;
+  B := NewOut;
+  AssertEquals('A exit code', 0, Run(RunArgs(A, []), Out, Err));
+  AssertEquals('B first exit code', 0, Run(RunArgs(B, ['--max-updates', '3']), Out, Err));
+  AssertEquals('B first out', 'stopped after update 3 of 8', Out);
+  AssertEquals('B second exit code', 0, Run(RunArgs(B, ['--resume']), Out, Err));
+  AssertEquals('B second out',
+    'resumed from ' + B + 'ckpt' + PathDelim + 'ckpt-00000003 at update 3' + #10 +
+    'done: 8 updates, best ' + B + 'ckpt' + PathDelim + 'ckpt-00000008', Out);
+  AssertEquals('UpdateLines', UpdateLines(A), UpdateLines(B));
+  RA := ReadBack(A + 'ckpt' + PathDelim + 'ckpt-00000008', StA);
+  RB := ReadBack(B + 'ckpt' + PathDelim + 'ckpt-00000008', StB);
+  AssertEquals('DiffArr', 0, DiffArr(RA, RB));
+  AssertTrue('the same ValLoss', StA.ValLoss = StB.ValLoss);
+end;
+
+procedure TTrainCliTest.TestUT_TrainCli_205;
+var
+  A, B, Out, Err: string;
+  StA, StB: TRunState;
+  RA, RB: TDoubleArray;
+begin
+  A := NewOut;
+  B := NewOut;
+  AssertEquals('A exit code', 0, Run(RunArgs(A, []), Out, Err));
+  AssertEquals('B first exit code', 0, Run(RunArgs(B, ['--max-updates', '4']), Out, Err));
+  AssertEquals('B second exit code', 0, Run(RunArgs(B, ['--resume']), Out, Err));
+  AssertEquals('UpdateLines', UpdateLines(A), UpdateLines(B));
+  RA := ReadBack(A + 'ckpt' + PathDelim + 'ckpt-00000008', StA);
+  RB := ReadBack(B + 'ckpt' + PathDelim + 'ckpt-00000008', StB);
+  AssertEquals('DiffArr', 0, DiffArr(RA, RB));
+end;
+
+procedure TTrainCliTest.TestUT_TrainCli_206;
+var
+  A, F, Out, Err: string;
+begin
+  A := NewOut;
+  F := NewOut;
+  AssertEquals('first exit code', 0, Run(RunArgs(A, ['--max-updates', '3']), Out, Err));
+  AssertEquals('config exit code', 1, Run(RunArgs(A, ['--resume', '--lr', '2e-2']), Out, Err));
+  AssertEquals('config err',
+    'the configuration differs from the checkpoint''s: ' + A + 'ckpt' + PathDelim + 'ckpt-00000003', Err);
+  AssertEquals('base exit code', 1, Run(RunArgs(A, ['--resume', '--base-sha256', 'abc']), Out, Err));
+  AssertEquals('base err',
+    'the base model differs from the checkpoint''s: ' + A + 'ckpt' + PathDelim + 'ckpt-00000003', Err);
+  AssertEquals('fresh exit code', 1, Run(RunArgs(F, ['--resume']), Out, Err));
+  AssertEquals('fresh err', 'nothing to resume in ' + F + 'ckpt' + PathDelim, Err);
+end;
+
+procedure TTrainCliTest.TestUT_TrainCli_207;
+var
+  O, Out, Err: string;
+  L: TStringList;
+  I, N: Integer;
+begin
+  O := NewOut;
+  AssertEquals('exit code', 3, Run(RunArgs(O, ['--lr', '1e30']), Out, Err));
+  AssertEquals('err', 'non-finite loss at update 2; stopped without updating', Err);
+  AssertEquals('Steps', '1 0 2|2 0 4', Steps(O));
+  L := LogLines(O);
+  try
+    N := 0;
+    for I := 0 to L.Count - 1 do
+      if Copy(L[I], 1, 4) = 'ckpt' then
+        Inc(N);
+    AssertEquals('no ckpt line', 0, N);
+  finally
+    L.Free;
+  end;
+end;
+
+procedure TTrainCliTest.TestUT_TrainCli_208;
+var
+  O, Out, Err: string;
+  A: TStringArray;
+begin
+  O := NewOut;
+  A := RunArgs(O, []);
+  A[20] := TmpDir + 'none.gguf';
+  AssertEquals('missing model exit code', 1, Run(A, Out, Err));
+  AssertEquals('missing model err', 'no model file ' + TmpDir + 'none.gguf', Err);
+  A := RunArgs(O, []);
+  A[21] := TmpDir + 'none.jsonl';
+  AssertEquals('missing data exit code', 1, Run(A, Out, Err));
+  AssertEquals('missing data err', 'no data file ' + TmpDir + 'none.jsonl', Err);
+  A := RunArgs(O, []);
+  A[21] := OtherFile;
+  AssertEquals('no sample exit code', 1, Run(A, Out, Err));
+  AssertEquals('no sample err', 'no training sample in ' + OtherFile, Err);
+  A := RunArgs(O, ['--warmup', '8']);
+  AssertEquals('warm-up exit code', 1, Run(A, Out, Err));
+  AssertEquals('warm-up err', 'warm-up 8 must be below the 8 updates', Err);
+end;
+
+procedure TTrainCliTest.TestUT_TrainCli_209;
+var
+  Out, Err: string;
+begin
+  AssertEquals('exit code', 2, Run(['--rank', '0', 'm', 't', 'o'], Out, Err));
+  AssertEquals('err',
+    '--rank: an integer in 1..4096, got "0"' + #10 +
+    'usage: qlora_train [options] MODEL TRAIN OUTDIR (see the unit header)', Err);
+  AssertEquals('out', '', Out);
+end;
+
+procedure TTrainCliTest.TestUT_TrainCli_210;
+var
+  O, Out, Err: string;
+begin
+  O := NewOut;
+  AssertEquals('exit code', 0,
+    Run(RunArgs(O, ['--max-updates', '100', '--batches-per-update', '3', '--keep', '1']), Out, Err));
+  AssertEquals('out', 'done: 4 updates, best ' + O + 'ckpt' + PathDelim + 'ckpt-00000004', Out);
+  AssertEquals('Steps', '1 0 6|2 0 8|3 1 6|4 1 8', Steps(O));
+  AssertEquals('CkptUpdates', '2 3 4', CkptUpdates(O));
+end;
+
+procedure TTrainCliTest.TestUT_TrainCli_211;
+var
+  O, Out, Err: string;
+  A, B: TStringArray;
+  St: TRunState;
+  L: TStringList;
+  I: Integer;
+  F: TStringArray;
+begin
+  O := NewOut;
+  A := RunArgs(O, []);
+  SetLength(B, Length(A) - 2);
+  for I := 2 to High(A) do
+    B[I - 2] := A[I];
+  AssertEquals('exit code', 0, Run(B, Out, Err));
+  AssertEquals('out', 'done: 8 updates, best ', Out);
+  St := ReadRunState(O + 'ckpt' + PathDelim + 'ckpt-00000008');
+  AssertTrue('ValLoss NaN', IsNan(St.ValLoss));
+  L := LogLines(O);
+  try
+    for I := 0 to L.Count - 1 do
+      if Copy(L[I], 1, 4) = 'ckpt' then
+      begin
+        F := L[I].Split([#9]);
+        AssertEquals('the loss of the ckpt line', 'nan', F[2]);
+      end;
+  finally
+    L.Free;
+  end;
+end;
+
+procedure TTrainCliTest.TestUT_TrainCli_212;
+var
+  O, Out, Err: string;
+  R: Integer;
+begin
+  O := NewOut;
+  R := Run(RunArgs(O, ['--split', '1']), Out, Err);
+  AssertEquals('exit code', 1, R);
+  AssertEquals('err', 'No CUDA GPUs are available', Err);
+  R := Run(RunArgs(O, ['--split', '3']), Out, Err);
+  AssertEquals('exit code', 1, R);
+  AssertEquals('err', 'split 3 outside 0..2', Err);
+  AssertEquals('out', '', Out);
 end;
 
 var

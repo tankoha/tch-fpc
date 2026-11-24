@@ -243,9 +243,170 @@ begin
 end;
 
 function RunTrainCLI(const AArgs: array of string; AOut, AErr: TStrings): Integer;
+var
+  C: TTrainConfig;
+  Msg, Hash, LogFile, Dir: string;
+  G: TGgufFile;
+  Tok: TQwenTokenizer;
+  M: TQwenModel;
+  TrainSet, ValidSet: TTrainSet;
+  S: TLoraSet;
+  O: TLoraAdamW;
+  Ck: TCheckpoints;
+  St: TRunState;
+  B: TBatches;
+  Total, U: Int64;
+  Epoch, I, J, K: Integer;
+  Pos, Tokens: Int64;
+  Denom, Sum, Loss, Norm, Lr, Val: Double;
+  R: TSampleLoss;
+  T0: TDateTime;
+  EndOfEpoch: Boolean;
 begin
-  Result := 0;
-  raise Exception.Create('RunTrainCLI: not implemented yet');
+  Msg := ParseTrainArgs(AArgs, C);
+  if Msg <> '' then
+  begin
+    AErr.Add(Msg);
+    AErr.Add(Usage);
+    Exit(2);
+  end;
+  G := nil;
+  Tok := nil;
+  M := nil;
+  TrainSet := nil;
+  ValidSet := nil;
+  S := nil;
+  O := nil;
+  Ck := nil;
+  try
+    try
+      if not FileExists(C.Model) then
+        raise Exception.Create('no model file ' + C.Model);
+      G := TGgufFile.Open(C.Model);
+      Tok := TQwenTokenizer.Create(G);
+      TrainSet := TTrainSet.Create(Tok, C.Train, C.Classes, C.Budget);
+      if TrainSet.Count = 0 then
+        raise Exception.Create('no training sample in ' + C.Train);
+      if C.Valid <> '' then
+        ValidSet := TTrainSet.Create(Tok, C.Valid, C.Classes, C.Budget);
+      Total := TotalUpdates(TrainSet, C);
+      if C.Warmup >= Total then
+        raise Exception.CreateFmt('warm-up %d must be below the %d updates', [C.Warmup, Total]);
+      if C.Split < 0 then
+        M := TQwenModel.Load(G, TDevice.Cpu, TDevice.Cpu, 0)
+      else
+        M := TQwenModel.Load(G, TDevice.Cuda(0), TDevice.Cuda(1), C.Split);
+      ManualSeed(C.Seed);
+      S := TLoraSet.Create(C.Rank, C.Alpha / C.Rank);
+      M.AttachLora(S);
+      O := TLoraAdamW.Create(S.Stores, DefaultAdamWConfig);
+      ForceDirectories(C.OutDir);
+      Ck := TCheckpoints.Create(C.OutDir + 'ckpt', C.Keep);
+      Hash := ConfigHash(C);
+      LogFile := C.OutDir + 'train-log.tsv';
+      Epoch := 0;
+      Pos := 0;
+      U := 0;
+      if C.Resume then
+      begin
+        Dir := Ck.Latest;
+        if Dir = '' then
+          raise Exception.Create('nothing to resume in ' + Ck.Root);
+        St := Ck.Load(Dir, S, O);
+        if St.ConfigHash <> Hash then
+          raise Exception.Create('the configuration differs from the checkpoint''s: ' + Dir);
+        if St.BaseSha256 <> C.BaseSha256 then
+          raise Exception.Create('the base model differs from the checkpoint''s: ' + Dir);
+        Epoch := St.Epoch;
+        Pos := St.Position;
+        U := St.Update;
+        AOut.Add(Format('resumed from %s at update %d', [Dir, U]));
+      end;
+      while Epoch < C.Epochs do
+      begin
+        B := SkipBatches(EpochBatches(TrainSet, C.Seed, Epoch, C.Pool, C.Budget), Pos);
+        I := 0;
+        while I < Length(B) do
+        begin
+          T0 := Now;
+          Denom := 0;
+          for J := I to Min(I + C.BatchesPerUpdate, Length(B)) - 1 do
+            for K := 0 to High(B[J]) do
+              Denom := Denom + TrainSet[B[J][K]].LossTo - TrainSet[B[J][K]].LossFrom;
+          Sum := 0;
+          Tokens := 0;
+          for J := I to Min(I + C.BatchesPerUpdate, Length(B)) - 1 do
+            for K := 0 to High(B[J]) do
+            begin
+              R := SampleLossBackward(M, TrainSet[B[J][K]], Denom, C.Slice);
+              Sum := Sum + R.Sum;
+              Inc(Tokens, Length(TrainSet[B[J][K]].Tokens));
+              Inc(Pos);
+            end;
+          Loss := Sum / Denom;
+          if IsNan(Loss) or IsInfinite(Loss) then
+          begin
+            AErr.Add(Format('non-finite loss at update %d; stopped without updating', [U + 1]));
+            AppendLine(LogFile, Format('%d'#9'%d'#9'%d'#9'%s', [U + 1, Epoch, Pos, G17(Loss)]));
+            Exit(3);
+          end;
+          Inc(U);
+          Norm := O.ClipGlobalNorm(C.Clip);
+          Lr := ScheduleLR(C.Lr, U, C.Warmup, Total, C.MinLrRatio);
+          O.Step(Lr);
+          O.ZeroGrad;
+          Inc(I, C.BatchesPerUpdate);
+          EndOfEpoch := I >= Length(B);
+          AppendLine(LogFile, Format('%d'#9'%d'#9'%d'#9'%s'#9'%s'#9'%s'#9'%d'#9'%.1f',
+            [U, Epoch, Pos, G17(Loss), G17(Lr), G17(Norm), Tokens, SecondSpan(Now, T0)]));
+          if EndOfEpoch or (U mod C.CkptEvery = 0) then
+          begin
+            Val := NaN;
+            if ValidSet <> nil then
+              Val := ValidationLoss(M, ValidSet, C.Slice);
+            St := NewRunState;
+            St.Update := U;
+            { at an epoch's end the state is the next epoch's start }
+            St.Epoch := Epoch + Ord(EndOfEpoch);
+            if EndOfEpoch then
+              St.Position := 0
+            else
+              St.Position := Pos;
+            St.Seed := C.Seed;
+            St.ConfigHash := Hash;
+            St.BaseSha256 := C.BaseSha256;
+            St.ValLoss := Val;
+            Dir := Ck.Save(St, S, O);
+            AppendLine(LogFile, Format('ckpt'#9'%d'#9'%s'#9'%s', [U, G17(Val), Dir]));
+          end;
+          if (C.MaxUpdates > 0) and (U >= C.MaxUpdates) then
+          begin
+            AOut.Add(Format('stopped after update %d of %d', [U, Total]));
+            Exit(0);
+          end;
+        end;
+        Inc(Epoch);
+        Pos := 0;
+      end;
+      AOut.Add(Format('done: %d updates, best %s', [U, Ck.Best]));
+      Result := 0;
+    except
+      on E: Exception do
+      begin
+        AErr.Add(E.Message);
+        Result := 1;
+      end;
+    end;
+  finally
+    Ck.Free;
+    O.Free;
+    M.Free;
+    S.Free;
+    ValidSet.Free;
+    TrainSet.Free;
+    Tok.Free;
+    G.Free;
+  end;
 end;
 
 end.

@@ -731,3 +731,12 @@ When a case is run again, do not edit its row; append a new row below (the last 
 | UT-DatasetFilter-008 | OK |  | 2026-11-25 | Jaccard |
 | UT-DatasetFilter-009 | OK |  | 2026-11-25 | Valid count |
 | UT-DatasetFilter-010 | OK |  | 2026-11-25 | Split key |
+| UT-DatasetCli-101 | OK |  | 2026-11-25 | Default config values |
+| UT-DatasetCli-102 | OK |  | 2026-11-25 | ParseDatasetArgs: every option, then minimal |
+| UT-DatasetCli-103 | OK |  | 2026-11-25 | ParseDatasetArgs: errors, case-sensitive option, positional count |
+| UT-DatasetCli-104 | OK |  | 2026-11-25 | MainBlock and UnitNameOf |
+| UT-DatasetCli-105 | OK |  | 2026-11-25 | VerifyRecord outcomes by dialect |
+| UT-DatasetCli-106 | OK |  | 2026-11-25 | RunDatasetCLI: filter, split, outputs |
+| UT-DatasetCli-107 | OK |  | 2026-11-25 | RunDatasetCLI: leak checks against eval and examples |
+| UT-DatasetCli-108 | OK |  | 2026-11-25 | RunDatasetCLI: tokenizer check |
+| UT-DatasetCli-109 | OK |  | 2026-11-25 | RunDatasetCLI: raw errors, unknown option, missing files |

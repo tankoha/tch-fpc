@@ -134,3 +134,9 @@ When a case is run again, do not edit its row; append a new row below (the last 
 | ITa-T17-004 | OK | - | 2026-11-24 | recorded 1.836529, whole graph 1.836529 (relative difference): value 4.67E-009, limit 1.00E-004 |
 | ITa-T17-005 | OK | - | 2026-11-24 | ckpt-00000010: one process vs 3 updates + --resume in a new process (inside epoch 0) + the rest: max |difference| over 14745600 adapter and moment values; logs equal: value 0.00E+000, limit 0.00E+000 |
 | ITa-T17-006 | OK | - | 2026-11-24 | lr 1e30: exit code 3, two log lines (the second nan), no checkpoint (count of mismatches): value 0.00E+000, limit 0.00E+000 |
+| ITa-T18-001 | OK | - | 2026-11-25 | value 0.00E+000, limit 0.00E+000 |
+| ITa-T18-002 | OK | - | 2026-11-25 | value 6.43E-001, limit 1.00E+000 |
+| ITa-T18-003 | OK | - | 2026-11-25 | value 6.08E-001, limit 1.50E+000 |
+| ITa-T18-004 | OK | - | 2026-11-25 | value 3.75E-004, limit 1.00E-001 |
+| ITa-T18-005 | OK | - | 2026-11-25 | value 1.74E-003, limit 2.00E-002 |
+| ITa-T18-006 | OK | - | 2026-11-25 | value 0, limit 0 |

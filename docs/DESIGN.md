@@ -4726,6 +4726,38 @@ Checks, in this order:
   drafts with the MTP head. The original model stays installed; it is the
   rollback and the "before" of every later comparison.
 
+**Measured with the T18 prototype (local session 15, 2026-11-25;
+`samples/qwen-lora/work/proto/T18/`), the rehearsal model and the M2
+exit checkpoint (32 samples, update 16):** 78 tensors merged, 532 MB to
+629 MB, a few seconds on the CPU. Identity: the same sha256. Round trip:
+at most 0.63 of the block's Q8_0 step. Loss gain on the 32 samples:
+base 3.6152, adapter 0.0878, merged 0.0882, **99.99 % kept**. Fidelity
+against the threshold above: the worst mean |Δ logprob| over the top 10
+of the 27 H43 prompts is **0.318** (max 0.494, one top-1 differs) — a
+miss. Its cause is the retyping itself, not the merge: the same file
+merged with B = 0 (Q4_K/Q5_K/Q6_K re-quantised to Q8_0, no adapter
+change) is already 0.243 from the base. The 0.8B is that sensitive to
+8-bit noise (H43: `llama-server`'s Q8_K activations alone move it by up
+to 1.8). **(H47) holds:** the bundled `llama-server` on an all-F32 copy
+of the merged file (`-ctk f32 -ctv f32 -fa off`) against the Pascal
+forward on the merged file: at most **1.3e-3**, top-1 27/27 (H43's
+level), so upstream reads the merged layout and the Q8_0 tensors as the
+sample does. On the merged file itself it is off by up to 1.74 (mean
+0.94), as on the base Q4_K_M file (1.85, mean 0.85): a coarse check
+only.
+
+**Decision (the user, 2026-11-25): a floor criterion.** The fidelity
+check becomes: the worst mean |Δ| of the merged file against the forward
+with the adapter is at most **1.5 ×** the same figure for the file
+merged with B = 0 against the base (the retyping floor; measured 0.318 /
+0.243 = 1.31), and at least 90 % of the loss gain is kept. **(H47)** is
+judged as `llama-server` on the F32 copy of the merged file against the
+Pascal forward on the merged file, at most 0.02 with the same top-1
+(H43's threshold). The 0.05 above is superseded. Whether the 27B is less
+sensitive to the retyping is measured at M4. F16 merged tensors (closer
+to the adapter) were not taken: the 27B file would grow to about 26.9 GB,
+too close to Ollama's 31.8 GB at the 64k context.
+
 ### 8.16 Data pipeline and the data specification
 
 ```

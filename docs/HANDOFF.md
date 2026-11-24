@@ -6,7 +6,75 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 Status at a glance of the knowledge-package and fine-tuning work:
 [progress.md](progress.md).
 
-## Local session 14, continued (2026-11-23/24): T12, T16 and T15 done, T17 prepared — resume here
+## Local session 15 (2026-11-24/25): T17 done, M2 exit run passed, T18 prepared — resume here
+
+**T17 (`qlora_train`) done** (T17a, T17a2, T17b1–T17b3, T17c through
+`tasks/run-task.sh`). Each step checked: rebuilt with `-Cr`; the
+implementation of `src/TrainStep.pas` and `src/TrainCli.pas` equals the
+prototype in `work/proto/T17/` (no difference but the header comment);
+the ten mutants of the facts caught on the rows the facts name; UT gate
+696/696, line coverage 100 % (3532/3532). T17a's documents needed hand
+fixes (the `--split` text, a path in row 201); T17a2 redid the two UT case
+tables. ITa (T17c, the agents' run, rehearsal model): 0.0896, 3.2e-9,
+0.745, 4.7e-9, 0, 0, `ours.tsv` byte-identical to the prototype's final
+run; ITa gate 109/109.
+
+**Incident in T17b2 (recorded in commit 6d24ea0's message):** the main
+agent's first delegate was refused (a template marker left in the goal);
+further delegates were refused as "review pending" even after a review;
+the main agent tried to patch `src/TrainCli.pas` itself (refused by the
+hook) and then ran `rm` on its own transcript in `work/tasks/` (still 0
+bytes). The delegation then ran normally; the code was unaffected, only
+the final report was lost. Open: write the transcripts outside the
+project, and see why the hook kept a refused delegate as review-pending.
+
+**M2 exit run passed** (harness owner, CPU, rehearsal model;
+`samples/qwen-lora/work/m2exit/`, git-ignored): 32 fixed records (8 pieces
+each of `TrainData`, `Checkpoint`, `Lora`, `Recompute`; 3529 tokens), one
+update per epoch, 16 epochs, lr 1e-3, warm-up 1: loss 3.6152 → 0.0992
+(**2.7 %** of the first; below 10 % from update 11), 22 minutes. With
+ITa-T17-005 (exact resume) two of M2's exit conditions hold; H47 and the
+Ollama import remain (T18, then the user).
+
+**T18 (`GgufMerge`, `qlora_merge`) prepared** (DESIGN 8.15 with the
+"Measured" and "Decision" paragraphs of this session). Prototype in
+`samples/qwen-lora/work/proto/T18/` (git-ignored; reference tests in
+`ref/`, mutants by `mut.sh`, probes `merge_check`, `zero`, `ask.bb`,
+`cmp.bb`). Measured on the M2 exit checkpoint: identity holds, round trip
+0.63 steps, gain kept 99.99 %, but fidelity 0.318 against DESIGN's 0.05 —
+caused by re-quantising the base's K-quants to Q8_0 (B = 0 alone: 0.243).
+**H47 holds**: `llama-server` on an all-F32 copy of the merged file
+against the Pascal forward on it, 1.3e-3, top-1 27/27. **The user decided
+a floor criterion** (DESIGN 8.15 "Decision"): the merged file against the
+adapter at most 1.5 × the B = 0 merge against the base, gain kept ≥ 90 %,
+H47 at 0.02. Committed:
+- `src/GgufMerge.pas` skeleton (interface final), `src/qlora_merge.pas`
+  (complete, thin wrapper); `tests/ut/GgufMerge_test.pas` skeleton with
+  helpers (the tiny model);
+- `tasks/T18-facts.md` (20 UT rows: 001–014 the merge, 101–106 the
+  command line, each run against the prototype with `-Cr`; 100 % line
+  coverage (129 lines); eight mutants caught);
+- ITa `tests/ita/T18-run.sh`, driver `tests/ita/T18/merge_check.pas`:
+  `qlora_train` on T17's 8 records (4 updates), `qlora_merge`, then 001
+  identity 0, 002 round trip 0.643 (limit 1), 003 floor ratio 0.608
+  (0.148 / 0.243, limit 1.5), 004 gain lost 3.75e-4 (limit 0.1), 005 H47
+  1.74e-3 (limit 0.02), 006 byte-identical to the prototype's merged file:
+  0. About 6 minutes. The references (git-ignored, on this machine):
+  `work/oracle/T18/expected.jsonl` (llama-server on the F32 copy of the
+  prototype's merged file), `merged.sha256`, `make-oracle.bb`; the prompts
+  of `work/oracle/T11`. Skeleton: all NG.
+- tasks `T18a`, `T18b1` (merge), `T18b2` (command line), `T18c`.
+
+**Next:** `tasks/run-task.sh T18a`, `T18b1`, `T18b2` (check each: rebuild
+with `-Cr`, compare with `work/proto/T18/`, run `mut.sh` against the
+agents' unit, the gate), then `QLORA_MODEL=<rehearsal GGUF>
+tasks/run-task.sh T18c`. Then M2's last exit condition, by the user: the
+merged rehearsal file imports into Ollama (`ollama create` under a new
+name; H45 proper is the 27B at M4), then T19 (`qlora_dataset`, with the
+Oxygene EBuild filter row at M3) and T20 (`qlora_eval`). Still open: the
+M4 question of local session 13.
+
+## Local session 14, continued (2026-11-23/24): T12, T16 and T15 done, T17 prepared
 
 **T12 (`Lora`) done** (T12a, T12b1–T12b4, T12c through
 `tasks/run-task.sh`, about 4 h). Each step checked: rebuilt with `-Cr`;

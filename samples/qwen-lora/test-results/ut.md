@@ -672,3 +672,12 @@ When a case is run again, do not edit its row; append a new row below (the last 
 | UT-TrainData-108 | OK |  | 2026-11-24 | BatchTensors, padded batch |
 | UT-TrainData-109 | OK |  | 2026-11-24 | BatchTensors, masked targets decode to answer |
 | UT-TrainData-110 | OK |  | 2026-11-24 | BatchTensors, empty batch / out-of-range sample |
+| UT-TrainStep-001 | OK |  | 2026-11-24 | T17b1: sample loss without gradients |
+| UT-TrainStep-002 | OK |  | 2026-11-24 | T17b1: backward: loss and grads against the reference |
+| UT-TrainStep-003 | OK |  | 2026-11-24 | T17b1: backward: slice size 1, 3, 7, 100 |
+| UT-TrainStep-004 | OK |  | 2026-11-24 | T17b1: denominator scaling and accumulation |
+| UT-TrainStep-005 | OK |  | 2026-11-24 | T17b1: adapters with B zero: same loss as without adapters |
+| UT-TrainStep-006 | OK |  | 2026-11-24 | T17b1: SampleLoss defines no grads |
+| UT-TrainStep-007 | OK |  | 2026-11-24 | T17b1: ETrainStep messages: slice, denominator, loss span |
+| UT-TrainStep-008 | OK |  | 2026-11-24 | T17b1: ValidationLoss over a set; empty set NaN |
+| UT-TrainStep-009 | OK |  | 2026-11-24 | T17b1: backward with the loss span at the last token |

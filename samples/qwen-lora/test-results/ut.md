@@ -681,3 +681,11 @@ When a case is run again, do not edit its row; append a new row below (the last 
 | UT-TrainStep-007 | OK |  | 2026-11-24 | T17b1: ETrainStep messages: slice, denominator, loss span |
 | UT-TrainStep-008 | OK |  | 2026-11-24 | T17b1: ValidationLoss over a set; empty set NaN |
 | UT-TrainStep-009 | OK |  | 2026-11-24 | T17b1: backward with the loss span at the last token |
+| UT-TrainCli-101 | OK |  | 2026-11-24 | default settings |
+| UT-TrainCli-102 | OK |  | 2026-11-24 | three positionals only |
+| UT-TrainCli-103 | OK |  | 2026-11-24 | every option together |
+| UT-TrainCli-104 | OK |  | 2026-11-24 | parse errors: unknown, missing, out of range, arity |
+| UT-TrainCli-105 | OK |  | 2026-11-24 | sha256 in a blob file name, and the rejects |
+| UT-TrainCli-106 | OK |  | 2026-11-24 | BaseSha256 from the model name or --base-sha256 |
+| UT-TrainCli-107 | OK |  | 2026-11-24 | ConfigHash: stable and sensitive fields |
+| UT-TrainCli-108 | OK |  | 2026-11-24 | TotalUpdates per epoch |

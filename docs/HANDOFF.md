@@ -6,7 +6,7 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 Status at a glance of the knowledge-package and fine-tuning work:
 [progress.md](progress.md).
 
-## Local session 15 (2026-11-24/25): T17 done, M2 exit run passed, T18 prepared — resume here
+## Local session 15 (2026-11-24/25): T17 and T18 done, M2's exit conditions hold (H47, Ollama import) — resume here
 
 **T17 (`qlora_train`) done** (T17a, T17a2, T17b1–T17b3, T17c through
 `tasks/run-task.sh`). Each step checked: rebuilt with `-Cr`; the
@@ -65,16 +65,32 @@ H47 at 0.02. Committed:
   of `work/oracle/T11`. Skeleton: all NG.
 - tasks `T18a`, `T18b1` (merge), `T18b2` (command line), `T18c`.
 
-**Next:** `tasks/run-task.sh T18a`, `T18b1`, `T18b2` (check each: rebuild
-with `-Cr`, compare with `work/proto/T18/`, run `mut.sh` against the
-agents' unit, the gate), then `QLORA_MODEL=<rehearsal GGUF>
-tasks/run-task.sh T18c`. Then M2's last exit condition, by the user: the
-merged rehearsal file imports into Ollama (`ollama create` under a new
-name; H45 proper is the 27B at M4), then T19 (`qlora_dataset`, with the
-Oxygene EBuild filter row at M3) and T20 (`qlora_eval`). Still open: the
-M4 question of local session 13.
+**T18 done** (T18a, T18b1, T18b2, T18c through `tasks/run-task.sh`, about
+2.5 h). Each step checked: rebuilt with `-Cr`; `src/GgufMerge.pas` equals
+the prototype (header comment aside); the eight mutants of the facts
+caught on the rows the facts name; UT gate 716/716, line coverage 100 %
+(3661/3661). T18a's system flow needed two hand fixes (the fixture's seed
+5 read as "5 blocks"; the checkpoint's origin). ITa (T18c, the agents'
+run): 0, 0.643, 0.608, 3.75e-4, 1.74e-3, 0 — `ours.tsv` and the merged
+file byte-identical to the prototype's; **H47 holds with the agents'
+code**; ITa gate 115/115.
 
-## Local session 14, continued (2026-11-23/24): T12, T16 and T15 done, T17 prepared
+**M2's exit conditions all hold (2026-11-25; T19 and T20 remain).** The last one: the user
+imported the merged small model and the base into Ollama
+(`samples/qwen-lora/work/m2ollama/`: `Qwen3.5-0.8B-m2.gguf`,
+`Modelfile.base`, `Modelfile.m2`, `check.bb`; models `qlora-m2`,
+`qlora-m2-base`); both load on the GPU and answer; the merged one
+reproduces trained answers (Lora 271/271, Checkpoint 245/304, Recompute
+140/274, TrainData 22/304), the base none (DESIGN 8.15 "M2's Ollama
+import holds"). The two models may be removed with `ollama rm` when no
+longer wanted.
+
+**Next:** M2g (the user: the rehearsal model split over both GPUs in
+bf16, 20 steps, against the CPU curve) and M3 / the rest of M2's units:
+T19 (`qlora_dataset`, with the Oxygene EBuild filter row at M3) and T20
+(`qlora_eval`), both to prepare. Still open: the M4 question of local
+session 13; the T17b2 incident's two follow-ups (transcripts outside the
+project; the hook keeping a refused delegate as review-pending).
 
 **T12 (`Lora`) done** (T12a, T12b1–T12b4, T12c through
 `tasks/run-task.sh`, about 4 h). Each step checked: rebuilt with `-Cr`;

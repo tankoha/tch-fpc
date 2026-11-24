@@ -5,7 +5,7 @@
 再開するときは最初にこれを読んでください。決定事項と理由は [DESIGN_jp.md](DESIGN_jp.md) にあります。
 知識パッケージとファインチューニングの作業の状況は [progress_jp.md](progress_jp.md) で一目で見られます。
 
-## ローカルセッション15（2026-11-24〜25）：T17 完了、M2 の終了条件の実行に合格、T18 を準備 — ここから再開
+## ローカルセッション15（2026-11-24〜25）：T17・T18 完了、M2 の終了条件が成立（H47、Ollama への取り込み） — ここから再開
 
 **T17（`qlora_train`）完了**（T17a、T17a2、T17b1〜T17b3、T17c を `tasks/run-task.sh` で）。
 各段階を確認した：`-Cr` で再ビルド。`src/TrainStep.pas` と `src/TrainCli.pas` の実装は
@@ -54,15 +54,27 @@ H47 は 0.02。コミットしたもの：
   `make-oracle.bb`。プロンプトは `work/oracle/T11` のもの。スケルトンでは全部 NG。
 - タスク `T18a`、`T18b1`（マージ）、`T18b2`（コマンドライン）、`T18c`。
 
-**次：** `tasks/run-task.sh T18a`、`T18b1`、`T18b2`（各段階で確認：`-Cr` で再ビルド、
-`work/proto/T18/` と比べる、エージェントのユニットに `mut.sh` を流す、ゲート）、続いて
-`QLORA_MODEL=<リハーサル用 GGUF> tasks/run-task.sh T18c`。その後 M2 の最後の終了条件を
-ユーザーが確かめる：マージ済みのリハーサル用ファイルを Ollama に取り込む（新しい名前で
-`ollama create`。H45 そのものは M4 の 27B）。続いて T19（`qlora_dataset`。M3 の Oxygene
-EBuild のフィルタ行を含む）と T20（`qlora_eval`）。未決のまま：ローカルセッション13 の
-M4 の問い。
+**T18 完了**（T18a、T18b1、T18b2、T18c を `tasks/run-task.sh` で。約 2.5 時間）。各段階を
+確認した：`-Cr` で再ビルド。`src/GgufMerge.pas` は試作と同じ（ヘッダのコメントを除く）。
+facts の 8 個の変異体は facts の挙げる行で捕まる。UT ゲート 716/716、行カバレッジ 100%
+（3661/3661）。T18a のシステムフローは 2 か所を手で直した（fixture の seed 5 を
+「5 ブロック」と読んだ、チェックポイントの出どころ）。ITa（T18c、エージェントの実行）：
+0、0.643、0.608、3.75e-4、1.74e-3、0 — `ours.tsv` とマージ済みファイルは試作と
+バイト単位で同じ。**エージェントのコードで H47 が成り立つ**。ITa ゲート 115/115。
 
-## ローカルセッション14 の続き（2026-11-23〜24）：T12、T16、T15 完了、T17 を準備
+**M2 の終了条件がすべて成り立つ（2026-11-25。T19 と T20 は残る）。** 最後の条件：ユーザーがマージ済みの小さな
+モデルと土台を Ollama に取り込んだ（`samples/qwen-lora/work/m2ollama/`：
+`Qwen3.5-0.8B-m2.gguf`、`Modelfile.base`、`Modelfile.m2`、`check.bb`。モデル
+`qlora-m2`、`qlora-m2-base`）。どちらも GPU に載って答え、マージ済みの方は学習した
+答えを再現する（Lora 271/271、Checkpoint 245/304、Recompute 140/274、TrainData
+22/304）が、土台は再現しない（DESIGN 8.15「M2 の Ollama への取り込みは成立」）。
+2 つのモデルは不要になったら `ollama rm` で消してよい。
+
+**次：** M2g（ユーザー：リハーサル用モデルを bf16 で両 GPU に分割し 20 ステップ、CPU の
+曲線と比べる）と M3 / M2 の残りのユニット：T19（`qlora_dataset`。M3 の Oxygene EBuild の
+フィルタ行を含む）と T20（`qlora_eval`）、どちらも要準備。未決のまま：ローカル
+セッション13 の M4 の問い。T17b2 の出来事の 2 つの宿題（トランスクリプトをプロジェクトの
+外に書く、拒否された delegate をフックが review pending のまま残す件）。
 
 **T12（`Lora`）完了**（T12a、T12b1〜T12b4、T12c を `tasks/run-task.sh` で。約 4 時間）。
 各段階の後に確認：`-Cr` でビルドし直し、`src/Lora.pas`、`PackedLinear.pas`、`QwenBlocks.pas`、

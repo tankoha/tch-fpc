@@ -4758,6 +4758,21 @@ sensitive to the retyping is measured at M4. F16 merged tensors (closer
 to the adapter) were not taken: the 27B file would grow to about 26.9 GB,
 too close to Ollama's 31.8 GB at the 64k context.
 
+**M2's Ollama import holds (the user, 2026-11-25; Ollama 0.40.13).** The
+M2 exit checkpoint merged by the committed `qlora_merge` (sha256
+5f2f7cd2…, the prototype's bytes) and the base Q4_K_M file were imported
+with `ollama create` under new names (`qlora-m2`, `qlora-m2-base`) from
+the same Modelfile but the first `FROM`: the second `FROM` the rehearsal
+projector, `RENDERER` and `PARSER` `qwen3.5`, temperature 0. Both load
+fully on the GPU and answer. Asked the four training prompts of the M2
+exit run (thinking off; each prompt has eight trained answers), the merged
+model reproduces the leading characters of one of them — Lora 271 of 271,
+Checkpoint 245 of 304, Recompute 140 of 274, TrainData 22 of 304 (a blend
+of its eight) — and the base none (0 on each). So Ollama accepts the
+retyped Q8_0 tensors with `general.file_type` left at 15 (R9 did not
+occur in small). The 27B import with the projector blob, the tool call
+and the MTP draft (H45 proper, H49) stay at M5.
+
 ### 8.16 Data pipeline and the data specification
 
 ```

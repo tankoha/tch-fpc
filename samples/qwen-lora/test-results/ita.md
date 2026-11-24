@@ -140,3 +140,9 @@ When a case is run again, do not edit its row; append a new row below (the last 
 | ITa-T18-004 | OK | - | 2026-11-25 | value 3.75E-004, limit 1.00E-001 |
 | ITa-T18-005 | OK | - | 2026-11-25 | value 1.74E-003, limit 2.00E-002 |
 | ITa-T18-006 | OK | - | 2026-11-25 | value 0, limit 0 |
+| ITa-T19-001 | OK | - | 2026-11-25 | 33 raw records: outcome (accepted, or the reject reason up to its colon) against the planted one (count of mismatches): value 0.0E+000, limit 0.0E+000 |
+| ITa-T19-002 | OK | - | 2026-11-25 | 5 valid of 16 accepted: the split recomputed per dialect x task type (count of mismatches): value 0.0E+000, limit 0.0E+000 |
+| ITa-T19-003 | OK | - | 2026-11-25 | train and valid records: the raw object plus its class, in raw order (count of mismatches): value 0.0E+000, limit 0.0E+000 |
+| ITa-T19-004 | OK | - | 2026-11-25 | manifest: one line per accepted record with the MD5 of its output line, its split and class (count of mismatches): value 0.0E+000, limit 0.0E+000 |
+| ITa-T19-005 | OK | - | 2026-11-25 | card: totals and reject reasons against rejects.jsonl (count of mismatches): value 0.0E+000, limit 0.0E+000 |
+| ITa-T19-006 | OK | - | 2026-11-25 | a second run from another directory: the five output files byte-identical (count of files that differ): value 0.0E+000, limit 0.0E+000 |

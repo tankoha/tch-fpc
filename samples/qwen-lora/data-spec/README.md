@@ -1,7 +1,13 @@
-# Data specification v1 (qwen-lora)
+# Data specification v3 (qwen-lora)
 
-Version: **spec-v1** (2026-11-25). Written by Claude (Opus) for the
+Version: **spec-v3** (2026-11-25). Written by Claude (Opus) for the
 harness; read by the generator, Mistral Large 3 (DESIGN 8.16).
+
+| Version | Change |
+|---|---|
+| spec-v1 | first version; 100-job pilot: 43 % accepted |
+| spec-v2 | after the first pilot: "common mistakes" per dialect in dialects.md (each checked with the dialect's compiler), rules for `expected_stdout` and the repair with the actual output in spec.md; second pilot: 44 % |
+| spec-v3 | after the second pilot (44 %): `override` in Delphi records added to the common mistakes; the driver now shows the source lines around a compile error and says when an error repeats |
 
 The specification is instructions and lists. It contains **no example
 programs**: the generator writes every sample itself, and nothing here
@@ -26,4 +32,4 @@ How it is used:
    generator's own claim that a sample compiles is never trusted.
 
 What changes the version: any edit of these files. The manifest records
-`spec-v1` for every accepted record.
+`spec-v3` for every accepted record (the pilots of spec-v1 and spec-v2 are not part of the data set).

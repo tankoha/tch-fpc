@@ -1,4 +1,4 @@
-# Topics and length (spec-v1)
+# Topics and length (spec-v3)
 
 ## Topics
 

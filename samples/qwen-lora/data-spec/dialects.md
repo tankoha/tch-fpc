@@ -1,9 +1,22 @@
-# Dialects (spec-v1)
+# Dialects (spec-v3)
 
 Five dialects, each checked with its own compiler. Write only what the
 dialect's section allows. A sample tags the features it uses
 (`features`); **every feature of a dialect appears in at least 60 of its
 1000 samples** (the harness asks for each in turn).
+
+Each section ends with **common mistakes**: errors that earlier samples
+made, each checked with the dialect's compiler (wrong → right).
+
+## In every dialect
+
+- `if a <> 3 or b <> 3 then` binds as `a <> (3 or b) <> 3` and does not
+  compile: put every comparison combined with `and` / `or` in
+  parentheses, `if (a <> 3) or (b <> 3) then`.
+- Declare every method you implement and implement every method you
+  declare ("Forward declaration not solved").
+- A record or class declares its fields first, then its methods and
+  properties; a field after a method needs a new visibility section.
 
 ## `objfpc` — Free Pascal 3.2.2, `{$mode objfpc}`
 
@@ -32,6 +45,30 @@ dialect's section allows. A sample tags the features it uses
 - **Not in this dialect**: inline `var` in a `begin ... end` block,
   `TList<T>` without `specialize`, method pointers without `@`, anonymous
   functions.
+- **Common mistakes**:
+  - `for var I := 1 to 3 do` → declare `I` in the `var` section.
+  - A record with methods without `{$modeswitch advancedrecords}` after
+    the mode line ("END expected but FUNCTION found").
+  - Inside a generic class, `specialize TList<T>.Create` or a nested
+    `specialize TFPGList<specialize TFPGList<T>>` ("Duplicate identifier
+    TList$1$crc…") → declare the types once in the class,
+    `private type TItems = specialize TList<T>;`, and write
+    `TItems.Create`.
+  - `TFPGList` of a record ("Operator is not overloaded: TPoint =
+    TPoint") → `specialize TList<TPoint>` of `Generics.Collections`, or
+    `TFPGList` only for classes and simple types. `TFPGList.Create` takes
+    no arguments.
+  - A generic routine called without `specialize`, or a routine named
+    like an RTL one (`DaysBetween`) → `specialize F<T>(...)`, and own names
+    that do not hide `SysUtils` / `DateUtils` routines.
+  - `function F(A: array of array of Integer): array of array of Integer`
+    ("Type identifier expected") → `type TMatrix = array of array of
+    Integer;` and use `TMatrix` for parameters and results.
+  - A procedure type written inside a parameter list → declare it as a
+    type first: `generic TPred<T> = function(const V: T): Boolean;`,
+    then `P: specialize TPred<T>`.
+  - `TCar.Create(...)` on a `record` → records have no `Create`; fill the
+    fields or write a function that returns the record.
 
 ## `fpc-delphi` — Free Pascal 3.2.2, `{$mode delphi}`
 
@@ -55,6 +92,17 @@ dialect's section allows. A sample tags the features it uses
   | `fpcdelphi.dynarray` | dynamic arrays and open arrays |
 - **Not in this dialect**: inline `var`, `generic`/`specialize`, `@` for
   method pointers, anonymous methods, `System.`-prefixed unit names.
+- **Common mistakes**:
+  - A `unit` without `{$mode delphi}` ("Identifier not found "class"") →
+    every file, units too, has the mode line.
+  - `TComparer<T>.Construct(F)` with `function F(const A, B: T)` →
+    `function F(constref A, B: T): Integer` (FPC's comparer takes
+    `constref`).
+  - `class function` in a record without `static` ("Class methods must be
+    static in records") → `class function F: T; static;`.
+  - `Min`, `Max` need `Math` in `uses`; `TComparison` is not available.
+  - A method marked `override` whose ancestor has no virtual method of
+    that name and signature.
 
 ## `unleashed` — Unleashed Pascal, `{$mode unleashed}`
 
@@ -82,6 +130,22 @@ dialect's section allows. A sample tags the features it uses
   `raise`, `exit` or `begin ... end` inside them); parallel and async
   results are printed in a fixed order.
 - **Not in this dialect**: `generic`/`specialize`.
+- **Common mistakes**:
+  - `async` is not a routine modifier (`async function F` → "BEGIN
+    expected"): write a normal function and call it as
+    `var R := async F(100);`, then read `await R`.
+  - `lock` is a statement on a variable, `lock(Total) do Total += I;`,
+    not a type or a variable name (`lock: TCriticalSection` fails).
+    There is no `TSimpleEvent` or `IAsyncResult<T>`.
+  - `autofree X;` as a statement → `var X := autofree TFoo.Create;`, or
+    `defer X.Free;` after the creation.
+  - A `var`-section initialiser written `state: TState := Idle;` → `=`
+    there (`state: TState = Idle;`), `:=` only for inline variables.
+  - `for var B in L do` where `B` is already a local of the routine
+    ("Duplicate identifier") → a new name for the loop variable.
+  - Generic constraints to simple types (`<T: Integer>`) → no
+    constraint, or a concrete type instead of the generic.
+  - Inside `$'...{...}...'` strings are written `'a'`, not `''a''`.
 
 ## `delphi` — Delphi (checked as an approximation with FPC)
 
@@ -119,7 +183,17 @@ within what both compilers accept.
   of bytes there (use a typed constant array); sorting strings with the
   default comparer fails (give `TComparer<string>.Construct` with
   `CompareStr`); nested generic types are declared as aliases
-  (`TWordList = TList<TWordCount>`), not written inline.
+  (`TWordList = TList<TWordCount>`), not written inline; unit-qualified
+  calls such as `System.SysUtils.CompareStr(...)` fail (write
+  `CompareStr(...)`).
+- **Common mistakes**:
+  - `virtual` or `override` methods in a record (also `ToString;
+    override`) → records have no virtual methods
+    (use a class); `class function` in a record ends with `static;`.
+  - `Format`, `IntToStr` and the like without `System.SysUtils` in
+    `uses`.
+  - `TProc` / `TFunc` / `TSize` (not in the check) → declare the
+    `reference to` type or the record yourself.
 
 ## `oxygene` — RemObjects Oxygene (Elements 14), .NET Core
 
@@ -150,3 +224,30 @@ within what both compilers accept.
 - **Not in this dialect**: `unit`, `procedure`/`function` keywords,
   `Free`, `destructor`, `initialization`/`finalization`, `with`, `asm`,
   `reference to`.
+- **Common mistakes**:
+  - `uses` lists namespaces separated by commas, one semicolon at the
+    end: `uses System, System.Collections.Generic, System.Linq;`.
+  - Mixing the two layouts: either `interface` (declarations only) …
+    `implementation` (method bodies) … `end.`, or no `interface` /
+    `implementation` at all and the bodies inside the type (unified).
+    Bodies inside the type after `interface` give ""implementation"
+    expected".
+  - `writeLn('Sum: ', sum)` (`writeLn` takes one argument) →
+    `writeLn($'Sum: {sum}')` or `writeLn('Sum: ' + sum.ToString)`.
+  - `List<T>.Create(...)` → `new List<T>` and `Add`; there is no `Create`.
+  - A jagged array `new Integer[rows][]` → `var data: array of array of
+    Integer := new array of Integer[rows];` then
+    `data[i] := new Integer[cols];`.
+  - The `where` clause comes after the method's semicolon:
+    `class method Find<T>(arr: array of T; value: T): Integer; where T is
+    IComparable<T>;`.
+  - A function-typed field `Fn: T -> T` → `Fn: block(x: T): T;` (assign a
+    lambda `x -> x * 2`).
+  - An anonymous method passed to `Sort` written `static method(...)` →
+    a lambda `pts.Sort((a, b) -> a.X - b.X)` or `method(a, b: Point):
+    Integer begin ... end`.
+  - `new class(IFoo) ... end` (no anonymous classes) → declare a named
+    class that implements the interface.
+  - `Unit`, `old`, `loop` are keywords: not as field or method names.
+  - `Trunc`, `Round` of Pascal do not exist → `Math.Truncate(x)`,
+    `Math.Round(x, 2)` (with `Int32(...)` where an integer is needed).

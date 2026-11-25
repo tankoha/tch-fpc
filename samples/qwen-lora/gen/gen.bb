@@ -4,15 +4,24 @@
 ;; qlora_verify, and returns the verifier's message for at most three
 ;; repairs. A record that compiled only after a repair also gives a `fix`
 ;; record (the broken source, the verifier's message, the repaired source).
+;; For wrong-output the repair message carries the program's actual output.
 ;; Writes, under OUT (outside the repository):
 ;;   raw.jsonl   every final record, accepted or not, as the generator wrote
 ;;               it plus "verify" (the verifier's outcome) and the fix records
-;;   log.jsonl   one line per request: job, attempt, tokens, latency, outcome
+;;   log.jsonl   one line per request: job, attempt, tokens, latency, outcome,
+;;               the verifier's detail and the actual output (wrong-output)
 ;;   jobs.edn    the job list (made once; a rerun skips finished jobs)
 ;; Usage (from the sample's root):
-;;   bb gen/gen.bb plan N OUT [SEED]   write OUT/jobs.edn: N jobs per dialect
-;;   bb gen/gen.bb run OUT VERIFY [MAX] run the jobs not yet in log.jsonl
-;;                                      (at most MAX of them)
+;;   bb gen/gen.bb plan COUNTS OUT [SEED]
+;;                                     write OUT/jobs.edn: COUNTS is N (jobs
+;;                                     per dialect) or objfpc=N,oxygene=M,...
+;;   bb gen/gen.bb run OUT VERIFY [MAX [WORKERS [TARGET]]]
+;;                                     run the jobs not yet in raw.jsonl (at
+;;                                     most MAX of them, WORKERS at a time,
+;;                                     none for a dialect with TARGET
+;;                                     accepted records)
+;;   bb gen/gen.bb reverify OUT VERIFY verify the rejected records again
+;;                                     (no Bedrock): errors, actual output
 ;;   bb gen/gen.bb stats OUT            counts, yield, tokens
 (require '[clojure.string :as str] '[cheshire.core :as json] '[babashka.process :as p]
          '[clojure.java.io :as io] '[clojure.edn :as edn])
@@ -40,32 +49,59 @@
   (let [m (mod k 20)]
     (cond (< m 13) "write" (< m 16) "extend" (< m 18) "convert" :else "unit")))
 
-(defn plan [n out seed]
+(defn counts [spec]
+  ;; "N" (N jobs for every dialect) or "objfpc=N,unleashed=M,..." (dialects
+  ;; not named get none)
+  (if (re-matches #"\d+" spec)
+    (zipmap dialects (repeat (parse-long spec)))
+    (into {} (for [kv (str/split spec #",") :let [[d n] (str/split kv #"=")]]
+               (do (when-not (some #{d} dialects) (throw (ex-info (str "unknown dialect " d) {})))
+                   [d (parse-long n)])))))
+
+(defn plan [spec out seed]
+  ;; the jobs are drawn dialect by dialect (the pilots' jobs stay as they
+  ;; were) and written round-robin over the dialects, so a partial run
+  ;; (MAX) advances all dialects together
   (let [ts (topics)
         r (java.util.Random. seed)
+        cs (counts spec)
         jobs (vec (for [d dialects
                         :let [fs (mapv second (features-of d))]
-                        k (range n)]
+                        k (range (get cs d 0))]
                     {:id (format "%s-%05d" (str/replace d "-" "") (inc k))
                      :dialect d :task_type (task-type k)
                      :topic (ts (mod (+ k (.nextInt r (count ts))) (count ts)))
                      :features (vec (distinct [(fs (mod k (count fs))) (fs (mod (+ k 5) (count fs)))]))
-                     :language (if (< (.nextDouble r) 0.1) "ja" "en")}))]
+                     :language (if (< (.nextDouble r) 0.1) "ja" "en")}))
+        jobs (vec (sort-by (juxt #(parse-long (re-find #"\d+$" (:id %)))
+                                 #(.indexOf dialects (:dialect %)))
+                           jobs))]
+    (when (.exists (io/file out "jobs.edn"))
+      (throw (ex-info (str out "/jobs.edn exists; a new plan needs a new OUT") {})))
     (.mkdirs (io/file out))
     (spit (str out "/jobs.edn") (pr-str jobs))
     (println (count jobs) "jobs in" (str out "/jobs.edn"))))
 
-(defn converse [out system messages]
-  ;; one Converse call; returns {:text :usage :latency}
-  (let [tmp (str out "/tmp")
-        _ (.mkdirs (io/file tmp))
+(defn converse [tmp system messages]
+  ;; one Converse call (request files in the worker's TMP); returns
+  ;; {:text :usage :latency}
+  (let [_ (.mkdirs (io/file tmp))
         sf (str tmp "/system.json") mf (str tmp "/messages.json")]
     (spit sf (json/generate-string [{:text system}]))
     (spit mf (json/generate-string messages))
-    (let [r (p/sh "aws" "bedrock-runtime" "converse" "--model-id" model
-                  "--system" (str "file://" sf) "--messages" (str "file://" mf)
-                  "--inference-config" (json/generate-string {:temperature temperature :maxTokens 6000})
-                  "--output" "json")]
+    (let [call #(p/sh "aws" "bedrock-runtime" "converse" "--model-id" model
+                      "--system" (str "file://" sf) "--messages" (str "file://" mf)
+                      "--inference-config" (json/generate-string {:temperature temperature :maxTokens 6000})
+                      "--output" "json")
+          ;; throttling (also of the login token with several workers) is
+          ;; retried with a growing pause; any other failure stops the run
+          r (loop [k 0]
+              (let [r (call)]
+                (if (and (not (zero? (:exit r))) (< k 6)
+                         (re-find #"Rate exceeded|\(429\)|Throttling|TooManyRequests" (:err r)))
+                  (do (Thread/sleep (* 1000 (+ (bit-shift-left 2 k) (rand-int 3))))
+                      (recur (inc k)))
+                  r)))]
       (when-not (zero? (:exit r))
         (throw (ex-info (str "converse failed: " (str/trim (:err r))) {:exit (:exit r)})))
       (let [o (json/parse-string (:out r) true)]
@@ -98,10 +134,72 @@
 (defn blocks [answer]
   (vec (map second (re-seq #"(?s)```[a-zA-Z]*\n(.*?)```" (or answer "")))))
 
+;; the Oxygene project file of the verifier (K_OXY_PROJECT in
+;; src/DialectVerify.pas), used to rebuild a program whose output was wrong
+(def oxy-project
+  (str/join "\n"
+            ["<Project DefaultTargets=\"Build\" xmlns=\"http://schemas.microsoft.com/developer/msbuild/2003\" ToolsVersion=\"4.0\">"
+             "  <PropertyGroup>" "    <RootNamespace>Ex</RootNamespace>"
+             "    <ProjectGuid>{6b1f1c3e-1d2a-4c55-9a7e-0c1f2e3d4a01}</ProjectGuid>"
+             "    <OutputType>Exe</OutputType>" "    <AssemblyName>Ex</AssemblyName>"
+             "    <Configuration Condition=\"'$(Configuration)' == ''\">Release</Configuration>"
+             "    <TargetFramework>.NETCore</TargetFramework>" "    <Mode>Echoes</Mode>"
+             "    <OutputPath>.\\Bin</OutputPath>" "  </PropertyGroup>"
+             "  <ItemGroup>" "    <Compile Include=\"Program.pas\" />" "  </ItemGroup>"
+             "  <Import Project=\"$(MSBuildExtensionsPath)\\RemObjects Software\\Elements\\RemObjects.Elements.Echoes.targets\" />"
+             "</Project>" ""]))
+
+(def actual-max 3000)
+
+(defn actual-output [w dialect prog]
+  ;; the stdout of a program the verifier judged wrong-output: the FPC build
+  ;; stays in w/work/verify/<n>/main; Oxygene's is deleted, so rebuild it
+  (let [run (fn [dir secs args]
+              (let [r (apply p/sh {:dir dir :continue true} "timeout" (str secs) args)]
+                (when (zero? (:exit r)) (:out r))))
+        out (if (= dialect "oxygene")
+              (let [d (str w "/oxy")]
+                (.mkdirs (io/file d))
+                (spit (str d "/Program.pas") prog)
+                (spit (str d "/Ex.elements") oxy-project)
+                (when (run d 300 ["flatpak" "run" "--command=/app/dotnet/dotnet" "com.remobjects.earth"
+                                  "/app/earth/EBuild.dll" "Ex.elements"])
+                  (run d 20 ["flatpak" "run" "--command=/app/dotnet/dotnet" "com.remobjects.earth" "Bin/Ex.dll"])))
+              (when-let [exe (first (filter #(and (= "main" (.getName %)) (.canExecute %))
+                                            (file-seq (io/file w "work/verify"))))]
+                (run (.getParent exe) 20 [(.getPath exe)])))]
+    (when out
+      (if (> (count out) actual-max) (str (subs out 0 actual-max) "\n[... cut]\n") out))))
+
+(def oxy-lock (Object.))
+
+(defn error-context [detail bs prog]
+  ;; the lines around the compiler's first error, numbered, the error line
+  ;; marked and (FPC) a caret under the column; nil when the place is unknown
+  (let [[_ f ln col] (or (re-find #"^([A-Za-z0-9_.]+)\((\d+),(\d+)\)" detail)
+                         (re-find #"\[(Program\.pas) \((\d+)\)\]" detail))
+        src (cond (nil? f) nil
+                  (#{"main.pas" "Program.pas"} f) prog
+                  :else (first (filter #(re-find (re-pattern (str "(?i)^\\s*unit\\s+"
+                                                                   (java.util.regex.Pattern/quote (str/replace f #"\.pas$" ""))
+                                                                   "\\s*;")) %) bs)))]
+    (when src
+      (let [ls (str/split-lines src) n (parse-long ln)]
+        (when (<= 1 n (count ls))
+          (str/join "\n"
+                    (for [i (range (max 1 (- n 3)) (inc (min (count ls) (+ n 2))))
+                          s (cons (format "%4d%s %s" i (if (= i n) " >>" "   ") (nth ls (dec i)))
+                                  (when (and col (= i n))
+                                    [(str (apply str (repeat (+ 8 (dec (parse-long col))) " ")) "^")]))]
+                      s)))))))
+
 (defn verify [verify-bin dialect rec]
   ;; writes the record's blocks (units named after themselves) into a fresh
-  ;; directory under the home directory and runs qlora_verify on the program
-  (let [w (str (System/getProperty "user.home") "/.cache/qlora-gen/" (System/nanoTime))
+  ;; directory under the home directory and runs qlora_verify on the program;
+  ;; for wrong-output also returns the program's actual output. Oxygene runs
+  ;; one at a time (the verifier's build directory is named after the clock)
+  (let [w (str (System/getProperty "user.home") "/.cache/qlora-gen/" (System/nanoTime)
+               "-" (.getId (Thread/currentThread)))
         bs (blocks (:answer rec))
         unit? #(re-find #"(?i)^\s*unit\s+[A-Za-z_][A-Za-z0-9_.]*\s*;" %)
         prog (first (remove unit? bs))]
@@ -113,52 +211,83 @@
               (spit (str w "/" (second (re-find #"(?i)^\s*unit\s+([A-Za-z_][A-Za-z0-9_.]*)" u)) ".pas") u))
             (spit (str w "/main.pas") prog)
             (spit (str w "/main.expected") (or (:expected_stdout rec) ""))
-            (let [line (str/trim (:out (p/sh {:dir w} verify-bin "--dialect" dialect "main.pas")))
-                  c (str/split line #"\t" -1)]
-              {:outcome (nth c 3 "") :detail (nth c 4 "") :program prog})))
+            (let [go (fn []
+                       (let [line (str/trim (:out (p/sh {:dir w} verify-bin "--dialect" dialect "main.pas")))
+                             c (str/split line #"\t" -1)
+                             v {:outcome (nth c 3 "") :detail (nth c 4 "") :program prog}]
+                         (case (:outcome v)
+                           "wrong-output" (assoc v :actual (actual-output w dialect prog))
+                           "compile-error" (assoc v :context (error-context (:detail v) bs prog))
+                           v)))]
+              (if (= dialect "oxygene") (locking oxy-lock (go)) (go)))))
       (finally (p/sh "rm" "-rf" w)))))
 
 (defn job-text [job]
   (str "Job: " (json/generate-string (select-keys job [:id :dialect :task_type :topic :features :language]))))
 
-(defn repair-text [v]
+(defn error-key [detail]
+  ;; the compiler message without file and position, to see a repeated error
+  (-> (str detail) (str/replace #"^[A-Za-z0-9_.]+\(\d+,\d+\)\s*" "")
+      (str/replace #"\s*\[Program\.pas \(\d+\)\]$" "")))
+
+(defn repair-text [v prev]
   (case (:outcome v)
     "compile-error" (str "The verifier could not compile the program. First error: " (:detail v)
+                         (when (:context v)
+                           (str "\n\nThe source around it (>> marks the line):\n\n```\n" (:context v) "\n```"))
+                         (when (and (= "compile-error" (:outcome prev))
+                                    (= (error-key (:detail v)) (error-key (:detail prev))))
+                           (str "\n\nThis is the same error as in your previous reply: that change did not fix it."
+                                " Do not repeat it. Check the construct against the dialect's section and its"
+                                " \"Common mistakes\" in the specification, and rewrite that part another way,"
+                                " with simpler constructs if needed."))
                          "\nReturn the whole corrected reply.")
-    "wrong-output" "The program ran, but its output differs from expected_stdout. Make the program and expected_stdout agree exactly (every line break included). Return the whole corrected reply."
+    "wrong-output" (str "The program ran, but its output differs from expected_stdout."
+                        (if (:actual v)
+                          (str " The program printed exactly this:\n\n```text\n" (:actual v)
+                               (when-not (str/ends-with? (:actual v) "\n") "\n[no final line break]\n")
+                               "```\n\nDecide which is wrong, the program or expected_stdout, and fix it.")
+                          "")
+                        " Make the program and expected_stdout agree exactly (every line break included). Return the whole corrected reply.")
     "run-error" (str "The program stopped with exit code " (:detail v) ". It must end normally with code 0. Return the whole corrected reply.")
     "timeout" "The program did not finish within the time limit. Return the whole corrected reply."
     "no-sections" "The reply must have exactly the four sections ### prompt, ### answer, ### expected_stdout (with the output inside a ```text fence) and ### features. Return the whole reply again in that format."
     (str "The reply was not accepted (" (:outcome v) " " (:detail v) "). Follow the specification exactly and return the whole corrected reply.")))
 
-(defn run-job [out verify-bin system job logw raww]
+(def write-lock (Object.))
+
+(defn write-line [w o]
+  ;; one JSON line; several workers share the writers
+  (locking write-lock
+    (.write w (str (json/generate-string o) "\n"))
+    (.flush w)))
+
+(defn run-job [tmp verify-bin system job logw raww]
   (loop [messages [{:role "user" :content [{:text (job-text job)}]}]
-         attempt 0 first-fail nil]
-    (let [r (converse out system messages)
+         attempt 0 first-fail nil prev nil]
+    (let [r (converse tmp system messages)
           rec (parse-record (:text r) job attempt)
           v (if rec (verify verify-bin (:dialect job) rec) {:outcome "no-sections" :detail ""})
           ok (= "accepted" (:outcome v))]
-      (.write logw (str (json/generate-string {:job (:id job) :attempt attempt :usage (:usage r)
-                                               :latency (:latency r) :outcome (:outcome v)}) "\n"))
-      (.flush logw)
+      (write-line logw {:job (:id job) :attempt attempt :usage (:usage r)
+                        :latency (:latency r) :outcome (:outcome v) :detail (:detail v)
+                        :actual (:actual v)})
       (let [first-fail (or first-fail (when (= "compile-error" (:outcome v)) {:v v :rec rec}))]
         (if (or ok (>= attempt max-repairs))
-          (do (.write raww (str (json/generate-string (assoc (or rec {:id (:id job) :raw (:text r)})
-                                                             :verify (:outcome v) :job job)) "\n"))
+          (do (write-line raww (assoc (or rec {:id (:id job) :raw (:text r)})
+                                      :verify (:outcome v) :job job))
               (when (and ok first-fail (contains? #{"write" "extend"} (:task_type job)))
                 (let [broken (get-in first-fail [:v :program])
                       msg (get-in first-fail [:v :detail])]
-                  (.write raww (str (json/generate-string
-                                     (assoc rec :id (str (:id job) "-fix") :task_type "fix"
-                                            :prompt (str "This program does not compile:\n\n```pascal\n" broken "```\n\n"
-                                                         "The compiler says: " msg "\nFix it.")
-                                            :broken_source broken :compiler_message msg
-                                            :verify "accepted" :job job)) "\n"))))
-              (.flush raww)
+                  (write-line raww (assoc rec :id (str (:id job) "-fix") :task_type "fix"
+                                          :prompt (str "This program does not compile:\n\n```pascal\n" broken "```\n\n"
+                                                       "The compiler says: " msg "\nFix it.")
+                                          :broken_source broken :compiler_message msg
+                                          :verify "accepted" :job job))))
               (:outcome v))
           (recur (conj messages {:role "assistant" :content [{:text (:text r)}]}
-                       {:role "user" :content [{:text (repair-text v)}]})
-                 (inc attempt) first-fail))))))
+                       {:role "user" :content [{:text (repair-text v prev)}]})
+                 (inc attempt) first-fail v))))))
 
 (defn done-jobs [out]
   (let [f (io/file (str out "/raw.jsonl"))]
@@ -168,19 +297,69 @@
              (get-in o [:job :id])))
       #{})))
 
-(defn run [out verify-bin mx]
+(defn accepted-by-dialect [out]
+  ;; accepted records per dialect in OUT/raw.jsonl, fix records not counted
+  (let [f (io/file out "raw.jsonl")]
+    (if (.exists f)
+      (frequencies (for [l (str/split-lines (slurp f)) :when (not (str/blank? l))
+                         :let [o (json/parse-string l true)]
+                         :when (and (= "accepted" (:verify o)) (not (str/ends-with? (str (:id o)) "-fix")))]
+                     (get-in o [:job :dialect])))
+      {})))
+
+(defn run [out verify-bin mx workers target]
+  ;; WORKERS jobs at a time, each worker with its own tmp directory; at most
+  ;; MAX jobs in this call; a dialect gets no new job once TARGET of its
+  ;; records (fix records not counted) are accepted, counted over all calls
+  ;; (jobs in progress may add up to WORKERS more). The first failure
+  ;; (Converse: expired session) stops the hand-out of new jobs, the jobs in
+  ;; progress finish, then exit 4. Order of jobs in the files may differ
+  ;; from jobs.edn
   (let [jobs (edn/read-string (slurp (str out "/jobs.edn")))
         done (done-jobs out)
-        todo (take (or mx Long/MAX_VALUE) (remove #(done (:id %)) jobs))
+        queue (atom (vec (remove #(done (:id %)) jobs)))
+        acc (atom (accepted-by-dialect out))
+        issued (atom 0)
+        stop (atom nil)
+        take-job #(locking queue
+                    (when (< @issued (or mx Long/MAX_VALUE))
+                      (let [q @queue
+                            i (first (keep-indexed (fn [i j] (when (< (get @acc (:dialect j) 0) (or target Long/MAX_VALUE)) i)) q))]
+                        (when i
+                          (reset! queue (into (subvec q 0 i) (subvec q (inc i))))
+                          (swap! issued inc)
+                          (q i)))))
         system (spec-text)]
     (with-open [logw (io/writer (str out "/log.jsonl") :append true)
                 raww (io/writer (str out "/raw.jsonl") :append true)]
-      (doseq [job todo]
-        (let [o (try (run-job out verify-bin system job logw raww)
-                     (catch clojure.lang.ExceptionInfo e
-                       (binding [*out* *err*] (println "stopped:" (ex-message e)))
-                       (System/exit 4)))]
-          (println (:id job) o))))))
+      (let [fs (doall
+                (for [k (range workers)]
+                  (future
+                    (let [tmp (str out "/tmp/w" k)]
+                      (loop []
+                        (when-let [job (and (nil? @stop) (take-job))]
+                          (try (let [o (run-job tmp verify-bin system job logw raww)]
+                                 (when (= "accepted" o) (swap! acc update (:dialect job) (fnil inc 0)))
+                                 (locking write-lock (println (:id job) o)))
+                               (catch Exception e
+                                 (reset! stop (str (:id job) ": " (ex-message e)))))
+                          (recur)))))))]
+        (run! deref fs)))
+    (when @stop
+      (binding [*out* *err*] (println "stopped:" @stop))
+      (System/exit 4))))
+
+(defn reverify [out verify-bin]
+  ;; verifies the final records that were not accepted again (no Bedrock):
+  ;; dialect, outcome, first compiler error or the actual output
+  (doseq [l (str/split-lines (slurp (str out "/raw.jsonl")))
+          :when (not (str/blank? l))
+          :let [o (json/parse-string l true)]
+          :when (and (:answer o) (not= "accepted" (:verify o)))]
+    (let [v (verify verify-bin (:dialect o) o)]
+      (println (json/generate-string {:id (:id o) :dialect (:dialect o) :outcome (:outcome v)
+                                      :detail (:detail v) :actual (:actual v) :context (:context v)
+                                      :expected (when (:actual v) (:expected_stdout o))})))))
 
 (defn stats [out]
   (let [ls #(for [l (str/split-lines (slurp (str out "/" %))) :when (not (str/blank? l))] (json/parse-string l true))
@@ -197,8 +376,9 @@
              "output tokens" (reduce + (map #(get-in % [:usage :outputTokens] 0) log)))
     (println "repairs per job" (frequencies (vals (frequencies (map :job log)))))))
 
-(let [[cmd a b c] *command-line-args*]
+(let [[cmd a b c d e] *command-line-args*]
   (case cmd
-    "plan" (plan (parse-long a) b (parse-long (or c "1")))
-    "run" (run a b (some-> c parse-long))
+    "plan" (plan a b (parse-long (or c "1")))
+    "run" (run a b (some-> c parse-long) (parse-long (or d "1")) (some-> e parse-long))
+    "reverify" (reverify a b)
     "stats" (stats a)))

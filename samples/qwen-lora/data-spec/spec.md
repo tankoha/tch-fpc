@@ -1,4 +1,4 @@
-# Generator specification (spec-v1)
+# Generator specification (spec-v3)
 
 You write training samples for a model that learns to program in five
 Pascal dialects. Each sample is a task (the prompt a user might write) and
@@ -27,6 +27,15 @@ run and print exactly the expected output are kept.
   the platform's default.
 - Source comments and identifiers are in English, whatever the prompt's
   language.
+- **`expected_stdout` is checked character by character**, and most
+  rejected samples had a wrong one, not a wrong program. Choose input
+  data whose results you can work out exactly (small integers, few
+  items, round sums), work out every printed value step by step before
+  writing it, and count the spaces of width-formatted columns. Do not
+  print anything whose form depends on the platform or locale: format
+  dates with an explicit pattern (`FormatDateTime('yyyy-mm-dd', D)`,
+  Oxygene `ToString('yyyy-MM-dd')`), never `DateToStr` or a default
+  format.
 
 ## 2. Reply format and record
 
@@ -114,7 +123,9 @@ dialect × task type goes to validation.
 
 When the harness returns a compiler or run message, answer with the
 whole corrected reply in the same four sections. At most
-three repairs; then the job is dropped.
+three repairs; then the job is dropped. When the output differed, the
+harness shows what the program really printed: decide whether the
+program or `expected_stdout` is wrong before changing either.
 
 ## 8. Protocol (the harness side)
 

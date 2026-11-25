@@ -151,3 +151,10 @@ When a case is run again, do not edit its row; append a new row below (the last 
 | ITa-T20-003 | OK | - | 2026-11-25 | 14 table rows of the report recomputed from the judgements (count missing): value 0, limit 0 |
 | ITa-T20-004 | OK | - | 2026-11-25 | 12 adoption lines recomputed, the sign test included (count missing): value 0, limit 0 |
 | ITa-T20-005 | OK | - | 2026-11-25 | a second run from another directory: results.tsv and report.md byte-identical (count of files that differ): value 0, limit 0 |
+| ITa-T21-001 | OK | - | 2026-11-25 | default kind: logprobs (27 prompts) and the 4 update lines byte-identical to the code before T21 (count of differences): value 0, limit 0 |
+| ITa-T21-002 | OK | - | 2026-11-25 | --compute bf16: largest \|logprob difference\| over the fp32 top 10 of each prompt: value 0.1883, limit 0.25 |
+| ITa-T21-003 | OK | - | 2026-11-25 | --compute bf16: prompts whose top-1 token differs although the fp32 margin exceeds 0.5 (count): value 0, limit 0 |
+| ITa-T21-004 | OK | - | 2026-11-25 | --compute bf16 training: largest relative loss difference to fp32 over 4 updates: value 5.33e-03, limit 0.02 |
+| ITa-T21-005 | OK | - | 2026-11-25 | fp32 for 2 updates, then --compute bf16 --resume: 4 updates, the first 2 identical to fp32, the rest within 0.02 (count of violations): value 0, limit 0 |
+| ITa-T21-006 | OK | - | 2026-11-25 | --compute bf16 twice: the logprobs byte-identical (1 if not): value 0, limit 0 |
+| ITa-T21 (driver) | OK | - | 2026-11-25 | summary.tsv tail: exit codes lp32 0, lp16a 0, lp16b 0, tr32 0, tr16 0, mix1 0, mix2 0, check 0; 0 other stderr lines (work/ita/T21/errors-other.txt) |

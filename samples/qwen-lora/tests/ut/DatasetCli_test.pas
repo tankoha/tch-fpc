@@ -340,8 +340,9 @@ begin
   AssertEquals('accepted', Outcome);
   AssertEquals(False, VerifyRecord(RawRec('o', ['namespace N;' + #10 + 'end.' + #10],
     '', 'oxygene'), NewDir(), 10, Env, Cls, Outcome, Detail));
-  AssertEquals('static-only', Cls);
-  AssertEquals('static-ok', Outcome);
+  AssertEquals('compiled-run', Cls);   { T22: Oxygene compiled with EBuild }
+  AssertEquals('compile-error', Outcome);
+  AssertEquals('E: Could not find a "Main" method in this project', Detail);
 end;
 
 procedure TDatasetCliTest.TestUT_DatasetCli_106;

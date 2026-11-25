@@ -288,7 +288,7 @@ begin
   AssertTrue('not passed', not J.Passed);
   J := Judge(Task('o', 'oxygene', '10'),
     ReplyLine('o', 1, True, 'namespace N;' + #10), O);
-  AssertEquals('static-ok', O);
+  AssertEquals('compile-error', O);   { T22: Oxygene compiled with EBuild }
   AssertTrue('not compiled', not J.Compiled);
   AssertTrue('not passed', not J.Passed);
   J := Judge(Task('r', 'regression', '', 'tool-call', 'get_weather'),

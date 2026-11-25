@@ -4480,6 +4480,21 @@ data-spec/（Opus/Sonnet、リポジトリ内）  ──►  Mistral Large 3（�
 である。学習の設定にある受け入れる区分の一覧（既定は `compiled-run` と `fpc-approx`）
 はそのまま。）*
 
+**T22 での形（ローカルセッション 15、2026-11-25。
+`samples/qwen-lora/tasks/T22-facts.md`）。** フィルタの表の Oxygene の行を
+`DialectVerify`（T06）に入れた：ソースを `Program.pas` として .NET Core（Echoes）の
+プロジェクト `Ex.elements`（`pascal-oxygene` スキルのもの）の隣にコピーし、
+`flatpak run --command=/app/dotnet/dotnet com.remobjects.earth /app/earth/EBuild.dll Ex.elements`
+でビルドし、同じ `dotnet` で `Bin/Ex.dll` を実行する。EBuild が 0 で終わり `.dll` が
+あれば良し。クラスは `compiled-run`。作業ディレクトリはホームの下
+（`~/.cache/qlora-verify/<n>`。flatpak の `/tmp` は別物）で、終わったら消す。
+EBuild のエラー行（`E: …`）を詳細にし、作業ディレクトリのパスはそこから除く。
+Oxygene のレコードは 1 ファイル（隣のユニットはコンパイルしない）：Oxygene のクラスと
+そのテストプログラムは 1 つの namespace ファイルに入れる。測定：1 ファイルあたり約 0.9 秒
+（ビルドと実行）。スキルの例 6 つは受け入れ。UT 108 行、行 100%、変異体 10 個が捕まる。
+ITa 6/6。T19 の ITa も再実行し、その `x-oxygene` レコードは今はコンパイル・実行され、
+仕込んだ出力違いで落ちる。
+
 **T19 での形（ローカルセッション15、2026-11-25。
 `samples/qwen-lora/tasks/T19-facts.md`）。** 2 つのユニットと薄いプログラム：
 `DatasetFilter`（純粋：スキーマ、fenced block、正規化したソース、トークン、shingle、
@@ -4612,6 +4627,7 @@ IT ケースを書く。サブエージェント（T02 まで、および T14 �
 | T19 | `qlora_dataset` | T05、T06 | 重複、漏れ、失敗を仕込んだ合成の生データで、仕込んだものだけを落とす |
 | T20 | `qlora_eval` | T06 | リハーサル用モデルに対して：固定した返答の記録から、8.17 の報告を作る |
 | T21 | bf16 の計算（`--compute`）、アダプタの初期値を CPU で引く（M2g で追加、2026-11-25） | T10、T12、T11、T17 | 既定の fp32 の出力が以前とバイト単位で同じ。CPU で bf16 の logprobs と学習が fp32 に近い。続いて 2 枚のカードで M2g-b |
+| T22 | `DialectVerify` の Oxygene のフィルタ行（M3、2026-11-25） | T06 | ITa の Oxygene のファイルが仕込みどおり。T19 の ITa も Oxygene のレコードをコンパイル・実行して再実行 |
 
 順序：T01〜T06 と T08、T13、T14 は、数値の面で先行するものが無いので最初に行う
 （T06 は早めに。M3 が必要とする）。次に T07、T09、T10、T11（M1 の終わり）。その後に

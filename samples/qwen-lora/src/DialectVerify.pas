@@ -9,7 +9,10 @@
   - stage 1: text functions (ReadEnvRec .. SortStrings)
   - stage 2: RunLimited (adapted from tasks/snippets/runlimited.pas),
     CompileStep, VerifyFile
-  - stage 3: CollectPascalFiles, VerifyMain }
+  - stage 3: CollectPascalFiles, VerifyMain
+  - T22 (tasks/T22-facts.md): Oxygene compiled with EBuild in the Elements
+    flatpak and run with its dotnet (OxygeneStep, RemoveTree, the Oxygene
+    branches of ChooseCompiler and VerifyFile, EBuild's error lines) }
 unit DialectVerify;
 
 {$mode objfpc}{$H+}
@@ -47,11 +50,32 @@ const
     trace — scalar consts keep the measured lines of src/ honest) }
   K_SIMPLE_UNITS = 'SysUtils,Classes,Math,StrUtils,DateUtils,Types,Variants,TypInfo,Rtti';
   K_GENERIC_UNITS = 'Collections,Defaults';
+  { the .NET Core console project of one Oxygene source (T22; as the
+    pascal-oxygene skill's check-examples.sh) }
+  K_OXY_PROJECT = '<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003" ToolsVersion="4.0">' + #10 +
+    '  <PropertyGroup>' + #10 +
+    '    <RootNamespace>Ex</RootNamespace>' + #10 +
+    '    <ProjectGuid>{6b1f1c3e-1d2a-4c55-9a7e-0c1f2e3d4a01}</ProjectGuid>' + #10 +
+    '    <OutputType>Exe</OutputType>' + #10 +
+    '    <AssemblyName>Ex</AssemblyName>' + #10 +
+    '    <Configuration Condition="''$(Configuration)'' == ''''">Release</Configuration>' + #10 +
+    '    <TargetFramework>.NETCore</TargetFramework>' + #10 +
+    '    <Mode>Echoes</Mode>' + #10 +
+    '    <OutputPath>.\Bin</OutputPath>' + #10 +
+    '  </PropertyGroup>' + #10 +
+    '  <ItemGroup>' + #10 +
+    '    <Compile Include="Program.pas" />' + #10 +
+    '  </ItemGroup>' + #10 +
+    '  <Import Project="$(MSBuildExtensionsPath)\RemObjects Software\Elements\RemObjects.Elements.Echoes.targets" />' + #10 +
+    '</Project>' + #10;
   K_USAGE = 'usage: qlora_verify [--dialect D] [--timeout SECONDS] PATH...';
 
 type
   TEnvRec = record
     Fpc, FpcUnleashed: string;
+    { T22: the Elements flatpak (app id) and the root of the Oxygene work
+      directories (under the home directory) }
+    Elements, OxyRoot: string;
   end;
   TCompileState = (csNoCompiler, csStartFail, csTimeout, csFail, csOk);
 
@@ -73,6 +97,9 @@ function RunLimited(const AExe: string; const AArgs: array of string;
   out AExitCode: Integer; out ATimedOut: Boolean): Boolean;
 function CompileStep(ACompiler, ASrcPath, AOutDir: string; ATimeoutMs: Integer;
   ADelphi: Boolean; out ALog: string; out AExePath: string): TCompileState;
+function OxygeneStep(AFlatpak, AApp, ASrcPath, AOutDir: string; ATimeoutMs: Integer;
+  out ALog: string): TCompileState;
+procedure RemoveTree(const ADir: string);
 function VerifyFile(ASrcName, AForcedDialect: string; ATimeoutSec: Integer;
   const AEnv: TEnvRec; AWorkRoot: string; out AOK: Boolean): string;
 function CollectPascalFiles(APath: string; out AFiles: TStringArray): Boolean;
@@ -674,6 +701,24 @@ begin
     AExePath := ExePath;
     Result := csOk;
   end;
+end;
+
+{ 2.13b (T22) Oxygene: copy the source as Program.pas into AOutDir (under
+  the home directory: the flatpak's /tmp is its own), write the project
+  Ex.elements (.NET Core, Echoes) and build it with EBuild inside the
+  Elements flatpak. csOk when EBuild exits 0 and Bin/Ex.dll exists. }
+function OxygeneStep(AFlatpak, AApp, ASrcPath, AOutDir: string; ATimeoutMs: Integer;
+  out ALog: string): TCompileState;
+begin
+  ALog := '';
+  Result := csFail;
+  raise Exception.Create('OxygeneStep: not implemented yet');
+end;
+
+{ 2.13c (T22) Deletes ADir and everything below it. }
+procedure RemoveTree(const ADir: string);
+begin
+  raise Exception.Create('RemoveTree: not implemented yet');
 end;
 
 { 2.14 }

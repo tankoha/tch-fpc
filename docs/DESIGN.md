@@ -4949,6 +4949,23 @@ because a wrong sample cannot be detected without one and a model
 trained on it copies the generator's errors. The class list of the
 training configuration, default `compiled-run`, `fpc-approx`, stays.)*
 
+**As written for T22 (local session 15, 2026-11-25;
+`samples/qwen-lora/tasks/T22-facts.md`).** The Oxygene row of the filter
+table, in `DialectVerify` (T06): the source is copied as `Program.pas`
+next to a .NET Core (Echoes) project `Ex.elements` (the `pascal-oxygene`
+skill's), built with `flatpak run --command=/app/dotnet/dotnet
+com.remobjects.earth /app/earth/EBuild.dll Ex.elements` and run with the
+same `dotnet` on `Bin/Ex.dll`; good when EBuild exits 0 and the `.dll`
+exists; class `compiled-run`. The work directory is under the home
+directory (`~/.cache/qlora-verify/<n>`; the flatpak has its own `/tmp`)
+and is deleted afterwards; EBuild's error lines (`E: …`) are the detail,
+the work directory removed from them. One file per Oxygene record (units
+next to it are not compiled): an Oxygene class with its test program is
+one namespace file. Measured: about 0.9 s per file (build and run); the
+skill's six examples accepted; UT 108 rows, 100 % lines, ten mutants
+caught; ITa 6/6, the T19 ITa again with its `x-oxygene` record now
+compiled, run and rejected for a planted wrong output.
+
 **As written for T19 (local session 15, 2026-11-25;
 `samples/qwen-lora/tasks/T19-facts.md`).** Two units and a thin program:
 `DatasetFilter` (pure: the schema, the fenced blocks, the normalised
@@ -5105,6 +5122,7 @@ test.
 | T19 | `qlora_dataset` | T05, T06 | on a synthetic raw set with planted duplicates, leaks and failures, exactly the planted ones are rejected |
 | T20 | `qlora_eval` | T06 | against the rehearsal model: the report of 8.17 from a fixed transcript of replies |
 | T21 | bf16 compute (`--compute`), adapters drawn on the CPU (added at M2g, 2026-11-25) | T10, T12, T11, T17 | the default fp32 output byte-identical to before; bf16 logprobs and training close to fp32 on the CPU; then M2g-b on the two cards |
+| T22 | the Oxygene filter row in `DialectVerify` (M3, 2026-11-25) | T06 | the Oxygene files of the ITa as planted; the T19 ITa again with its Oxygene record compiled and run |
 
 Order: T01–T06 and T08, T13, T14 have no numeric predecessors and come
 first (T06 early, M3 needs it); then T07, T09, T10, T11 (end of M1); then

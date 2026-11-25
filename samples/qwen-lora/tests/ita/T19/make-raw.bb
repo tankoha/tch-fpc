@@ -90,7 +90,7 @@
    [(dissoc (rec "x-no-generator" "objfpc" "write" "No generator." [o3] "lacsap\n") :generator) "schema"]
    [(assoc (rec "x-bad-dialect" "objfpc" "write" "Unknown dialect." [o3] "lacsap\n") :dialect "turbo") "schema"]
    [(assoc (rec "x-no-fence" "objfpc" "write" "No fence." [o3] "lacsap\n") :answer "program X; begin end.") "schema"]
-   [(rec "x-oxygene" "oxygene" "write" "Hello in Oxygene." [oxy] "Hello\n") "verify"]
+   [(rec "x-oxygene" "oxygene" "write" "Hello in Oxygene." [oxy] "Hallo\n") "verify"]   ; T22: compiled and run, its output planted wrong
    [:bad-json "schema"]])
 
 (defn line [r] (if (= r :bad-json) "{\"id\": \"x-bad-json\", " (json/generate-string r)))

@@ -1,0 +1,11 @@
+counter	accepted
+words	accepted
+guard	accepted
+fib	accepted
+x-compile	compile-error
+x-output	wrong-output
+x-run	run-error
+x-pitfall	accepted
+x-pitfall-wrong	wrong-error
+x-no-expected	no-expected
+x-fpc	compile-error

@@ -90,6 +90,8 @@ type
     procedure TestUT_Lora_113;
     { UT-Lora-114 }
     procedure TestUT_Lora_114;
+    { UT-Lora-301 }
+    procedure TestUT_Lora_301;
   end;
 
 var
@@ -850,6 +852,44 @@ begin
     end;
   finally
     S.Free;
+  end;
+end;
+
+{ UT-Lora-301 }
+procedure TLoraTest.TestUT_Lora_301;
+var
+  S1, S2: TVarStore;
+  P: TLoraPair;
+  N1, N2, Old: TTensor;
+  B: TDoubleArray;
+  I: Integer;
+  M: Double;
+begin
+  ManualSeed(7);
+  S1 := TVarStore.Create(TDevice.Cpu);
+  P := TLoraPair.Create(S1.Root / 'p', 'p', 8, 6, 3, 2.0);
+  try
+    N1 := TTensor.rand([4], kFloat, TDevice.Cpu);
+    ManualSeed(7);
+    S2 := TVarStore.Create(TDevice.Cpu);
+    try
+      Old := S2.Root.Uniform('x', [3, 8], -1 / Sqrt(8), 1 / Sqrt(8));
+      N2 := TTensor.rand([4], kFloat, TDevice.Cpu);
+      AssertTrue('A equals Old (exact)', DiffArr(Arr(P.A), Arr(Old)) = 0.0);
+      AssertTrue('N1 equals N2 (exact)', DiffArr(Arr(N1), Arr(N2)) = 0.0);
+      AssertTrue('A requires grad', P.A.RequiresGrad);
+      AssertEquals('S1.Count', 2, S1.Count);
+      B := Arr(P.B);
+      M := 0;
+      for I := 0 to High(B) do
+        M := Max(M, Abs(B[I]));
+      AssertTrue('B all zero', M = 0.0);
+    finally
+      S2.Free;
+    end;
+  finally
+    P.Free;
+    S1.Free;
   end;
 end;
 

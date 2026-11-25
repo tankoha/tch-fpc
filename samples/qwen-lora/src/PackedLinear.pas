@@ -96,20 +96,34 @@ end;
 function TPackedLinear.Forward(const X: TTensor): TTensor;
 var
   S: TInt64Array;
+  Xc: TTensor;
 begin
   S := X.Shape;
   if X.Kind <> kFloat then
     raise EPackedLinear.Create('X must be kFloat (fp32)');
   if (Length(S) = 0) or (S[High(S)] <> FInDim) then
     raise EPackedLinear.CreateFmt('X must end in %d, got %s', [FInDim, ShapeStr(X)]);
-  Result := X.matmul(Weight.transpose(0, 1));
-  if FLora <> nil then
-    Result := Result + FLora.Delta(X);
+  if FCompute = kFloat then
+  begin
+    Result := X.matmul(Weight.transpose(0, 1));
+    if FLora <> nil then
+      Result := Result + FLora.Delta(X);
+  end
+  else
+  begin
+    Xc := X.totype(FCompute);
+    Result := Xc.matmul(Weight.totype(FCompute).transpose(0, 1));
+    if FLora <> nil then
+      Result := Result + FLora.Delta(Xc);
+    Result := Result.totype(kFloat);
+  end;
 end;
 
 procedure TPackedLinear.SetCompute(AValue: TKind);
 begin
-  raise EPackedLinear.Create('TPackedLinear.SetCompute: not implemented yet');
+  if (AValue <> kFloat) and (AValue <> kBFloat16) then
+    raise EPackedLinear.Create('compute must be kFloat or kBFloat16');
+  FCompute := AValue;
 end;
 
 procedure TPackedLinear.SetLora(AValue: TLoraPair);

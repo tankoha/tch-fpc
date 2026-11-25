@@ -756,3 +756,8 @@ When a case is run again, do not edit its row; append a new row below (the last 
 | UT-EvalCli-105 | OK |  | 2026-11-25 | JudgeReply: the twelve judgment rows |
 | UT-EvalCli-106 | OK |  | 2026-11-25 | RunEvalCLI: valid run — results.tsv, report.md, before only |
 | UT-EvalCli-107 | OK |  | 2026-11-25 | RunEvalCLI: the four error paths |
+| UT-PackedLinear-301 | OK |  | 2026-11-25 | Compute, the setter and the default |
+| UT-PackedLinear-302 | OK |  | 2026-11-25 | Forward, the bf16 path |
+| UT-PackedLinear-303 | OK |  | 2026-11-25 | Forward, bf16 with a LoRA pair and backward |
+| UT-PackedLinear-304 | OK |  | 2026-11-25 | Forward, bf16 and a non-fp32 X |
+| UT-Lora-301 | OK |  | 2026-11-25 | Create, lora_a drawn on the CPU |

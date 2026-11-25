@@ -105,7 +105,7 @@ begin
   FRank := ARank;
   FScale := AScale;
   Bound := 1 / Sqrt(AInDim);
-  FA := P.Uniform('lora_a', [ARank, AInDim], -Bound, Bound);
+  FA := P.VarCopy('lora_a', TTensor.zeros([ARank, AInDim], kFloat, TDevice.Cpu).uniform_(-Bound, Bound));
   FB := P.Zeros('lora_b', [AOutDim, ARank]);
 end;
 

@@ -46,6 +46,10 @@ type
     procedure TestUT_PackedLinear_105;
     procedure TestUT_PackedLinear_106;
     procedure TestUT_PackedLinear_107;
+    procedure TestUT_PackedLinear_301;
+    procedure TestUT_PackedLinear_302;
+    procedure TestUT_PackedLinear_303;
+    procedure TestUT_PackedLinear_304;
   end;
 
 var
@@ -579,6 +583,131 @@ begin
     L.Free;
     P.Free;
     S.Free;
+  end;
+end;
+
+{ UT-PackedLinear-301: Compute, the setter and the default. }
+procedure TPackedLinearTest.TestUT_PackedLinear_301;
+var
+  L: TPackedLinear;
+begin
+  L := NewLinear;
+  try
+    AssertTrue('default kFloat', L.Compute = kFloat);
+    L.Compute := kBFloat16;
+    AssertTrue('kBFloat16', L.Compute = kBFloat16);
+    try
+      L.Compute := kHalf;
+      Fail('no EPackedLinear');
+    except
+      on E: EPackedLinear do
+      begin
+        AssertEquals('compute must be kFloat or kBFloat16', E.Message);
+        AssertTrue('still kBFloat16', L.Compute = kBFloat16);
+      end;
+    end;
+    try
+      L.Compute := kDouble;
+      Fail('no EPackedLinear');
+    except
+      on E: EPackedLinear do
+        AssertEquals('compute must be kFloat or kBFloat16', E.Message);
+    end;
+    L.Compute := kFloat;
+    AssertTrue('kFloat', L.Compute = kFloat);
+  finally
+    L.Free;
+  end;
+end;
+
+{ UT-PackedLinear-302: Forward, the bf16 path. }
+procedure TPackedLinearTest.TestUT_PackedLinear_302;
+var
+  L: TPackedLinear;
+  X, Y, Y32: TTensor;
+begin
+  L := NewLinear;
+  try
+    X := FixX.totype(kFloat);
+    Y32 := L.Forward(X);
+    L.Compute := kBFloat16;
+    Y := L.Forward(X);
+    AssertTrue('Y kind kFloat', Y.Kind = kFloat);
+    AssertEquals('shape', '[5, 6]', ShapeText(Y));
+    AssertTrue('equals the bf16 product (exact)',
+      DiffArr(Arr(Y),
+        Arr(X.totype(kBFloat16).matmul(L.Weight.totype(kBFloat16).transpose(0, 1)).totype(kFloat))) = 0);
+    AssertTrue('max |Y - Y32| > 0', DiffArr(Arr(Y), Arr(Y32)) > 0);
+    AssertTrue('max |Y - Y32| <= 0.02', DiffArr(Arr(Y), Arr(Y32)) <= 0.02);
+    L.Compute := kFloat;
+    AssertTrue('Forward(X) equals Y32 again (exact)', DiffArr(Arr(L.Forward(X)), Arr(Y32)) = 0);
+  finally
+    L.Free;
+  end;
+end;
+
+{ UT-PackedLinear-303: Forward, bf16 with a LoRA pair and backward. }
+procedure TPackedLinearTest.TestUT_PackedLinear_303;
+var
+  L: TPackedLinear;
+  S: TVarStore;
+  P: TLoraPair;
+  X, Xc, Y: TTensor;
+  V: TDoubleArray;
+  I: Integer;
+  SumSq: Double;
+begin
+  L := NewLinear;
+  S := TVarStore.Create(TDevice.Cpu);
+  P := NewPair(S, 8, 6);
+  try
+    X := FixX.totype(kFloat);
+    SetB(P);
+    L.Lora := P;
+    L.Compute := kBFloat16;
+    Xc := X.totype(kBFloat16);
+    Y := L.Forward(X);
+    Y.sum(kNone).Backward;
+    AssertTrue('Y kind kFloat', Y.Kind = kFloat);
+    AssertTrue('equals bf16 product + Delta (exact)',
+      DiffArr(Arr(Y),
+        Arr((Xc.matmul(L.Weight.totype(kBFloat16).transpose(0, 1)) + P.Delta(Xc)).totype(kFloat))) = 0);
+    AssertTrue('A.grad kind kFloat', P.A.grad.Kind = kFloat);
+    V := Arr(P.A.grad);
+    SumSq := 0;
+    for I := 0 to High(V) do
+      SumSq := SumSq + V[I] * V[I];
+    AssertTrue('A.grad sum of squares > 0', SumSq > 0);
+    AssertTrue('B.grad kind kFloat', P.B.grad.Kind = kFloat);
+    V := Arr(P.B.grad);
+    SumSq := 0;
+    for I := 0 to High(V) do
+      SumSq := SumSq + V[I] * V[I];
+    AssertTrue('B.grad sum of squares > 0', SumSq > 0);
+  finally
+    L.Free;
+    P.Free;
+    S.Free;
+  end;
+end;
+
+{ UT-PackedLinear-304: Forward, bf16 and a non-fp32 X. }
+procedure TPackedLinearTest.TestUT_PackedLinear_304;
+var
+  L: TPackedLinear;
+begin
+  L := NewLinear;
+  try
+    L.Compute := kBFloat16;
+    try
+      L.Forward(FixX.totype(kBFloat16));
+      Fail('no EPackedLinear');
+    except
+      on E: EPackedLinear do
+        AssertEquals('X must be kFloat (fp32)', E.Message);
+    end;
+  finally
+    L.Free;
   end;
 end;
 

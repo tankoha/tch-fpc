@@ -6,7 +6,75 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 Status at a glance of the knowledge-package and fine-tuning work:
 [progress.md](progress.md).
 
-## End of local session 15 (2026-11-25): M3 resume checklist — resume here
+## Local session 16 (2026-11-25): generator improved, spec-v3, pilots 2 and 3 — resume here
+
+The user chose (a) of the checklist below: improve and rerun the pilot.
+Work of the harness owner (no agents); nothing pushed.
+
+**What changed** (`samples/qwen-lora/gen/gen.bb`, `data-spec/`):
+- `reverify OUT VERIFY`: verifies the rejected records of a run again,
+  without Bedrock, and prints the compiler's first error or the actual
+  output. Used on the pilot because its log had no error messages; the
+  log now keeps `detail` and `actual` per request.
+- Repairs: for `wrong-output` the program's actual output (FPC: the
+  verifier's build is run again; Oxygene: rebuilt with EBuild, since the
+  verifier deletes it); for `compile-error` the source lines around the
+  first error with a marker and (FPC) a caret, and, when the same error
+  (position ignored) comes back, an instruction not to repeat the change.
+- Parallel workers (`run OUT VERIFY [MAX [WORKERS [TARGET]]]`): a tmp
+  directory per worker, one lock for the writers, Oxygene verified one at
+  a time; throttling (also the 429 of the login token, `CreateOAuth2Token`,
+  seen with four workers) is retried with a growing pause; any other
+  failure stops the hand-out and exits 4. `TARGET`: a dialect gets no new
+  job once that many of its records (fix records not counted) are
+  accepted, counted over all runs in OUT (jobs in progress may add up to
+  WORKERS more). `MAX` limits one call, for batches.
+- `plan COUNTS OUT [SEED]`: COUNTS is N or `objfpc=N,oxygene=M,...`; the
+  jobs are drawn as before (the pilots' plans are reproduced) and written
+  round-robin over the dialects; an existing `jobs.edn` is not overwritten.
+- `data-spec` **spec-v3** (README has the version table): "common
+  mistakes" per dialect and for all dialects in `dialects.md`, each
+  checked with the dialect's compiler or the verifier (probes in the
+  session's scratchpad, not kept); rules for `expected_stdout` (results
+  worked out step by step, column widths counted, no locale-dependent
+  dates) and for the repair in `spec.md`.
+- Checked without Bedrock: a fake `aws` on PATH that returns pilot
+  replies (parallel run, repair texts, exit 4 on a failed call, MAX and
+  TARGET).
+
+**Pilots** (outside the repository, `work/gen/pilot*`):
+
+| | spec | jobs | accepted | objfpc | fpc-delphi | unleashed | delphi | oxygene | fix records | cost |
+|---|---|---|---|---|---|---|---|---|---|---|
+| pilot | v1 | seed 1 | 43 % | 30 % | 80 % | 40 % | 50 % | 15 % | 20 | $1.4 |
+| pilot2 | v2 | seed 2 | 44 % | 40 % | 60 % | 45 % | 35 % | 40 % | 16 | $1.6 |
+| pilot3 | v3 | seed 2 (= pilot2) | **62 %** | 65 % | 85 % | 35 % | 60 % | 65 % | 32 | $1.6 |
+
+- pilot2 against pilot3 on the same jobs: 31 accepted in both, 31 only
+  in pilot3, 13 only in pilot2, 25 in neither (sign test p ≈ 0.01).
+  First answers accepted: 20 and 15 (no change); accepted after a repair:
+  24 → 47. The gain is the repair messages, not the list of mistakes.
+- In pilot2 the model often returned the same compile error four times,
+  among them mistakes the list names (Oxygene `writeLn` with two
+  arguments, a procedure type inside a parameter list).
+- 4 workers: about 8 minutes per 100 jobs; about 2.4 M input and 0.25 M
+  output tokens per 100 jobs ($0.50 / $1.50 per million).
+
+**Waiting for the user (first thing to ask):** the cost limit and the
+number of workers of the full run. Proposal (from pilot3's yields):
+`bb gen/gen.bb plan objfpc=2000,fpc-delphi=1500,unleashed=3500,delphi=2000,oxygene=2000 work/gen/v1 3`,
+then `bb gen/gen.bb run work/gen/v1 $PWD/work/proto/T22/bin/qlora_verify 2000 4 900`
+in batches of 2000 jobs (about $31 each; check `stats` between them).
+TARGET 900 leaves room for `qlora_dataset`'s near-duplicate and leak
+removal (1000 per dialect, 15 % of them fix records). Expected: about
+7 900 jobs, about $125, about 10 hours with 4 workers (8 workers not
+tried). Unleashed's yield (35–45 %) is the least certain. **No Bedrock
+call without the user's approval of the cost.**
+
+**After the generation run:** as in the checklist below ("After the
+generation run"); run `qlora_dataset` with `--spec-version spec-v3`.
+
+## End of local session 15 (2026-11-25): M3 resume checklist — answered in local session 16 above
 
 The session was closed for a fresh one in the middle of M3. Everything
 below is committed; nothing since `0d27f50` is pushed (eight commits,

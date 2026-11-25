@@ -2,11 +2,12 @@
   per call to fp32 by GgufQuantT.DequantizeT (DESIGN 8.12, "PackedLinear").
   Shapes in libtorch order [Out, In]; a GGUF matrix lists its dims as
   (In, Out). LoadPacked / LoadDense read a tensor of a TGgufFile. With a
-  LoRA pair (T12; not owned) Forward adds its Delta. Written without
+  LoRA pair (T12; not owned) Forward adds its Delta. With Compute kBFloat16
+  (T21) the products run in bf16 and Forward returns fp32. Written without
   reference to Qwen.
 
-  Interface by the harness owner (tasks/T10-facts.md, T12-facts.md); the
-  bodies are written in T10b and T12b. }
+  Interface by the harness owner (tasks/T10-facts.md, T12-facts.md,
+  T21-facts.md); the bodies are written in T10b, T12b and T21b. }
 unit PackedLinear;
 
 {$mode objfpc}{$H+}
@@ -25,7 +26,9 @@ type
     FTType: Cardinal;
     FOutDim, FInDim: Int64;
     FLora: TLoraPair;
+    FCompute: TKind;
     procedure SetLora(AValue: TLoraPair);
+    procedure SetCompute(AValue: TKind);
   public
     constructor Create(const ARaw: TTensor; ATType: Cardinal; AOutDim, AInDim: Int64);
     function Weight: TTensor;
@@ -36,6 +39,10 @@ type
     property InDim: Int64 read FInDim;
     { Not owned; nil (the default) for none. }
     property Lora: TLoraPair read FLora write SetLora;
+    { The kind of the matrix products: kFloat (the default) or kBFloat16.
+      With kBFloat16, X (fp32) and the weight are cast to bf16, the LoRA
+      Delta gets the bf16 X, and the sum is cast back to fp32. }
+    property Compute: TKind read FCompute write SetCompute;
   end;
 
 function TensorRaw(G: TGgufFile; const AName: RawByteString; const ADevice: TDevice;
@@ -78,6 +85,7 @@ begin
   FTType := ATType;
   FOutDim := AOutDim;
   FInDim := AInDim;
+  FCompute := kFloat;
 end;
 
 function TPackedLinear.Weight: TTensor;
@@ -97,6 +105,11 @@ begin
   Result := X.matmul(Weight.transpose(0, 1));
   if FLora <> nil then
     Result := Result + FLora.Delta(X);
+end;
+
+procedure TPackedLinear.SetCompute(AValue: TKind);
+begin
+  raise EPackedLinear.Create('TPackedLinear.SetCompute: not implemented yet');
 end;
 
 procedure TPackedLinear.SetLora(AValue: TLoraPair);

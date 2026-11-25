@@ -5,7 +5,8 @@
   tests/ut/QwenBlocksFixture.pas (which carries T05's tiny tokenizer).
   Invoked with `--all --format=plain` (see .sdlc/ut-coverage.sh).
 
-  Skeleton by the harness owner; the test methods are written in T17b. }
+  Skeleton by the harness owner; the test methods are written in T17b. 
+  (T21 from 301: --compute; the methods are written in T21b.)}
 program TrainCli_test;
 
 {$mode objfpc}{$H+}

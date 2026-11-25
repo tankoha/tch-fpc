@@ -5,7 +5,8 @@
   Runs on the CPU (.sdlc/ut-coverage.sh hides the GPUs).
   Invoked with `--all --format=plain` (see .sdlc/ut-coverage.sh).
 
-  Skeleton by the harness owner; the test methods are written in T10b and T12b. }
+  Skeleton by the harness owner; the test methods are written in T10b and T12b. 
+  (T21 from 301: the compute kind; the methods are written in T21b.)}
 program PackedLinear_test;
 
 {$mode objfpc}{$H+}

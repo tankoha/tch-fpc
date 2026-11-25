@@ -11,6 +11,8 @@
     --classes A,B (compiled-run,fpc-approx)
     --split S        blocks 0..S-1 on cuda:0, the rest and the head on
                      cuda:1 (default: all on the CPU)
+    --compute K      fp32 (default) or bf16: the kind of the matrix
+                     products (T21); not part of the configuration hash
     --base-sha256 H  the base GGUF's sha256 (default: from a file name
                      sha256-<64 hex>, else empty)
     --max-updates N  stop after update N (0: run to the end)
@@ -29,8 +31,8 @@
     checkpoint: 'ckpt', update, validation loss, directory.
   Exit codes: 0 done (or --max-updates reached), 1 error, 2 usage,
     3 non-finite loss.
-  Interface by the harness owner (tasks/T17-facts.md); the bodies are
-  written in T17b. }
+  Interface by the harness owner (tasks/T17-facts.md, T21-facts.md); the
+  bodies are written in T17b and T21b. }
 unit TrainCli;
 
 interface
@@ -47,6 +49,7 @@ type
     Warmup, Epochs, Seed, Pool, Budget, BatchesPerUpdate, CkptEvery, Keep, Slice: Integer;
     Classes: TStringArray;
     Split: Integer;            // -1: CPU
+    Compute: TKind;            // kFloat or kBFloat16
     BaseSha256: string;
     MaxUpdates: Int64;
     Resume: Boolean;
@@ -91,6 +94,7 @@ begin
   Result.Slice := 256;
   Result.Classes := TStringArray.Create('compiled-run', 'fpc-approx');
   Result.Split := -1;
+  Result.Compute := kFloat;
   Result.MaxUpdates := 0;
 end;
 

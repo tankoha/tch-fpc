@@ -6,7 +6,8 @@
   Runs on the CPU (.sdlc/ut-coverage.sh hides the GPUs).
   Invoked with `--all --format=plain` (see .sdlc/ut-coverage.sh).
 
-  Skeleton by the harness owner; the test methods are written in T11b. }
+  Skeleton by the harness owner; the test methods are written in T11b. 
+  (T21 from 301: --compute; the methods are written in T21b.)}
 program LogprobsCli_test;
 
 {$mode objfpc}{$H+}
@@ -46,7 +47,7 @@ type
   end;
 
 const
-  Usage = 'Usage: qlora_logprobs [--top N] [--split S] MODEL FILE';
+  Usage = 'Usage: qlora_logprobs [--top N] [--split S] [--compute K] MODEL FILE';
 
 var
   { the tiny model and the prompt file, written before the tests }

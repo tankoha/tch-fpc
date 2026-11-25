@@ -2,11 +2,14 @@
   (rows dequantised for the ids only), the trunk blocks of QwenBlocks as
   Recompute stages split over two devices, the final RMS norm and the head
   (output.weight, or token_embd when the file has none: tied), dequantised
-  HeadChunk rows at a time. fp32. DESIGN 8.10, 8.12, 8.14 "Head";
-  tasks/T11-facts.md.
+  HeadChunk rows at a time. fp32; with Compute kBFloat16 (T21) every
+  matrix product of the trunk blocks runs in bf16 (the head stays fp32:
+  bf16 logits would keep three significant digits). DESIGN 8.10,
+  8.12, 8.13, 8.14 "Head"; tasks/T11-facts.md, T21-facts.md.
 
   Skeleton by the harness owner (interface final); the routines are
-  written in T11b, AttachLora in T12b (tasks/T12-facts.md). }
+  written in T11b, AttachLora in T12b (tasks/T12-facts.md), Compute in
+  T21b (tasks/T21-facts.md). }
 unit QwenModel;
 
 {$mode objfpc}{$H+}
@@ -34,7 +37,9 @@ type
     FVocab, FRowBytes, FHeadRowBytes: Int64;
     FTied: Boolean;
     FHeadChunk: Int64;
+    FCompute: TKind;
     procedure SetHeadChunk(AValue: Int64);
+    procedure SetCompute(AValue: TKind);
   public
     constructor Load(G: TGgufFile; const ADevice0, ADevice1: TDevice; ASplit: Integer);
     destructor Destroy; override;
@@ -53,6 +58,9 @@ type
     property Vocab: Int64 read FVocab;
     property Tied: Boolean read FTied;
     property HeadChunk: Int64 read FHeadChunk write SetHeadChunk;
+    { kFloat (the default) or kBFloat16: sets every matrix of the trunk
+      blocks (TPackedLinear.Compute); the head stays fp32 (T21). }
+    property Compute: TKind read FCompute write SetCompute;
   end;
 
 function TrunkBlockCount(G: TGgufFile; const D: TQwenDims): Integer;
@@ -108,6 +116,7 @@ begin
   end;
   FHeadRowBytes := GgufTensorBytes(FHeadType, [QWord(FDims.Hidden)]);
   FHeadChunk := HeadChunkRows;
+  FCompute := kFloat;
 end;
 
 procedure TQwenModel.SetHeadChunk(AValue: Int64);
@@ -194,6 +203,11 @@ begin
     Inc(R0, Rows);
   end;
   Result := TTensor.cat(Parts, 1);
+end;
+
+procedure TQwenModel.SetCompute(AValue: TKind);
+begin
+  raise EQwenModel.Create('TQwenModel.SetCompute: not implemented yet');
 end;
 
 function TQwenModel.LastLogProbs(const AIds: array of Integer): TTensor;

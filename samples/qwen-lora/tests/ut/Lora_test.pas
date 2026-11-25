@@ -3,7 +3,8 @@
   stage 2 from 101: TLoraSet). Runs on the CPU (.sdlc/ut-coverage.sh hides
   the GPUs). Invoked with `--all --format=plain` (see .sdlc/ut-coverage.sh).
 
-  Skeleton by the harness owner; the test methods are written in T12b. }
+  Skeleton by the harness owner; the test methods are written in T12b. 
+  (T21: row 301, the initial values drawn on the CPU; the methods are written in T21b.)}
 program Lora_test;
 
 {$mode objfpc}{$H+}

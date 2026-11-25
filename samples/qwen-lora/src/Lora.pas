@@ -7,8 +7,8 @@
   read all pairs as one tch archive on the CPU. Written without reference
   to Qwen.
 
-  Interface by the harness owner (tasks/T12-facts.md); the bodies are
-  written in T12b. }
+  Interface by the harness owner (tasks/T12-facts.md, T21-facts.md); the
+  bodies are written in T12b and T21b. }
 unit Lora;
 
 {$mode objfpc}{$H+}
@@ -28,7 +28,9 @@ type
     FInDim, FOutDim, FRank: Int64;
     FScale: Double;
   public
-    { Registers lora_a (uniform in ±1/sqrt(AInDim)) and lora_b (zeros) under P. }
+    { Registers lora_a (uniform in ±1/sqrt(AInDim), drawn on the CPU and
+      copied to P's device, so the values do not depend on the device; T21)
+      and lora_b (zeros) under P. }
     constructor Create(const P: TVarPath; const AName: string; AInDim, AOutDim, ARank: Int64; AScale: Double);
     { s·((X·Aᵀ)·Bᵀ); X [.., InDim]; A and B are cast to X's kind. }
     function Delta(const X: TTensor): TTensor;

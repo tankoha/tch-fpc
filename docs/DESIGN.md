@@ -4507,6 +4507,32 @@ log-probabilities are bit for bit those without adapters; with random B
 the adapted forward is within 4.8e-5 of the base forward on a GGUF with
 W + s·B·A; block-wise gradients equal the whole-graph ones.
 
+**As written for T21 (local session 15, 2026-11-25;
+`samples/qwen-lora/tasks/T21-facts.md`).** The compute dtype above:
+`TPackedLinear.Compute` (`kFloat` by default, or `kBFloat16`) runs only
+the matrix product in bf16 — X and the dequantised weight cast to bf16,
+the LoRA delta of the bf16 X, the sum cast back to fp32. Everything else
+stays fp32, as R2 asks: the residual stream, the norms, RoPE, the
+convolution, the delta rule, the attention around the projections.
+**The head stays fp32**: bf16 logits keep three significant digits (steps
+of 0.0625 on the rehearsal model, measured), and the head is dequantised
+`HeadChunk` rows at a time, so its fp32 product costs little memory.
+`TQwenModel.Compute` sets every trunk matrix; `qlora_train` and
+`qlora_logprobs` take `--compute fp32|bf16`, a setting of the run like
+`--split` and not in the configuration hash (a checkpoint resumes in the
+other kind). The fp32 path is unchanged bit for bit. **`lora_a` is drawn
+on the CPU** and copied to its device (on the CPU the values of T12), so
+a run does not depend on the device map (M2g-a found the GPU's own
+generator gave another start). Measured with the prototype on the CPU,
+bf16 against fp32: logprobs of the 27 H43 prompts within 0.19 over the
+top 10 (median 0.04), top-1 27/27; training 4 updates within 5.3e-3
+relative. On the rehearsal model the bf16 difference is already above
+H43's 0.15 for the 27B on one prompt (0.188, the 130-token Pascal
+prompt), against our own fp32; that threshold is an estimate and a miss
+on the 27B goes to the user (8.11). Activations between the projections
+are fp32, so the 27B's block graph is larger than 8.3's bf16 estimate
+(not measured; R5 applies at the M4 smoke).
+
 ### 8.14 Block-wise backward, optimiser, checkpoints, the step
 
 **`Recompute`** — the reusable routine. A stage is anything with a device
@@ -5061,6 +5087,7 @@ test.
 | T18 | `GgufMerge`, `qlora_merge` | T04, T12 | round trip and fidelity checks of 8.15; **H47** |
 | T19 | `qlora_dataset` | T05, T06 | on a synthetic raw set with planted duplicates, leaks and failures, exactly the planted ones are rejected |
 | T20 | `qlora_eval` | T06 | against the rehearsal model: the report of 8.17 from a fixed transcript of replies |
+| T21 | bf16 compute (`--compute`), adapters drawn on the CPU (added at M2g, 2026-11-25) | T10, T12, T11, T17 | the default fp32 output byte-identical to before; bf16 logprobs and training close to fp32 on the CPU; then M2g-b on the two cards |
 
 Order: T01–T06 and T08, T13, T14 have no numeric predecessors and come
 first (T06 early, M3 needs it); then T07, T09, T10, T11 (end of M1); then

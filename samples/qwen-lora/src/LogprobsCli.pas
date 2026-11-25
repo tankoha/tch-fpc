@@ -1,17 +1,18 @@
 (* LogprobsCli (T11): the behaviour of qlora_logprobs. Command line:
-    qlora_logprobs [--top N] [--split S] MODEL FILE
+    qlora_logprobs [--top N] [--split S] [--compute K] MODEL FILE
   FILE: JSONL; every non-empty line is {"id": ..., "tokens": [ids]} or
   {"id": ..., "text": "..."} (text encoded by QwenTokenizer). One output
   line per record: {"id":"..","n":T,"top":[{"id":I,"logprob":L},...]}, the
   N most likely next tokens after the whole prompt (natural log of the
   softmax over the vocabulary; default N 20, 1..100). Without --split the
   model runs on the CPU; with --split S blocks 0..S-1 run on cuda:0 and the
-  rest and the head on cuda:1.
+  rest and the head on cuda:1. --compute fp32 (default) or bf16: the kind
+  of the matrix products (T21).
   Exit codes: 0 done, 1 error (message on stderr), 2 usage.
   tasks/T11-facts.md.
 
   Skeleton by the harness owner (interface final); the routines are
-  written in T11b3. *)
+  written in T11b3, --compute in T21b (tasks/T21-facts.md). *)
 unit LogprobsCli;
 
 {$mode objfpc}{$H+}
@@ -35,7 +36,7 @@ uses
   fpjson, jsonparser, Tch, GgufFile, QwenTokenizer, QwenModel;
 
 const
-  K_USAGE = 'Usage: qlora_logprobs [--top N] [--split S] MODEL FILE';
+  K_USAGE = 'Usage: qlora_logprobs [--top N] [--split S] [--compute K] MODEL FILE';
 
 type
   EUsage = class(Exception);

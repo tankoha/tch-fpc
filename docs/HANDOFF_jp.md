@@ -100,8 +100,8 @@ ITa（T20c、エージェント、`aws login` のあとに実行）：5/5 が 0�
 **次：** M2g（ユーザー：リハーサル用モデルを bf16 で両 GPU に分割し
 20 ステップ、CPU の曲線と比べる）。M3。未決のまま：ローカルセッション13 の M4 の問い。
 T17b2 の出来事の 2 つの宿題（トランスクリプトをプロジェクトの外に書く、拒否された delegate を
-フックが review pending のまま残す件）。新規：エージェントが fpcunit のテストに素の
-`Assert` を書く — フックか AGENTS.md の 1 行で禁じる（または UT のビルドに `-Sa` を足す）。
+フックが review pending のまま残す件）。済み：fpcunit のテストの素の `Assert` は
+`.sdlc/ut-coverage.sh` が拒み（ゲートが落ちる）、AGENTS.md でも禁じた。
 
 **T12（`Lora`）完了**（T12a、T12b1〜T12b4、T12c を `tasks/run-task.sh` で。約 4 時間）。
 各段階の後に確認：`-Cr` でビルドし直し、`src/Lora.pas`、`PackedLinear.pas`、`QwenBlocks.pas`、

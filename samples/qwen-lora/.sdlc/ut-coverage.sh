@@ -8,6 +8,8 @@
 # libraries (kcov's LD_PRELOAD wrapper) makes tests that load libtorch exit 1.
 # -B: rebuild every unit with line info; a stray .ppu next to a source
 # (compiled without -gl) would otherwise drop that unit from the coverage.
+# Plain Assert(...) in a test is refused: System.Assert does nothing
+# without -Sa, so such a check never fails; use AssertTrue and the like.
 #   TCH_LIBTCH  libtch build directory (default: ../../build/libtch, else
 #               ../../build/libtch-rocm)
 set -euo pipefail
@@ -21,6 +23,10 @@ work=$proj/work/ut
 rm -rf "$work" coverage
 mkdir -p "$work/units" "$work/bin" "$work/kcov" coverage
 runs=()
+if grep -nEi '(^|[^a-z0-9_.])assert[[:space:]]*\(' tests/ut/*.pas; then
+  echo "tests/ut: plain Assert(...) above does nothing without -Sa; use AssertTrue(msg, cond) etc."
+  exit 1
+fi
 for t in tests/ut/*_test.pas; do
   name=$(basename "$t" .pas)
   fpc -B -Mobjfpc -Sh -gl -gw -O- -vew -l- -Fu"$proj/src" -Fu"$root/src" -Fu"$proj/tests/ut" \

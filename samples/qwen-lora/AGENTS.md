@@ -155,6 +155,10 @@ list with the acceptance oracle of each task is 8.18.
 - Unit tests use fpcunit: `tests/ut/<Unit>_test.pas` is a program with a
   `TTestCase` class whose published methods are `procedure Test...`, run by
   `consoletestrunner`. Case IDs are `UT-<UNIT>-NNN`.
+- Checks in tests are fpcunit's (`AssertEquals`, `AssertTrue(msg, cond)`,
+  ...), never plain `Assert(cond, msg)`: `System.Assert` does nothing
+  without `-Sa`, which the build does not use, so the check never fails.
+  `.sdlc/ut-coverage.sh` refuses such a line.
 - Build line (what `.sdlc/ut-coverage.sh` uses):
   `fpc -Mobjfpc -Sh -gl -Fusrc -Fu../../src -FU<units> -Fl<libtch> -k-rpath=<libtch> <file.pas>`.
 - Tests that need a model file read its path from an environment variable

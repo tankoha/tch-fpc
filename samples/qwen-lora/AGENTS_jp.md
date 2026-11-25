@@ -126,6 +126,9 @@ ITa / ITb / ST の完了は消化率 100% (`sdlc.bb gate ita` など) で判定�
 - UT は fpcunit で書く。`tests/ut/<ユニット>_test.pas` は、published なメソッド
   `procedure Test...` を持つ `TTestCase` のクラスを含むプログラムで、`consoletestrunner` で動かす。
   ケース ID は `UT-<ユニット>-NNN`。
+- テストの確認は fpcunit のもの (`AssertEquals`、`AssertTrue(msg, cond)` など) を使い、
+  素の `Assert(cond, msg)` は書かない：`System.Assert` は `-Sa` なしでは何もせず、ビルドは
+  `-Sa` を使わないので、その確認は決して失敗しない。`.sdlc/ut-coverage.sh` はそういう行を拒む。
 - ビルドの行 (`.sdlc/ut-coverage.sh` が使うもの)：
   `fpc -Mobjfpc -Sh -gl -Fusrc -Fu../../src -FU<units> -Fl<libtch> -k-rpath=<libtch> <file.pas>`。
 - モデルのファイルが要るテストは、パスを環境変数 (リハーサル用の GGUF なら `QLORA_MODEL`)

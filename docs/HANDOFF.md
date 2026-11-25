@@ -121,9 +121,8 @@ gate 126/126. **All of M2's units (T12, T15–T20) are done.**
 both GPUs in bf16, 20 steps, against the CPU curve); M3. Still open: the
 M4 question of local session 13; the T17b2 incident's two follow-ups
 (transcripts outside the project; the hook keeping a refused delegate as
-review-pending); new: the agents write plain `Assert` in fpcunit tests —
-a hook or an AGENTS.md line should forbid it (or the UT build add
-`-Sa`).
+review-pending). Done: plain `Assert` in fpcunit tests is now refused by
+`.sdlc/ut-coverage.sh` (so the gate fails) and forbidden in AGENTS.md.
 
 **T12 (`Lora`) done** (T12a, T12b1–T12b4, T12c through
 `tasks/run-task.sh`, about 4 h). Each step checked: rebuilt with `-Cr`;

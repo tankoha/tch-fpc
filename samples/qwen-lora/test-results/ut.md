@@ -749,3 +749,10 @@ When a case is run again, do not edit its row; append a new row below (the last 
 | UT-EvalReport-007 | OK |  | 2026-11-25 | Adoption: H49 unmeasured → undecided; off empty |
 | UT-EvalReport-008 | OK |  | 2026-11-25 | DialectsOf: verified only, order, dedup, nil |
 | UT-EvalReport-009 | OK |  | 2026-11-25 | FirstBlock: fenced and unfenced, empty block, first block |
+| UT-EvalCli-101 | OK |  | 2026-11-25 | DefaultEvalConfig |
+| UT-EvalCli-102 | OK |  | 2026-11-25 | ParseEvalArgs: valid, positional after options, both options |
+| UT-EvalCli-103 | OK |  | 2026-11-25 | ParseEvalArgs: the six error messages |
+| UT-EvalCli-104 | OK |  | 2026-11-25 | LoadTasks: fields, blank line, no file, the seven error messages |
+| UT-EvalCli-105 | OK |  | 2026-11-25 | JudgeReply: the twelve judgment rows |
+| UT-EvalCli-106 | OK |  | 2026-11-25 | RunEvalCLI: valid run — results.tsv, report.md, before only |
+| UT-EvalCli-107 | OK |  | 2026-11-25 | RunEvalCLI: the four error paths |

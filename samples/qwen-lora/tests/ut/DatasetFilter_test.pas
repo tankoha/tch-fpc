@@ -174,12 +174,12 @@ begin
   SetLength(B2, 2);
   B2[0] := B1[0];
   B2[1] := 'unit v; end.';
-  Assert(SourceKey(B1) <> SourceKey(B2), 'row 005: the unit-v key must differ');
+  AssertTrue('row 005: the unit-v key must differ', SourceKey(B1) <> SourceKey(B2));
   SetLength(B3, 1);
   B3[0] := 'x := ''a'';';
   SetLength(B4, 1);
   B4[0] := 'x := ''A'';';
-  Assert(SourceKey(B3) <> SourceKey(B4), 'row 005: a vs A must differ');
+  AssertTrue('row 005: a vs A must differ', SourceKey(B3) <> SourceKey(B4));
 end;
 
 procedure TDatasetFilterTest.TestUT_DatasetFilter_006;
@@ -202,7 +202,7 @@ begin
   T[3] := 'd'; T[4] := 'e'; T[5] := 'f';
   S := Shingles(T);
   AssertEquals(2, Length(S));
-  Assert(S[0] < S[1], 'row 007: shingles must be ascending');
+  AssertTrue('row 007: shingles must be ascending', S[0] < S[1]);
   SetLength(T, 7);
   T[0] := 'x'; T[1] := 'x'; T[2] := 'x'; T[3] := 'x';
   T[4] := 'x'; T[5] := 'x'; T[6] := 'y';

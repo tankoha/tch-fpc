@@ -5,7 +5,7 @@
 再開するときは最初にこれを読んでください。決定事項と理由は [DESIGN_jp.md](DESIGN_jp.md) にあります。
 知識パッケージとファインチューニングの作業の状況は [progress_jp.md](progress_jp.md) で一目で見られます。
 
-## ローカルセッション15（2026-11-24〜25）：T17〜T19 完了、T20 は T20c を除き完了、M2 の終了条件が成立（H47、Ollama への取り込み） — ここから再開
+## ローカルセッション15（2026-11-24〜25）：T17〜T20 完了、M2 の終了条件が成立（H47、Ollama への取り込み） — ここから再開
 
 **T17（`qlora_train`）完了**（T17a、T17a2、T17b1〜T17b3、T17c を `tasks/run-task.sh` で）。
 各段階を確認した：`-Cr` で再ビルド。`src/TrainStep.pas` と `src/TrainCli.pas` の実装は
@@ -81,7 +81,7 @@ UT-DatasetCli-107 は評価課題の reference にレコード自身のプログ
 出力は試作の実行とバイト単位で同じ。ITa ゲート 121/121。Oxygene のフィルタ行は T19 に
 **含めない**：M3 で `DialectVerify`（T06）の変更として行う。
 
-**T20（`qlora_eval`）は T20c を除いて完了**（準備 840943b。T20a、T20b1、T20b2 を
+**T20（`qlora_eval`）完了**（準備 840943b。T20a、T20b1、T20b2、T20c を
 `tasks/run-task.sh` で）。DESIGN 8.17「T20 での実装」。返答はプログラムの外で記録する
 （`tests/ita/T20/ask.bb`、Ollama の `/api/chat`）。ITa は `qlora-m2-base` と `qlora-m2`
 の記録済みの返答それぞれ 56 個を判定する（0.8B は Pascal の課題 11 個のどれにも合格せず、
@@ -93,13 +93,11 @@ UT-EvalCli-106（入れ替わりの行が思考なしの節で一致してしま
 EvalReport_test から「台帳」の空の手続き 9 つを削除。EvalCli_test と DatasetFilter_test
 （T19b1）の **素の `Assert(cond, msg)` 36 個**を `AssertTrue` に：`System.Assert` は
 `-Sa` なしでは何もしないので、何も確かめていなかった。
-**T20c は未実行**：その前に AWS のセッションが切れた（exit 4）。ハーネス担当がエージェントの
-コードで ITa を実行した（結果はプロジェクトの外）：5/5 が 0、`summary.tsv`・`ours.tsv`・
-出力は試作の実行とバイト単位で同じ。残り：`aws login` のあと
-`QLORA_MODEL=…/Qwen3.5-0.8B-Q4_K_M.gguf tasks/run-task.sh T20c`（ゲートウェイはその
-`QLORA_MODEL` で動いている）、照合、コミット。これで M2 のユニットはすべて終わる。
+ITa（T20c、エージェント、`aws login` のあとに実行）：5/5 が 0、`summary.tsv`・`ours.tsv`・
+出力は試作の実行とバイト単位で同じ。ITa ゲート 126/126。**M2 のユニット（T12、T15〜T20）は
+すべて完了。**
 
-**次：** T20c（上）。M2g（ユーザー：リハーサル用モデルを bf16 で両 GPU に分割し
+**次：** M2g（ユーザー：リハーサル用モデルを bf16 で両 GPU に分割し
 20 ステップ、CPU の曲線と比べる）。M3。未決のまま：ローカルセッション13 の M4 の問い。
 T17b2 の出来事の 2 つの宿題（トランスクリプトをプロジェクトの外に書く、拒否された delegate を
 フックが review pending のまま残す件）。新規：エージェントが fpcunit のテストに素の

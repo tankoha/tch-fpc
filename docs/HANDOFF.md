@@ -6,7 +6,7 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 Status at a glance of the knowledge-package and fine-tuning work:
 [progress.md](progress.md).
 
-## Local session 15 (2026-11-24/25): T17–T19 done, T20 but for T20c, M2's exit conditions hold (H47, Ollama import) — resume here
+## Local session 15 (2026-11-24/25): T17–T20 done, M2's exit conditions hold (H47, Ollama import) — resume here
 
 **T17 (`qlora_train`) done** (T17a, T17a2, T17b1–T17b3, T17c through
 `tasks/run-task.sh`). Each step checked: rebuilt with `-Cr`; the
@@ -98,8 +98,8 @@ set of 33 records, `summary.tsv`, `ours.tsv` and the outputs
 byte-identical to the prototype's run; ITa gate 121/121. The Oxygene
 filter row is **not** in T19: a change of `DialectVerify` (T06) at M3.
 
-**T20 (`qlora_eval`) done but for T20c** (prepared 840943b; T20a,
-T20b1, T20b2 through `tasks/run-task.sh`). DESIGN 8.17 "As written for
+**T20 (`qlora_eval`) done** (prepared 840943b; T20a, T20b1, T20b2,
+T20c through `tasks/run-task.sh`). DESIGN 8.17 "As written for
 T20". The replies are recorded outside the program
 (`tests/ita/T20/ask.bb`, Ollama `/api/chat`); the ITa judges 56 recorded
 replies each of `qlora-m2-base` and `qlora-m2` (the 0.8B passes none of
@@ -113,15 +113,11 @@ thinking-off section) — facts rows reworded; nine "ledger" stubs removed
 from EvalReport_test; **36 plain `Assert(cond, msg)` calls** in
 EvalCli_test and DatasetFilter_test (T19b1) turned into `AssertTrue`:
 `System.Assert` is a no-op without `-Sa`, so they checked nothing.
-**T20c not run**: the AWS session expired before it (exit 4). The
-harness owner ran the ITa on the agents' code (results outside the
-project): 5/5 at 0, `summary.tsv`, `ours.tsv` and the outputs
-byte-identical to the prototype's run. Remaining: `aws login`, then
-`QLORA_MODEL=…/Qwen3.5-0.8B-Q4_K_M.gguf tasks/run-task.sh T20c` (the
-gateway runs with that `QLORA_MODEL`), compare, commit. Then all of
-M2's units are done.
+ITa (T20c, agents, run after an `aws login`): 5/5 at 0, `summary.tsv`,
+`ours.tsv` and the outputs byte-identical to the prototype's run; ITa
+gate 126/126. **All of M2's units (T12, T15–T20) are done.**
 
-**Next:** T20c (above); M2g (the user: the rehearsal model split over
+**Next:** M2g (the user: the rehearsal model split over
 both GPUs in bf16, 20 steps, against the CPU curve); M3. Still open: the
 M4 question of local session 13; the T17b2 incident's two follow-ups
 (transcripts outside the project; the hook keeping a refused delegate as

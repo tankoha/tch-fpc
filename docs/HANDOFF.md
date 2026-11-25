@@ -6,7 +6,7 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 Status at a glance of the knowledge-package and fine-tuning work:
 [progress.md](progress.md).
 
-## Local session 15 (2026-11-24/25): T17–T20 done, M2's exit conditions hold (H47, Ollama import) — resume here
+## Local session 15 (2026-11-24/25): T17–T21 done, M2 and M2g exit conditions hold — resume here
 
 **T17 (`qlora_train`) done** (T17a, T17a2, T17b1–T17b3, T17c through
 `tasks/run-task.sh`). Each step checked: rebuilt with `-Cr`; the
@@ -124,9 +124,27 @@ updates; resume on the cards exact; 221 s; peak 1.96 / 6.19 GiB. Found:
 `lora_a` is drawn by each device's own generator, so a run depends on
 the device map.
 
-**Next:** T21 (bf16 compute on the GPUs, and the adapter initialised on
-the CPU): prototype, facts, skeletons, ITa, tasks as for T17–T20; then
-M2g-b (`work/m2g/run.sh --compute bf16 12`, against the CPU curve); M3. Still open: the
+**T21 (bf16 compute, adapters drawn on the CPU) done** (prepared 8505b53;
+T21a–T21c through `tasks/run-task.sh`; DESIGN 8.13 "As written for T21").
+Only the trunk's matrix products run in bf16; the head stays fp32 (bf16
+logits step 0.0625); the fp32 path is unchanged bit for bit; `--compute`
+is not in the configuration hash. Each step checked: units equal the
+prototype (T21b2's `--compute` branch reformatted to the facts' layout);
+the 14 mutants caught on the facts' rows; UT gate 762/762, 100 % lines;
+ITa 6/6 equal to the prototype run (bf16 logprobs within 0.188, training
+within 5.3e-3), ITa gate 132/132.
+
+**M2g done: M2g's exit conditions hold** (DESIGN 8.11 "M2g-b measured"):
+bf16 on both cards from its own start follows the CPU fp32 curve (2.2e-3
+up to update 9, 6.3 % at most later, ends at 2.9 % of the first loss),
+159 s against 218 s in fp32; peak 2.18 / 6.28 GiB. Found: bf16 on the
+GPUs is not bit-reproducible run to run (losses up to 2.75e-4 apart from
+update 10), so exact resume holds for fp32 only. For M4: on the rehearsal
+model bf16 is already at 0.188 against our fp32 on one H43 prompt (the
+27B threshold is 0.15, an estimate); the fp32 activations between the
+projections make the 27B's block graph larger than 8.3's estimate.
+
+**Next:** M3. Still open: the
 M4 question of local session 13; the T17b2 incident's two follow-ups
 (transcripts outside the project; the hook keeping a refused delegate as
 review-pending). Done: plain `Assert` in fpcunit tests is now refused by

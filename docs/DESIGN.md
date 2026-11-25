@@ -4363,6 +4363,23 @@ the split model). Resume on the cards is exact (8 + 8 updates against 16:
 Proposed for T21 besides bf16: draw the adapter's initial values on the
 CPU and copy them, so a run does not depend on the device map.
 
+**M2g-b measured (2026-11-25**, harness owner, after T21, the committed
+code): the same run with `--split 12 --compute bf16`, from its own start
+(the adapter now drawn on the CPU: gradient norm at update 1 3.7718
+against the CPU's 3.7687): **within 2.2e-3 relative of the CPU fp32
+curve up to update 9**, 6.3 % at most afterwards, where the loss is below
+12 % of its start and differences compound; it ends at **2.9 %** of the
+first loss (CPU 2.7 %). 159 s against 218 s in fp32 on the cards; peak
+2.18 / 6.28 GiB. fp32 on the cards from its own start: within 5.5e-3 of
+the CPU curve. Resume on the cards: exact in fp32; in bf16 the update
+after the resume is exact, but **bf16 on the GPUs is not bit-reproducible
+run to run** (here the gradients differed from update 10, losses by up to
+2.75e-4; an earlier run of the same code matched): exact resume holds
+for fp32, for bf16 only to that order. **M2g's exit conditions hold**:
+the bf16 curve follows the CPU fp32 curve (no fixed tolerance was set
+before measuring; judged on the curve above) and the two-device path
+works, bf16 included.
+
 H43 in detail. Reference: the bundled `llama-server` started by hand on
 the same GGUF (`/completion`, `n_predict` 1, `n_probs` 20), for 24 prompts
 of 1, 2, 5, 63, 64, 65, 130 and about 600 tokens (single token: no

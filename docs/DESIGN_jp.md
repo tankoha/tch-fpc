@@ -4401,6 +4401,31 @@ data-spec/（Opus/Sonnet、リポジトリ内）  ──►  Mistral Large 3（�
 こと、生成器の項目を埋めること。そのうえで、何を受け入れるかはリポジトリの道具が
 独立に決める。「コンパイルが通る」という Mistral 自身の申告は、決して信用しない。
 
+**本番 1 回目の生成器（2026-11-26 にユーザーが変更）。** 本番 1 回目は Mistral Large 3 ではなく、ローカルの
+Qwen3.8 27B（128k、Ollama、思考なし）で生成する。上の図と段落は、設計の元の選択として Mistral のまま残す。
+根拠は、同じ 100 ジョブでの試験生成（ローカルセッション16、例の元のジョブを除いた 89 ジョブ）:
+
+| 生成器 | 受け入れ（89 ジョブ） | objfpc | fpc-delphi | unleashed | delphi | oxygene |
+|---|---|---|---|---|---|---|
+| Mistral Large 3、spec-v3 | 57 % | 61 % | 83 % | 24 % | 56 % | 61 % |
+| Qwen3.8 27B、spec-v3 | 40 % | 44 % | 78 % | 0 % | 72 % | 6 % |
+| Qwen3.8 27B、spec-v4（few-shot） | 53 % | 72 % | 61 % | 35 % | 56 % | 39 % |
+
+- **few-shot（spec-v4）。** ドライバは各ジョブの前に、同じ方言のやり取りを 2〜3 件
+  `data-spec/fewshot.jsonl` から置く。中身は、Mistral Large 3 が試験生成 2 と 3 で書き、検査器が受け入れた回答。
+  ハーネス担当が、タグがコードと合っていて説明に修正の跡がないものを選び、編集はしていない。
+  Claude が書いた例は渡さない（データ規則、8.7）。例の元のジョブは試験生成の比較から外した。
+  近似コピーの検査（4 行の窓の共有）では、それ以外に写しは見つからなかった。
+- **影響。** Bedrock の費用はかからない。その代わり GPU が数日ふさがり（ワーカー 2 で 1 ジョブ約 46 秒）、
+  その間 Hermes は Qwen を使えない。本番 1 回目は、自分で生成し検査器で選別したデータになる
+  （思考テキストなしの rejection sampling）。これは 8.7 で 2 回目の予定だったもの。
+  思考の形式は思考なしのまま（Qwen の回答は思考オフで作った）。
+  データカードには、レコードごとの生成器（`generator.model`、`version` = Ollama の digest、`fewshot`）と、
+  few-shot の例が Mistral の出力であることを記す。
+- **計画。** `plan objfpc=1600,fpc-delphi=1800,unleashed=3000,delphi=2100,oxygene=3000 work/gen/v1 3`、
+  `run work/gen/v1 VERIFY "" 2 900`（fix 以外の採用が 900 件に達した方言は止まる。
+  `work/gen/v1/run.sh` で再開できる）。2026-11-26 06:56 に開始。
+
 **公開（2026-11-17 にユーザーが決定）。** 受け入れたデータセットは、このリポジトリで
 公開する。`qlora_dataset` は `train.jsonl`、`valid.jsonl`、`manifest.jsonl` を `work/` では
 なく `samples/qwen-lora/data/dataset-v1/` に書く（コミットする。JSONL で数 MB）。生成器の

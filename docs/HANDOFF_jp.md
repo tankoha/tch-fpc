@@ -5,7 +5,45 @@
 再開するときは最初にこれを読んでください。決定事項と理由は [DESIGN_jp.md](DESIGN_jp.md) にあります。
 知識パッケージとファインチューニングの作業の状況は [progress_jp.md](progress_jp.md) で一目で見られます。
 
-## ローカルセッション16（2026-11-25）：生成器の改善、spec-v3、試験生成 2 と 3 — ここから再開
+## ローカルセッション16 の続き（2026-11-26）：few-shot 付きの Qwen で本番 1 回目を生成 — ここから再開
+
+ユーザーから、なぜ Mistral がサンプルを書くのかという質問があった（DESIGN 8.7 で選んだため）。ユーザーはローカルの
+Qwen3.8 27B を想定していた。pilot3 と同じジョブで試験生成を行い、ユーザーは **本番を Qwen で行う** ことを選んだ
+（DESIGN 8.16「Generator of run 1」）。ハーネス担当の作業（エージェントは使わない）。push はしていない。
+
+済んだこと:
+- `gen.bb`: `GEN_MODEL=ollama:<name>`（ローカル Ollama。思考は `GEN_THINK=1` のときだけ）。few-shot として、
+  ジョブと同じ方言の合格した Mistral の回答を 2〜3 件、各ジョブの前に置く（`data-spec/fewshot.jsonl`、計 11 件、
+  無編集、ID は `example-NN`）。ファイルは `gen.bb fewshot OUT:ID...` で作り直せる。レコードには `generator.fewshot` が入る。
+  ユーザーの `pascal-dialects` の例は Claude が書いたものなので使わない（8.7 のデータ規則）。
+- data-spec を **spec-v4** にした（README、spec.md 8 節、generator 欄）。
+- コミット `6bbd049`。
+
+試験生成、89 ジョブ（pilot3 の 100 件から例の元 11 件を除く）:
+
+| 生成器 | 全体 | objfpc | fpc-delphi | unleashed | delphi | oxygene | 100 ジョブの時間 |
+|---|---|---|---|---|---|---|---|
+| Mistral、spec-v3（pilot3） | 57 % | 61 % | 83 % | 24 % | 56 % | 61 % | 8 分、$1.6 |
+| Qwen、spec-v3（`pilot-qwen`） | 40 % | 44 % | 78 % | 0 % | 72 % | 6 % | 106 分 |
+| Qwen、spec-v4（`pilot-qwen-fs`） | 53 % | 72 % | 61 % | 35 % | 56 % | 39 % | 77 分 |
+
+例がないと、Qwen は Oxygene のファイル構成も Unleashed の unit 名（`System.SysUtils` と書く誤り）も知らなかった。
+例を渡すと、その大半が直った。
+
+**実行中:** 本番 1 回目を `samples/qwen-lora/work/gen/v1` で 2026-11-26 06:56 に開始した。切り離して動かしている
+（`setsid nohup work/gen/v1/run.sh`、PID は `pid.txt`、終了行は `exit.txt`）。計画は 11 500 ジョブ（seed 3）で、
+各方言は fix 以外の採用が 900 件に達すると止まる。見込みは約 8 700 ジョブ、4〜5 日。その間 Hermes から Qwen は使えない。
+
+次にやること:
+1. 進み具合を確認する: `bb gen/gen.bb stats work/gen/v1`、`tail work/gen/v1/run.txt`、`err.txt`。
+   止まっていたら（再起動や Ollama の再起動のあと）、`work/gen/v1/run.sh` を再実行する（終わったジョブは飛ばす）。
+   一時停止は `pid.txt` の PID を kill する。
+2. 5 方言すべてが 900 に達したら: `qlora_dataset --spec-version spec-v4`、リークとプライバシーの検査、
+   近似重複（H48）、データカード（生成器はレコードごとに Qwen、few-shot の例は Mistral 製と記す）。
+   その後、ベースライン評価を行う。
+3. 900 に届く前にジョブが尽きた方言があれば、別の seed で追加の計画を作る。
+
+## ローカルセッション16（2026-11-25）：生成器の改善、spec-v3、試験生成 2 と 3
 
 ユーザーは下のチェックリストの (a)（改善して試験生成をやり直す）を選んだ。ハーネス担当の作業
 （エージェントは使わない）。push はしていない。

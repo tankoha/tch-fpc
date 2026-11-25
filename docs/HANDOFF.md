@@ -6,7 +6,51 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 Status at a glance of the knowledge-package and fine-tuning work:
 [progress.md](progress.md).
 
-## Local session 16 (2026-11-25): generator improved, spec-v3, pilots 2 and 3 — resume here
+## Local session 16, continued (2026-11-26): Qwen with few-shot generates run 1 — resume here
+
+The user asked why Mistral writes the samples (DESIGN 8.7 chose it); they
+had expected the local Qwen3.8 27B. Pilots on the pilot3 jobs, then the
+user chose **Qwen for the full run** (DESIGN 8.16, "Generator of run 1").
+Work of the harness owner (no agents); nothing pushed.
+
+Done:
+- `gen.bb`: `GEN_MODEL=ollama:<name>` (local Ollama, thinking off unless
+  `GEN_THINK=1`); few-shot: two or three accepted Mistral replies of the
+  job's dialect (`data-spec/fewshot.jsonl`, 11 in all, unedited, ids
+  `example-NN`) before each job; `gen.bb fewshot OUT:ID...` rebuilds the
+  file; records carry `generator.fewshot`. The user's `pascal-dialects`
+  examples are Claude-written and stay out (8.7 data rules).
+- data-spec **spec-v4** (README, spec.md section 8, generator field).
+- Commit `6bbd049`.
+
+Pilots, 89 jobs (pilot3's 100 without the 11 example sources):
+
+| Generator | All | objfpc | fpc-delphi | unleashed | delphi | oxygene | Time per 100 jobs |
+|---|---|---|---|---|---|---|---|
+| Mistral, spec-v3 (pilot3) | 57 % | 61 % | 83 % | 24 % | 56 % | 61 % | 8 min, $1.6 |
+| Qwen, spec-v3 (`pilot-qwen`) | 40 % | 44 % | 78 % | 0 % | 72 % | 6 % | 106 min |
+| Qwen, spec-v4 (`pilot-qwen-fs`) | 53 % | 72 % | 61 % | 35 % | 56 % | 39 % | 77 min |
+
+Without examples Qwen did not know Oxygene's file layout or Unleashed's
+units (`System.SysUtils`); the examples fixed most of that.
+
+**Running now:** full run 1 in `samples/qwen-lora/work/gen/v1`, started
+2026-11-26 06:56, detached (`setsid nohup work/gen/v1/run.sh`, PID in
+`pid.txt`, exit line in `exit.txt`). 11 500 jobs planned (seed 3); a
+dialect stops at 900 accepted non-fix records. Expected about 8 700 jobs,
+about 4–5 days; Hermes cannot use Qwen meanwhile.
+
+Next:
+1. Check progress: `bb gen/gen.bb stats work/gen/v1`, `tail work/gen/v1/run.txt`,
+   `err.txt`. If stopped (reboot, Ollama restart): run `work/gen/v1/run.sh`
+   again (finished jobs are skipped). To pause: kill the PID in `pid.txt`.
+2. When all five dialects reach 900: `qlora_dataset --spec-version spec-v4`,
+   leak and privacy checks, near-duplicates (H48), the card (generator
+   Qwen per record, few-shot examples from Mistral), then the baseline
+   evaluation.
+3. If a dialect runs out of jobs before 900: plan more with another seed.
+
+## Local session 16 (2026-11-25): generator improved, spec-v3, pilots 2 and 3
 
 The user chose (a) of the checklist below: improve and rerun the pilot.
 Work of the harness owner (no agents); nothing pushed.

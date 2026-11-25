@@ -767,3 +767,8 @@ When a case is run again, do not edit its row; append a new row below (the last 
 | UT-TrainCli-302 | OK |  | 2026-11-25 | bf16 run against the fp32 run |
 | UT-LogprobsCli-301 | OK |  | 2026-11-25 | --compute bf16 and fp32 logprobs |
 | UT-LogprobsCli-302 | OK |  | 2026-11-25 | --compute with no value and a bad value |
+| UT-DialectVerify-301 | OK |  | 2026-11-25 | T22: Oxygene フィールド (Elements, OxyRoot) |
+| UT-DialectVerify-302 | OK |  | 2026-11-25 | T22: EBuild の `E: ` 行 (行頭の `E: ` のみを取り選ぶ) |
+| UT-DialectVerify-303 | OK |  | 2026-11-25 | T22: flatpak でのビルド&実行、各 state、log から作業ディレクトリ除去 |
+| UT-DialectVerify-304 | OK |  | 2026-11-25 | T22: 再帰でツリー削除、親ディレクトリは残す |
+| UT-DialectVerify-305 | OK |  | 2026-11-25 | T22: Oxygene の各 outcome、作業ディレクトリの削除 |

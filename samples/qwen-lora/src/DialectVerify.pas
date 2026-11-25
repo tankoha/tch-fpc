@@ -128,6 +128,8 @@ begin
     Result.FpcUnleashed := AHome + '/unleashed/fpc/bin/fpc'
   else
     Result.FpcUnleashed := AFpcUnleashed;
+  Result.Elements := 'com.remobjects.earth';
+  Result.OxyRoot := AHome + '/.cache/qlora-verify';
 end;
 
 { 2.2 }
@@ -242,8 +244,8 @@ begin
   end
   else if D = D_OXYGENE then
   begin
-    Result := '';
-    AClass := VS_STATIC_ONLY;
+    Result := ExeSearch('flatpak');  { T22: EBuild in the Elements flatpak }
+    AClass := VS_COMPILED_RUN;
   end
   else
     Result := '';
@@ -380,7 +382,8 @@ begin
     if (Length(Line) > 0) and (Line[Length(Line)] = #13) then
       Delete(Line, Length(Line), 1);
     LowLine := LowerCase(Line);
-    if (Pos('error:', LowLine) > 0) or (Pos('fatal:', LowLine) > 0) then
+    if (Pos('error:', LowLine) > 0) or (Pos('fatal:', LowLine) > 0) or
+       (Copy(Line, 1, 3) = 'E: ') then  { T22: EBuild's error lines }
       Result := Line;
     I := Q + 1;
   end;
@@ -709,16 +712,53 @@ end;
   Elements flatpak. csOk when EBuild exits 0 and Bin/Ex.dll exists. }
 function OxygeneStep(AFlatpak, AApp, ASrcPath, AOutDir: string; ATimeoutMs: Integer;
   out ALog: string): TCompileState;
+var
+  Text, Out: string;
+  Code: Integer;
+  TimedOut: Boolean;
+  L: TStringList;
 begin
   ALog := '';
-  Result := csFail;
-  raise Exception.Create('OxygeneStep: not implemented yet');
+  if (AFlatpak = '') or (not IsPathUsable(AFlatpak)) then
+    Exit(csNoCompiler);
+  ForceDirectories(AOutDir);
+  ReadTextFile(ASrcPath, Text);
+  L := TStringList.Create;
+  try
+    L.Text := Text;
+    L.SaveToFile(AOutDir + '/Program.pas');
+    L.Text := K_OXY_PROJECT;
+    L.SaveToFile(AOutDir + '/Ex.elements');
+  finally
+    L.Free;
+  end;
+  RunLimited(AFlatpak, ['run', '--command=/app/dotnet/dotnet', AApp, '/app/earth/EBuild.dll',
+    'Ex.elements'], AOutDir, ATimeoutMs, Out, Code, TimedOut);
+  ALog := StringReplace(Out, AOutDir + '/', '', [rfReplaceAll]);  { no home path in a detail }
+  if TimedOut then
+    Exit(csTimeout);
+  if (Code <> 0) or not FileExists(AOutDir + '/Bin/Ex.dll') then
+    Exit(csFail);
+  Result := csOk;
 end;
 
 { 2.13c (T22) Deletes ADir and everything below it. }
 procedure RemoveTree(const ADir: string);
+var
+  R: TSearchRec;
 begin
-  raise Exception.Create('RemoveTree: not implemented yet');
+  if FindFirst(ADir + '/*', faAnyFile or faDirectory, R) = 0 then
+  begin
+    repeat
+      if (R.Name <> '.') and (R.Name <> '..') then
+        if (R.Attr and faDirectory) <> 0 then
+          RemoveTree(ADir + '/' + R.Name)
+        else
+          DeleteFile(ADir + '/' + R.Name);
+    until FindNext(R) <> 0;
+    FindClose(R);
+  end;
+  RemoveDir(ADir);
 end;
 
 { 2.14 }
@@ -740,23 +780,20 @@ begin
     Dialect := DetectDialect(Text, ASrcName);
   CClass := '';
   Comp := ChooseCompiler(Dialect, AEnv, CClass);
-  if Dialect = D_OXYGENE then
-  begin
-    if DetectDialect(Text, ASrcName) = D_OXYGENE then
-      Outcome := OUT_STATIC_OK
-    else
-      Outcome := OUT_STATIC_REJECT;
-    AOK := IsGoodOutcome(Outcome);
-    Result := ASrcName + #9 + Dialect + #9 + CClass + #9 + Outcome + #9 +
-      NormalizeDetail('');
-    Exit;
-  end;
   { fresh out dir <workroot>/<n>, n unique per call (salt + per-process
     sequence), so a rerun never collides with a stale directory }
   GVerifySeq := GVerifySeq + 1;
-  W := AWorkRoot + '/' + IntToStr(GVerifyInit + GVerifySeq);
-  State := CompileStep(Comp, ASrcName, W, ATimeoutSec * 1000,
-    (Dialect = D_DELPHI), Log, ExePath);
+  if Dialect = D_OXYGENE then
+  begin
+    W := AEnv.OxyRoot + '/' + IntToStr(GVerifyInit + GVerifySeq);
+    State := OxygeneStep(Comp, AEnv.Elements, ASrcName, W, ATimeoutSec * 1000, Log);
+  end
+  else
+  begin
+    W := AWorkRoot + '/' + IntToStr(GVerifyInit + GVerifySeq);
+    State := CompileStep(Comp, ASrcName, W, ATimeoutSec * 1000,
+      (Dialect = D_DELPHI), Log, ExePath);
+  end;
   if (State = csNoCompiler) or (State = csStartFail) then
   begin
     Outcome := OUT_SKIPPED;
@@ -797,8 +834,12 @@ begin
         dir to absolute before setting CurrentDirectory, so the absolute-shebang
         exec path below stays valid. Fixing the inherited-cwd default meant
         test 106's fixture now logs to an absolute path (see its notes). }
-      Ran := RunLimited(ExePath, [], W, ATimeoutSec * 1000, RunOut, Code,
-        TimedOut);
+      if Dialect = D_OXYGENE then
+        Ran := RunLimited(Comp, ['run', '--command=/app/dotnet/dotnet', AEnv.Elements,
+          'Bin/Ex.dll'], W, ATimeoutSec * 1000, RunOut, Code, TimedOut)
+      else
+        Ran := RunLimited(ExePath, [], W, ATimeoutSec * 1000, RunOut, Code,
+          TimedOut);
       if Ran and TimedOut then
       begin
         Outcome := OUT_TIMEOUT;
@@ -822,6 +863,8 @@ begin
       end;
     end;
   end;
+  if Dialect = D_OXYGENE then
+    RemoveTree(W);
   AOK := IsGoodOutcome(Outcome);
   Result := ASrcName + #9 + Dialect + #9 + CClass + #9 + Outcome + #9 +
     NormalizeDetail(Detail);

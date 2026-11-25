@@ -127,6 +127,12 @@ type
     { extra coverage of defensive CLI branches (not a contract row) }
     procedure TestUT_DialectVerify_200;
     procedure TestUT_DialectVerify_201;
+    { T22: Oxygene compiled (EBuild in the Elements flatpak) and run }
+    procedure TestUT_DialectVerify_301;
+    procedure TestUT_DialectVerify_302;
+    procedure TestUT_DialectVerify_303;
+    procedure TestUT_DialectVerify_304;
+    procedure TestUT_DialectVerify_305;
   end;
 
 procedure TTestDialectVerify.WriteTestFile(const APath, AContent: string);
@@ -210,8 +216,8 @@ var
   Cls: string;
 begin
   E := ReadEnvRec('', '', '/h');
-  AssertEquals('', ChooseCompiler('oxygene', E, Cls));
-  AssertEquals('static-only', Cls);
+  AssertEquals(ExeSearch('flatpak'), ChooseCompiler('oxygene', E, Cls));
+  AssertEquals('compiled-run', Cls);
 end;
 
 procedure TTestDialectVerify.TestUT_DialectVerify_038;
@@ -1106,30 +1112,72 @@ begin
   AssertEquals('timeout', Cell(O, 5));
 end;
 
+const
+  { a correct Oxygene console program; prints "Hello from Oxygene" and 4 }
+  OXY_OK = 'namespace Hello;' + #10 + #10 + 'type' + #10 + '  Program = class' + #10 +
+    '  public' + #10 + '    class method Main(args: array of String): Int32;' + #10 +
+    '    begin' + #10 + '      writeLn(''Hello from Oxygene'');' + #10 + '      writeLn(2 + 2);' + #10 +
+    '    end;' + #10 + '  end;' + #10 + #10 + 'end.' + #10;
+  OXY_OUT = 'Hello from Oxygene' + #10 + '4' + #10;
+
+{ OXY_OK with Main's body replaced by ABody }
+function OxyWith(const ABody: string): string;
+begin
+  Result := 'namespace Hello;' + #10 + #10 + 'type' + #10 + '  Program = class' + #10 +
+    '  public' + #10 + '    class method Main(args: array of String): Int32;' + #10 +
+    '    begin' + #10 + ABody + '    end;' + #10 + '  end;' + #10 + #10 + 'end.' + #10;
+end;
+
+{ the environment of the T22 rows: Oxygene work under work/ut/<ADir>/oxy }
+function OxyEnv(const ADir: string): TEnvRec;
+begin
+  Result := ReadEnvRec('', '', GetEnvironmentVariable('HOME'));
+  Result.OxyRoot := ExpandFileName('work/ut/' + ADir + '/oxy');
+end;
+
+{ how many entries ADir holds (0 when it does not exist) }
+function EntryCount(const ADir: string): Integer;
+var
+  R: TSearchRec;
+begin
+  Result := 0;
+  if FindFirst(ADir + '/*', faAnyFile or faDirectory, R) = 0 then
+  begin
+    repeat
+      if (R.Name <> '.') and (R.Name <> '..') then
+        Inc(Result);
+    until FindNext(R) <> 0;
+    FindClose(R);
+  end;
+end;
+
 procedure TTestDialectVerify.TestUT_DialectVerify_103;
 var
   E: TEnvRec;
   OK: Boolean;
-  O, W: string;
+  O: string;
 begin
   WriteTestFile('work/ut/dv-103/o.pas', 'namespace Demo; type T = class of object end; end.');
-  O := VerifyFile('work/ut/dv-103/o.pas', '', 5, E, '', OK);
-  AssertTrue(OK);
-  AssertEquals('static-ok', Cell(O, 4));
+  E := OxyEnv('dv-103');
+  O := VerifyFile('work/ut/dv-103/o.pas', '', 10, E, '', OK);
+  AssertFalse(OK);
+  AssertEquals('compile-error', Cell(O, 4));
   AssertEquals('oxygene', Cell(O, 2));
-  AssertEquals('static-only', Cell(O, 3));
+  AssertEquals('compiled-run', Cell(O, 3));
+  AssertEquals('E: semicolon (;) expected, got "end" [Program.pas (1)]', Cell(O, 5));
 end;
 
 procedure TTestDialectVerify.TestUT_DialectVerify_104;
 var
   E: TEnvRec;
   OK: Boolean;
-  O, W: string;
+  O: string;
 begin
   WriteTestFile('work/ut/dv-104/p.pas', 'program p; begin end.');
-  O := VerifyFile('work/ut/dv-104/p.pas', 'oxygene', 5, E, '', OK);
+  E := OxyEnv('dv-104');
+  O := VerifyFile('work/ut/dv-104/p.pas', 'oxygene', 10, E, '', OK);
   AssertFalse(OK);
-  AssertEquals('static-reject', Cell(O, 4));
+  AssertEquals('compile-error', Cell(O, 4));
 end;
 
 procedure TTestDialectVerify.TestUT_DialectVerify_105;
@@ -1519,6 +1567,109 @@ begin
   AssertFalse(R);
   AssertEquals(2, EC);
   AssertEquals(1, Length(L));
+end;
+
+procedure TTestDialectVerify.TestUT_DialectVerify_301;
+var
+  E: TEnvRec;
+begin
+  E := ReadEnvRec('', '', '/h');
+  AssertEquals('com.remobjects.earth', E.Elements);
+  AssertEquals('/h/.cache/qlora-verify', E.OxyRoot);
+end;
+
+procedure TTestDialectVerify.TestUT_DialectVerify_302;
+begin
+  AssertEquals('E: Unknown identifier "Foo" [Program.pas (7)]',
+    FirstCompilerErrorLine('Building'#10 +
+      'XE: not this'#10 +
+      'E: Unknown identifier "Foo" [Program.pas (7)]'#13#10 +
+      'E: second'#10));
+  AssertEquals('', FirstCompilerErrorLine(' E: indented'#10 + 'e: lower'#10));
+end;
+
+procedure TTestDialectVerify.TestUT_DialectVerify_303;
+var
+  E: TEnvRec;
+  Fp, Log: string;
+  S: TCompileState;
+begin
+  E := OxyEnv('dv-303');
+  Fp := ExeSearch('flatpak');
+  WriteTestFile('work/ut/dv-303/src/ok.pas', OXY_OK);
+  WriteTestFile('work/ut/dv-303/src/bad.pas', OxyWith('      writeLn(Foo);' + #10));
+  S := OxygeneStep(Fp, E.Elements, 'work/ut/dv-303/src/ok.pas', E.OxyRoot + '/a', 60000, Log);
+  AssertEquals('good build must be csOk', Ord(csOk), Ord(S));
+  AssertTrue('Program.pas missing in /a', FileExists(E.OxyRoot + '/a/Program.pas'));
+  AssertTrue('Ex.elements missing in /a', FileExists(E.OxyRoot + '/a/Ex.elements'));
+  AssertTrue('Bin/Ex.dll missing in /a', FileExists(E.OxyRoot + '/a/Bin/Ex.dll'));
+  S := OxygeneStep(Fp, E.Elements, 'work/ut/dv-303/src/bad.pas', E.OxyRoot + '/b', 60000, Log);
+  AssertEquals('bad build must be csFail', Ord(csFail), Ord(S));
+  AssertEquals('E: Unknown identifier "Foo" [Program.pas (8)]',
+    FirstCompilerErrorLine(Log));
+  AssertTrue('work directory left in log', Pos(E.OxyRoot, Log) = 0);
+  S := OxygeneStep('', E.Elements, 'work/ut/dv-303/src/ok.pas', E.OxyRoot + '/c', 60000, Log);
+  AssertEquals('empty flatpak path must be csNoCompiler', Ord(csNoCompiler), Ord(S));
+  S := OxygeneStep('/nonexistent/flatpak', E.Elements, 'work/ut/dv-303/src/ok.pas',
+    E.OxyRoot + '/d', 60000, Log);
+  AssertEquals('missing flatpak must be csNoCompiler', Ord(csNoCompiler), Ord(S));
+  S := OxygeneStep(Fp, E.Elements, 'work/ut/dv-303/src/ok.pas', E.OxyRoot + '/e', 1, Log);
+  AssertEquals('1 ms limit must be csTimeout', Ord(csTimeout), Ord(S));
+end;
+
+procedure TTestDialectVerify.TestUT_DialectVerify_304;
+begin
+  WriteTestFile('work/ut/dv-304/t/a.txt', 'a'#10);
+  WriteTestFile('work/ut/dv-304/t/s/b.txt', 'b'#10);
+  WriteTestFile('work/ut/dv-304/t/s/u/c.txt', 'c'#10);
+  RemoveTree('work/ut/dv-304/t');
+  AssertTrue('t still there', not DirectoryExists('work/ut/dv-304/t'));
+  AssertTrue('parent work/ut/dv-304 gone', DirectoryExists('work/ut/dv-304'));
+end;
+
+procedure TTestDialectVerify.TestUT_DialectVerify_305;
+var
+  E: TEnvRec;
+  OK: Boolean;
+  O: string;
+begin
+  E := OxyEnv('dv-305');
+  WriteTestFile('work/ut/dv-305/s/ok.pas', OXY_OK);
+  WriteTestFile('work/ut/dv-305/s/ok.expected', OXY_OUT);
+  WriteTestFile('work/ut/dv-305/s/wrong.pas', OXY_OK);
+  WriteTestFile('work/ut/dv-305/s/wrong.expected', 'Hello'#10);
+  WriteTestFile('work/ut/dv-305/s/noexp.pas', OXY_OK);
+  WriteTestFile('work/ut/dv-305/s/code.pas',
+    OxyWith('      writeLn(''x'');'#10 + '      exit 3;'#10));
+  WriteTestFile('work/ut/dv-305/s/code.expected', 'x'#10);
+  WriteTestFile('work/ut/dv-305/s/pit.pas',
+    OxyWith('      writeLn(Foo); // expect-error: Unknown identifier "Foo"'#10));
+  WriteTestFile('work/ut/dv-305/s/pit2.pas',
+    OxyWith('      writeLn(Foo); // expect-error: Type mismatch'#10));
+  O := VerifyFile('work/ut/dv-305/s/ok.pas', '', 10, E, 'work/ut/dv-305/w', OK);
+  AssertTrue('ok.pas must be OK', OK);
+  AssertEquals('oxygene', Cell(O, 2));
+  AssertEquals('compiled-run', Cell(O, 3));
+  AssertEquals('accepted', Cell(O, 4));
+  O := VerifyFile('work/ut/dv-305/s/wrong.pas', '', 10, E, 'work/ut/dv-305/w', OK);
+  AssertFalse('wrong.pas must not be OK', OK);
+  AssertEquals('wrong-output', Cell(O, 4));
+  O := VerifyFile('work/ut/dv-305/s/noexp.pas', '', 10, E, 'work/ut/dv-305/w', OK);
+  AssertFalse('noexp.pas must not be OK', OK);
+  AssertEquals('no-expected', Cell(O, 4));
+  O := VerifyFile('work/ut/dv-305/s/code.pas', '', 10, E, 'work/ut/dv-305/w', OK);
+  AssertFalse('code.pas must not be OK', OK);
+  AssertEquals('run-error', Cell(O, 4));
+  AssertEquals('3', Cell(O, 5));
+  O := VerifyFile('work/ut/dv-305/s/pit.pas', '', 10, E, 'work/ut/dv-305/w', OK);
+  AssertTrue('pit.pas must be accepted', OK);
+  AssertEquals('accepted', Cell(O, 4));
+  O := VerifyFile('work/ut/dv-305/s/pit2.pas', '', 10, E, 'work/ut/dv-305/w', OK);
+  AssertFalse('pit2.pas must not be OK', OK);
+  AssertEquals('wrong-error', Cell(O, 4));
+  AssertEquals('E: Unknown identifier "Foo" [Program.pas (8)]', Cell(O, 5));
+  AssertEquals(0, EntryCount(E.OxyRoot));
+  AssertTrue('work/ut/dv-305/w exists', not DirectoryExists('work/ut/dv-305/w'));
 end;
 
 var

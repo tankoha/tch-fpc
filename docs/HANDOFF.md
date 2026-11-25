@@ -144,7 +144,43 @@ model bf16 is already at 0.188 against our fp32 on one H43 prompt (the
 27B threshold is 0.15, an estimate); the fp32 activations between the
 projections make the 27B's block graph larger than 8.3's estimate.
 
-**Next:** M3. Still open: the
+**M3 started (2026-11-25, the user approved the plan).** Done and committed:
+- **T22** (the Oxygene filter row in `DialectVerify`: EBuild in the
+  Elements flatpak, dotnet; work directory under `~/.cache/qlora-verify`,
+  removed afterwards; about 0.8 s per file): T22a–T22c through
+  `tasks/run-task.sh`; unit equal to the prototype, ten mutants caught,
+  UT gate 767/767, 100 % lines; ITa 6/6 (with the T19 ITa again, its
+  `x-oxygene` record now planted with a wrong output); ITa gate 138/138.
+- **`data-spec/` spec-v1** (instructions and lists, no example programs):
+  the reply is four text sections and `gen.bb` builds the record (Mistral
+  could not return valid JSON with the source in it, and invented its
+  `generator` fields).
+- **Evaluation tasks v1** (`samples/qwen-lora/eval/`): 200 Pascal (40 per
+  dialect: 30 write, 5 fix, 5 convert), 20 contains and 10 tool-call
+  regression tasks; every reference accepted, every fix task's given
+  program fails to compile, every convert task's runs; the references as
+  replies pass all 460 judgements of `qlora_eval`. Found while writing
+  them, now in `data-spec` (Delphi rules of the FPC check): no `TProc` /
+  `TFunc`; a number list in `for X in [...]` is a byte set; sorting
+  strings with the default comparer fails (no widestring manager); nested
+  generics only as aliases. The `pascal-delphi` skill says `TProc` /
+  `TFunc` may be used: it disagrees with the check.
+- **Generator driver** `gen/gen.bb` (Bedrock Converse, Mistral Large 3,
+  ap-northeast-1; up to three repairs with the verifier's message; fix
+  records from failed first answers). **Pilot** (100 jobs,
+  `work/gen/pilot`, outside the repository): 43 accepted plus 20 fix
+  records; objfpc 30 %, fpc-delphi 80 %, unleashed 40 %, delphi 50 %,
+  oxygene 15 %; 1.93 M input, 0.26 M output tokens, about $1.4 at
+  $0.50 / $1.50 per million; about 50 s per job.
+
+**Waiting for the user:** improve the specification (common mistakes per
+dialect, the actual output in wrong-output repairs, a parallel driver)
+and rerun the pilot, or start the full run as it is (estimate: about
+11 000 jobs, about $150, about 90 hours unless run in parallel). Then
+`qlora_dataset` → `data/dataset-v1` and its card (H48), and the
+baseline evaluation (`eval/ask.bb` on `qwen3.8-27b-128k`, GPUs).
+
+**Next:** the user's decision above. Still open: the
 M4 question of local session 13; the T17b2 incident's two follow-ups
 (transcripts outside the project; the hook keeping a refused delegate as
 review-pending). Done: plain `Assert` in fpcunit tests is now refused by

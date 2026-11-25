@@ -4345,6 +4345,24 @@ a CPU rehearsal has one device: the hand-over of activations and gradients
 between two devices, bf16, and host offload are otherwise first run at M4,
 when Qwen is no longer there to fix anything.
 
+**M2g in two stages (decided by the user, 2026-11-25).** The code is
+fp32 throughout (`TPackedLinear` refuses other kinds), so M2g is run
+first in fp32 (M2g-a), then, after a task T21 adds bf16 compute on the
+GPUs (the compute dtype of 8.13), in bf16 (M2g-b). **M2g-a measured
+(2026-11-25**, harness owner, `samples/qwen-lora/work/m2g/`,
+git-ignored): the M2 exit run (32 records, 16 updates, lr 1e-3) with
+`--split 12` on the two cards, 221 s (CPU: 22 min). Started from its own
+initialisation it ends at 2.6 % of the first loss, but up to 6 % off the
+CPU curve, because `lora_a` is drawn by the device's own generator
+(`Uniform` on each device's store: the GPU run starts from another A,
+gradient norm 3.44 against 3.77 at update 1). Started from the CPU's
+checkpoint after update 1, the two-card run follows the CPU fp32 curve
+within **1.2e-3** relative over updates 2–16 (a CPU checkpoint resumes on
+the split model). Resume on the cards is exact (8 + 8 updates against 16:
+0). Peak VRAM 1.96 GiB on cuda:0, 6.19 GiB on cuda:1 (the head).
+Proposed for T21 besides bf16: draw the adapter's initial values on the
+CPU and copy them, so a run does not depend on the device map.
+
 H43 in detail. Reference: the bundled `llama-server` started by hand on
 the same GGUF (`/completion`, `n_predict` 1, `n_probs` 20), for 24 prompts
 of 1, 2, 5, 63, 64, 65, 130 and about 600 tokens (single token: no

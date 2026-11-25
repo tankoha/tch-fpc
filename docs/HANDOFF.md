@@ -117,8 +117,16 @@ ITa (T20c, agents, run after an `aws login`): 5/5 at 0, `summary.tsv`,
 `ours.tsv` and the outputs byte-identical to the prototype's run; ITa
 gate 126/126. **All of M2's units (T12, T15–T20) are done.**
 
-**Next:** M2g (the user: the rehearsal model split over
-both GPUs in bf16, 20 steps, against the CPU curve); M3. Still open: the
+**M2g-a done** (fp32 on both cards; the user chose two stages, DESIGN 8.11
+"M2g in two stages"): from the CPU checkpoint after update 1 the
+`--split 12` run follows the CPU curve within 1.2e-3 relative over 15
+updates; resume on the cards exact; 221 s; peak 1.96 / 6.19 GiB. Found:
+`lora_a` is drawn by each device's own generator, so a run depends on
+the device map.
+
+**Next:** T21 (bf16 compute on the GPUs, and the adapter initialised on
+the CPU): prototype, facts, skeletons, ITa, tasks as for T17–T20; then
+M2g-b (`work/m2g/run.sh --compute bf16 12`, against the CPU curve); M3. Still open: the
 M4 question of local session 13; the T17b2 incident's two follow-ups
 (transcripts outside the project; the hook keeping a refused delegate as
 review-pending). Done: plain `Assert` in fpcunit tests is now refused by

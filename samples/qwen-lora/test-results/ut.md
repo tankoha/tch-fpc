@@ -740,3 +740,12 @@ When a case is run again, do not edit its row; append a new row below (the last 
 | UT-DatasetCli-107 | OK |  | 2026-11-25 | RunDatasetCLI: leak checks against eval and examples |
 | UT-DatasetCli-108 | OK |  | 2026-11-25 | RunDatasetCLI: tokenizer check |
 | UT-DatasetCli-109 | OK |  | 2026-11-25 | RunDatasetCLI: raw errors, unknown option, missing files |
+| UT-EvalReport-001 | OK |  | 2026-11-25 | CountOf: dialect, verified aggregate, checks, thinking on/off, absent dialect |
+| UT-EvalReport-002 | OK |  | 2026-11-25 | FlipsOf: pairing, thinking, dialect, verified, unpaired |
+| UT-EvalReport-003 | OK |  | 2026-11-25 | SignTestP exact values |
+| UT-EvalReport-004 | OK |  | 2026-11-25 | PassRate: 3/4 and 0/0 (NaN) |
+| UT-EvalReport-005 | OK |  | 2026-11-25 | Adoption all yes |
+| UT-EvalReport-006 | OK |  | 2026-11-25 | Adoption: dialect fall, tool-call loss, H49 |
+| UT-EvalReport-007 | OK |  | 2026-11-25 | Adoption: H49 unmeasured → undecided; off empty |
+| UT-EvalReport-008 | OK |  | 2026-11-25 | DialectsOf: verified only, order, dedup, nil |
+| UT-EvalReport-009 | OK |  | 2026-11-25 | FirstBlock: fenced and unfenced, empty block, first block |

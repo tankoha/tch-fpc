@@ -28,22 +28,35 @@ run and print exactly the expected output are kept.
 - Source comments and identifiers are in English, whatever the prompt's
   language.
 
-## 2. Record
+## 2. Reply format and record
 
-Answer with exactly one JSON object (no text around it):
+Reply with exactly these four sections and nothing else (each heading on a
+line of its own, in this order):
 
-| Field | Type | Content |
-|---|---|---|
-| `id` | string | the job id you were given |
-| `dialect` | string | `objfpc`, `fpc-delphi`, `unleashed`, `delphi` or `oxygene` (as given) |
-| `task_type` | string | `write`, `extend`, `fix`, `convert` or `unit` (as given) |
-| `topic` | string | the topic you were given |
-| `features` | array of strings | the feature ids (dialects.md) the source really uses; at least the ones you were asked for |
-| `language` | string | `en` or `ja`: the language of the prompt |
-| `prompt` | string | the task as a user would write it (section 4) |
-| `answer` | string | one or two sentences, then the source: **exactly one fenced block per file** (```` ```pascal ```` … ```` ``` ````); for `unit` tasks the unit's block first, the program's block second (Oxygene: one block) |
-| `expected_stdout` | string | the exact standard output of the program, with every line break (`\n`) |
-| `generator` | object | `model`, `version`, `date` (YYYY-MM-DD), `prompt_id` (the job id), `temperature`, `repair_attempts` (0 when the first answer was kept) |
+````
+### prompt
+<the task as a user would write it (section 4)>
+### answer
+<one or two sentences, then the source: exactly one fenced block per
+file, ```pascal … ```; for `unit` tasks the unit's block first, the
+program's block second (Oxygene: one block)>
+### expected_stdout
+```text
+<the exact standard output of the program, every line as printed>
+```
+### features
+<the feature ids (dialects.md) the source really uses, comma-separated;
+at least the ones the job asks for>
+````
+
+The harness builds the record from the job and your sections:
+
+| Field | Content |
+|---|---|
+| `id`, `dialect`, `task_type`, `topic`, `language` | from the job |
+| `prompt`, `answer`, `features` | your sections |
+| `expected_stdout` | the text inside the ```` ```text ```` fence, each line ending with `\n` |
+| `generator` | filled by the harness: `model`, `version`, `date`, `prompt_id` (the job id), `temperature`, `repair_attempts` |
 
 A `unit` block starts with `unit <Name>;` and is saved as `<Name>.pas`
 next to the program; the program uses it by that name.
@@ -100,7 +113,7 @@ dialect × task type goes to validation.
 ## 7. Repairs
 
 When the harness returns a compiler or run message, answer with the
-whole corrected record (same `id`, `repair_attempts` one higher). At most
+whole corrected reply in the same four sections. At most
 three repairs; then the job is dropped.
 
 ## 8. Protocol (the harness side)

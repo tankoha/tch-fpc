@@ -158,3 +158,10 @@ When a case is run again, do not edit its row; append a new row below (the last 
 | ITa-T21-005 | OK | - | 2026-11-25 | fp32 for 2 updates, then --compute bf16 --resume: 4 updates, the first 2 identical to fp32, the rest within 0.02 (count of violations): value 0, limit 0 |
 | ITa-T21-006 | OK | - | 2026-11-25 | --compute bf16 twice: the logprobs byte-identical (1 if not): value 0, limit 0 |
 | ITa-T21 (driver) | OK | - | 2026-11-25 | summary.tsv tail: exit codes lp32 0, lp16a 0, lp16b 0, tr32 0, tr16 0, mix1 0, mix2 0, check 0; 0 other stderr lines (work/ita/T21/errors-other.txt) |
+| ITa-T22-001 | OK | - | 2026-11-25 | 11 Oxygene files: outcome as planted, class compiled-run (count of mismatches): value 0, limit 0 |
+| ITa-T22-002 | OK | - | 2026-11-25 | details free of the home directory and the work directory (count of lines): value 0, limit 0 |
+| ITa-T22-003 | OK | - | 2026-11-25 | Oxygene work directories left under ~/.cache/qlora-verify by the run (count): value 0, limit 0 |
+| ITa-T22-004 | OK | - | 2026-11-25 | seconds per Oxygene file (build and run): value 0.82, limit 5 |
+| ITa-T22-005 | OK | - | 2026-11-25 | the T19 ITa with this src/: NG cases (6 OK expected): value 0, limit 0 |
+| ITa-T22-006 | OK | - | 2026-11-25 | T19's x-oxygene compiled, run and rejected: reason "verify: wrong-output" (1 if not verify: wrong-output): value 0, limit 0 |
+| ITa-T22 (driver) | OK | - | 2026-11-25 | summary.tsv tail: exit codes verify 1 (planted faults, expected), t19 0, check 0; 0 other stderr lines (work/ita/T22/errors-other.txt) |

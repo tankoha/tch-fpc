@@ -6,7 +6,7 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 Status at a glance of the knowledge-package and fine-tuning work:
 [progress.md](progress.md).
 
-## Local session 15 (2026-11-24/25): T17 and T18 done, M2's exit conditions hold (H47, Ollama import) — resume here
+## Local session 15 (2026-11-24/25): T17–T19 done, T20 but for T20c, M2's exit conditions hold (H47, Ollama import) — resume here
 
 **T17 (`qlora_train`) done** (T17a, T17a2, T17b1–T17b3, T17c through
 `tasks/run-task.sh`). Each step checked: rebuilt with `-Cr`; the
@@ -75,7 +75,7 @@ run): 0, 0.643, 0.608, 3.75e-4, 1.74e-3, 0 — `ours.tsv` and the merged
 file byte-identical to the prototype's; **H47 holds with the agents'
 code**; ITa gate 115/115.
 
-**M2's exit conditions all hold (2026-11-25; T19 and T20 remain).** The last one: the user
+**M2's exit conditions all hold (2026-11-25).** The last one: the user
 imported the merged small model and the base into Ollama
 (`samples/qwen-lora/work/m2ollama/`: `Qwen3.5-0.8B-m2.gguf`,
 `Modelfile.base`, `Modelfile.m2`, `check.bb`; models `qlora-m2`,
@@ -85,12 +85,49 @@ reproduces trained answers (Lora 271/271, Checkpoint 245/304, Recompute
 import holds"). The two models may be removed with `ollama rm` when no
 longer wanted.
 
-**Next:** M2g (the user: the rehearsal model split over both GPUs in
-bf16, 20 steps, against the CPU curve) and M3 / the rest of M2's units:
-T19 (`qlora_dataset`, with the Oxygene EBuild filter row at M3) and T20
-(`qlora_eval`), both to prepare. Still open: the M4 question of local
-session 13; the T17b2 incident's two follow-ups (transcripts outside the
-project; the hook keeping a refused delegate as review-pending).
+**T19 (`qlora_dataset`) done** (prepared dc28a34; T19a, T19b1, T19b2,
+T19c through `tasks/run-task.sh`). DESIGN 8.16 "As written for T19".
+Each step checked: rebuilt with `-Cr`; `src/DatasetFilter.pas` and
+`src/DatasetCli.pas` equal the prototype in `work/proto/T19/` (header
+comment aside); the eleven mutants caught on the facts' rows; UT gate
+735/735, 100 % lines. Hand fixes: seven Input cells of T19a's case tables
+(extra back quotes); UT-DatasetCli-107 gave the evaluation task the
+record's own program as reference, so the prompt leak check never fired
+(facts row reworded). ITa (T19c, agents): 6/6 at 0 on the synthetic raw
+set of 33 records, `summary.tsv`, `ours.tsv` and the outputs
+byte-identical to the prototype's run; ITa gate 121/121. The Oxygene
+filter row is **not** in T19: a change of `DialectVerify` (T06) at M3.
+
+**T20 (`qlora_eval`) done but for T20c** (prepared 840943b; T20a,
+T20b1, T20b2 through `tasks/run-task.sh`). DESIGN 8.17 "As written for
+T20". The replies are recorded outside the program
+(`tests/ita/T20/ask.bb`, Ollama `/api/chat`); the ITa judges 56 recorded
+replies each of `qlora-m2-base` and `qlora-m2` (the 0.8B passes none of
+the eleven Pascal tasks; 14 regression passes). Each step checked as
+above: units equal the prototype; the thirteen mutants caught on the
+facts' rows; UT gate 751/751, 100 % lines (4569/4569). Hand fixes: one
+sentence of T20a's system flow ("56 replies per thinking mode": per
+model); UT-EvalReport-002 (task a seeds 1 and 2 read as two tasks),
+-007 (flips line not checked), UT-EvalCli-106 (flips line matched in the
+thinking-off section) — facts rows reworded; nine "ledger" stubs removed
+from EvalReport_test; **36 plain `Assert(cond, msg)` calls** in
+EvalCli_test and DatasetFilter_test (T19b1) turned into `AssertTrue`:
+`System.Assert` is a no-op without `-Sa`, so they checked nothing.
+**T20c not run**: the AWS session expired before it (exit 4). The
+harness owner ran the ITa on the agents' code (results outside the
+project): 5/5 at 0, `summary.tsv`, `ours.tsv` and the outputs
+byte-identical to the prototype's run. Remaining: `aws login`, then
+`QLORA_MODEL=…/Qwen3.5-0.8B-Q4_K_M.gguf tasks/run-task.sh T20c` (the
+gateway runs with that `QLORA_MODEL`), compare, commit. Then all of
+M2's units are done.
+
+**Next:** T20c (above); M2g (the user: the rehearsal model split over
+both GPUs in bf16, 20 steps, against the CPU curve); M3. Still open: the
+M4 question of local session 13; the T17b2 incident's two follow-ups
+(transcripts outside the project; the hook keeping a refused delegate as
+review-pending); new: the agents write plain `Assert` in fpcunit tests —
+a hook or an AGENTS.md line should forbid it (or the UT build add
+`-Sa`).
 
 **T12 (`Lora`) done** (T12a, T12b1–T12b4, T12c through
 `tasks/run-task.sh`, about 4 h). Each step checked: rebuilt with `-Cr`;

@@ -206,8 +206,27 @@ begin
 end;
 
 procedure TQwenModel.SetCompute(AValue: TKind);
+const
+  K_FFN: array[0..2] of string = ('ffn_gate', 'ffn_up', 'ffn_down');
+  K_LINEAR: array[0..4] of string = ('attn_qkv', 'attn_gate', 'ssm_beta', 'ssm_alpha', 'ssm_out');
+  K_FULL: array[0..3] of string = ('attn_q', 'attn_k', 'attn_v', 'attn_output');
+var
+  I, J: Integer;
 begin
-  raise EQwenModel.Create('TQwenModel.SetCompute: not implemented yet');
+  if (AValue <> kFloat) and (AValue <> kBFloat16) then
+    raise EQwenModel.Create('compute must be kFloat or kBFloat16');
+  for I := 0 to FTrunk - 1 do
+  begin
+    for J := 0 to High(K_FFN) do
+      FBlocks[I].Target(K_FFN[J]).Compute := AValue;
+    if IsFullBlock(FDims, I) then
+      for J := 0 to High(K_FULL) do
+        FBlocks[I].Target(K_FULL[J]).Compute := AValue
+    else
+      for J := 0 to High(K_LINEAR) do
+        FBlocks[I].Target(K_LINEAR[J]).Compute := AValue;
+  end;
+  FCompute := AValue;
 end;
 
 function TQwenModel.LastLogProbs(const AIds: array of Integer): TTensor;

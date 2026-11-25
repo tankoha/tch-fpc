@@ -44,6 +44,8 @@ type
     procedure TestUT_LogprobsCli_215;
     procedure TestUT_LogprobsCli_216;
     procedure TestUT_LogprobsCli_217;
+    procedure TestUT_LogprobsCli_301;
+    procedure TestUT_LogprobsCli_302;
   end;
 
 const
@@ -335,6 +337,73 @@ begin
     O.Free;
     E.Free;
   end;
+end;
+
+{ Like Want, but with the model's Compute set to kBFloat16 (T21). }
+function Want16(const AId: string; const AIds: array of Integer; ATop: Integer): string;
+var
+  G: TGgufFile;
+  M: TQwenModel;
+  V, Idx: TTensor;
+  Ids: array of Int64;
+  Lp: array of Double;
+  J: Integer;
+begin
+  G := TGgufFile.Open(TinyPath);
+  try
+    M := TQwenModel.Load(G, TDevice.Cpu, TDevice.Cpu, 0);
+    try
+      M.Compute := kBFloat16;
+      M.LastLogProbs(AIds).topk(ATop, 0, True, True, V, Idx);
+      Ids := nil;
+      Lp := nil;
+      SetLength(Ids, ATop);
+      SetLength(Lp, ATop);
+      for J := 0 to ATop - 1 do
+      begin
+        Ids[J] := Idx.Int64Value([J]);
+        Lp[J] := V.DoubleValue([J]);
+      end;
+      Result := TopLine(AId, Length(AIds), Ids, Lp);
+    finally
+      M.Free;
+    end;
+  finally
+    G.Free;
+  end;
+end;
+
+{ UT-LogprobsCli-301: --compute bf16 and fp32 }
+procedure TLogprobsCliTest.TestUT_LogprobsCli_301;
+var
+  O, E: TStringList;
+begin
+  try
+    AssertEquals(0, TLogprobsCliTest.RunCli(['--compute', 'bf16', '--top', '3', TinyPath, PromptPath], O, E));
+    AssertEquals(0, E.Count);
+    AssertEquals(3, O.Count);
+    AssertEquals('line 1 (bf16)', Want16('a', [5, 17, 2], 3), O[0]);
+    AssertTrue('differs from the fp32 line', O[0] <> TLogprobsCliTest.Want('a', [5, 17, 2], 3));
+  finally
+    O.Free;
+    E.Free;
+  end;
+  try
+    AssertEquals(0, TLogprobsCliTest.RunCli(['--top', '3', '--compute', 'fp32', TinyPath, PromptPath], O, E));
+    AssertEquals(0, E.Count);
+    AssertEquals(3, O.Count);
+    AssertEquals('line 1 (fp32)', TLogprobsCliTest.Want('a', [5, 17, 2], 3), O[0]);
+  finally
+    O.Free;
+    E.Free;
+  end;
+end;
+
+{ UT-LogprobsCli-302: --compute with no value and a bad value }
+procedure TLogprobsCliTest.TestUT_LogprobsCli_302;
+begin
+  CheckUsage(Self, ['--compute'], '--compute needs a value');
+  CheckUsage(Self, ['--compute', 'fp16', TinyPath, PromptPath], '--compute must be fp32 or bf16, got fp16');
 end;
 
 var

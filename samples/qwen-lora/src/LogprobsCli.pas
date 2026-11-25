@@ -68,6 +68,7 @@ end;
 function RunLogprobsCLI(const AArgs: array of string; AOut, AErr: TStrings): Integer;
 var
   Top, Split, I, J, LineNo: Integer;
+  Compute: TKind;
   Pos: array of string;
   G: TGgufFile;
   Tok: TQwenTokenizer;
@@ -83,18 +84,28 @@ var
   TopLp: array of Double;
 begin
   Top := 20;
+  Compute := kFloat;
   Split := -1;
   Pos := nil;
   try
     I := 0;
     while I <= High(AArgs) do
     begin
-      if (AArgs[I] = '--top') or (AArgs[I] = '--split') then
+      if (AArgs[I] = '--top') or (AArgs[I] = '--split') or (AArgs[I] = '--compute') then
       begin
         if I = High(AArgs) then
           raise EUsage.Create(AArgs[I] + ' needs a value');
         if AArgs[I] = '--top' then
           Top := ParseCount(AArgs[I + 1], '--top', 1, 100)
+        else if AArgs[I] = '--compute' then
+        begin
+          if AArgs[I + 1] = 'fp32' then
+            Compute := kFloat
+          else if AArgs[I + 1] = 'bf16' then
+            Compute := kBFloat16
+          else
+            raise EUsage.Create('--compute must be fp32 or bf16, got ' + AArgs[I + 1]);
+        end
         else
           Split := ParseCount(AArgs[I + 1], '--split', 0, 1000);
         Inc(I, 2);
@@ -130,6 +141,7 @@ begin
         M := TQwenModel.Load(G, TDevice.Cpu, TDevice.Cpu, 0)
       else
         M := TQwenModel.Load(G, TDevice.Cuda(0), TDevice.Cuda(1), Split);
+      M.Compute := Compute;
       for LineNo := 1 to Lines.Count do
       begin
         if Trim(Lines[LineNo - 1]) = '' then

@@ -61,6 +61,8 @@ type
     procedure TestUT_QwenModel_205;
     procedure TestUT_QwenModel_206;
     procedure TestUT_QwenModel_207;
+    procedure TestUT_QwenModel_301;
+    procedure TestUT_QwenModel_302;
   end;
 
 const
@@ -870,6 +872,116 @@ begin
   finally
     M.Free;
     S.Free;
+    G.Free;
+  end;
+end;
+
+{ The number of the trunk matrices of M computed with AK (T21: ffn_gate,
+  ffn_up, ffn_down of every block, plus the block's own matrices). }
+function ComputeCount(const M: TQwenModel; AK: TKind): Integer;
+const
+  K_FFN: array[0..2] of string = ('ffn_gate', 'ffn_up', 'ffn_down');
+  K_LINEAR: array[0..4] of string = ('attn_qkv', 'attn_gate', 'ssm_beta', 'ssm_alpha', 'ssm_out');
+  K_FULL: array[0..3] of string = ('attn_q', 'attn_k', 'attn_v', 'attn_output');
+var
+  I, J, N: Integer;
+  B: TQwenBlock;
+
+  procedure CountNames(const Names: array of string; ANum: Integer);
+  var
+    K: Integer;
+  begin
+    for K := 0 to ANum - 1 do
+      if B.Target(Names[K]).Compute = AK then
+        Inc(N);
+  end;
+begin
+  N := 0;
+  for I := 0 to M.TrunkBlocks - 1 do
+  begin
+    B := M.Stages[I] as TQwenBlock;
+    CountNames(K_FFN, Length(K_FFN));
+    if IsFullBlock(M.Dims, I) then
+      CountNames(K_FULL, Length(K_FULL))
+    else
+      CountNames(K_LINEAR, Length(K_LINEAR));
+  end;
+  Result := N;
+end;
+
+{ Max |v| of the array. }
+function MaxAbs(const A: array of Double): Double;
+var
+  I: Integer;
+begin
+  Result := 0;
+  for I := 0 to High(A) do
+    Result := Max(Result, Abs(A[I]));
+end;
+
+{ UT-QwenModel-301: SetCompute, every matrix of the trunk blocks. }
+procedure TQwenModelTest.TestUT_QwenModel_301;
+var
+  G: TGgufFile;
+  M: TQwenModel;
+begin
+  G := TGgufFile.Open(TiedPath);
+  M := TQwenModel.Load(G, TDevice.Cpu, TDevice.Cpu, 1);
+  try
+    AssertTrue('default kFloat', M.Compute = kFloat);
+    AssertEquals('15 of 15 kFloat', 15, ComputeCount(M, kFloat));
+    M.Compute := kBFloat16;
+    AssertTrue('kBFloat16', M.Compute = kBFloat16);
+    AssertEquals('15 of 15 kBFloat16', 15, ComputeCount(M, kBFloat16));
+    try
+      M.Compute := kHalf;
+      Fail('no EQwenModel');
+    except
+      on E: EQwenModel do
+        AssertEquals('compute must be kFloat or kBFloat16', E.Message);
+    end;
+    AssertTrue('still kBFloat16', M.Compute = kBFloat16);
+    AssertEquals('still 15 of 15 kBFloat16', 15, ComputeCount(M, kBFloat16));
+    M.Compute := kFloat;
+    AssertEquals('15 of 15 kFloat', 15, ComputeCount(M, kFloat));
+  finally
+    M.Free;
+    G.Free;
+  end;
+end;
+
+{ UT-QwenModel-302: Logits, the head stays fp32 in bf16. }
+procedure TQwenModelTest.TestUT_QwenModel_302;
+var
+  G: TGgufFile;
+  M: TQwenModel;
+  Guard: IInterface;
+  L32, L16, H, A, B: TTensor;
+  D: Double;
+begin
+  G := TGgufFile.Open(TiedPath);
+  M := TQwenModel.Load(G, TDevice.Cpu, TDevice.Cpu, 1);
+  try
+    L32 := NoGradLogits(M);
+    M.Compute := kBFloat16;
+    L16 := NoGradLogits(M);
+    Guard := NoGradGuard;
+    try
+      H := M.Trunk(M.Embed(Ids8));
+      A := M.Logits(H);
+    finally
+      Guard := nil;
+    end;
+    M.Compute := kFloat;
+    B := M.Logits(H);
+    AssertTrue('L16 kind kFloat', L16.Kind = kFloat);
+    D := DiffArr(Arr(L16), Arr(L32));
+    AssertTrue('max |L16 - L32| > 0', D > 0);
+    AssertTrue('max |L16 - L32| / max |L32| <= 0.05', D / MaxAbs(Arr(L32)) <= 0.05);
+    AssertTrue('A equals B (exact: the head is fp32)', DiffArr(Arr(A), Arr(B)) = 0);
+    AssertTrue('the last logits equal L32 (exact)', DiffArr(Arr(NoGradLogits(M)), Arr(L32)) = 0);
+  finally
+    M.Free;
     G.Free;
   end;
 end;

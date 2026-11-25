@@ -60,6 +60,8 @@ type
     procedure TestUT_TrainCli_210;
     procedure TestUT_TrainCli_211;
     procedure TestUT_TrainCli_212;
+    procedure TestUT_TrainCli_301;
+    procedure TestUT_TrainCli_302;
   end;
 
 var
@@ -800,6 +802,65 @@ begin
   AssertEquals('exit code', 1, R);
   AssertEquals('err', 'split 3 outside 0..2', Err);
   AssertEquals('out', '', Out);
+end;
+
+procedure TTrainCliTest.TestUT_TrainCli_301;
+var
+  C: TTrainConfig;
+  H1, H2: string;
+begin
+  AssertEquals('no error', '', ParseTrainArgs(['m', 't', 'o'], C));
+  AssertTrue('default kFloat', C.Compute = kFloat);
+  AssertEquals('no error', '', ParseTrainArgs(['--compute', 'bf16', 'm', 't', 'o'], C));
+  AssertTrue('kBFloat16', C.Compute = kBFloat16);
+  AssertEquals('no error', '', ParseTrainArgs(['--compute', 'fp32', 'm', 't', 'o'], C));
+  AssertTrue('kFloat', C.Compute = kFloat);
+  CheckParse(Self, ['--compute', 'fp16', 'm', 't', 'o'], '--compute: fp32 or bf16, got "fp16"');
+  CheckParse(Self, ['--compute', 'BF16', 'm', 't', 'o'], '--compute: fp32 or bf16, got "BF16"');
+  CheckParse(Self, ['m', 't', 'o', '--compute'], '--compute: value missing');
+  C.Train := TrainFile;
+  H1 := ConfigHash(C);
+  C.Compute := kBFloat16;
+  H2 := ConfigHash(C);
+  AssertEquals('the kind is not in the hash', H1, H2);
+end;
+
+procedure TTrainCliTest.TestUT_TrainCli_302;
+var
+  O1, O2: string;
+  Out, Err: string;
+  L: TStringList;
+  FS: TFormatSettings;
+  F: TStringArray;
+  A1, A2, Rel: Double;
+begin
+  O1 := NewOut;
+  AssertEquals('fp32 exit code', 0, Run(RunArgs(O1, ['--max-updates', '2']), Out, Err));
+  O2 := NewOut;
+  AssertEquals('bf16 exit code', 0, Run(RunArgs(O2, ['--max-updates', '2', '--compute', 'bf16']), Out, Err));
+  AssertEquals('bf16 err', '', Err);
+  AssertEquals('bf16 out', 'stopped after update 2 of 8', Out);
+  FS := DefaultFormatSettings;
+  FS.DecimalSeparator := '.';
+  L := LogLines(O1);
+  try
+    AssertEquals('fp32: two update lines', 2, L.Count);
+    F := L[0].Split([#9]);
+    AssertTrue('the fp32 loss parses', TryStrToFloat(F[3], A1, FS));
+  finally
+    L.Free;
+  end;
+  L := LogLines(O2);
+  try
+    AssertEquals('bf16: two update lines', 2, L.Count);
+    F := L[0].Split([#9]);
+    AssertTrue('the bf16 loss parses', TryStrToFloat(F[3], A2, FS));
+  finally
+    L.Free;
+  end;
+  AssertTrue('the loss of update 1 differs', A1 <> A2);
+  Rel := Abs(A1 - A2) / Max(Abs(A1), 1e-30);
+  AssertTrue('relative difference <= 0.01', Rel <= 0.01);
 end;
 
 var

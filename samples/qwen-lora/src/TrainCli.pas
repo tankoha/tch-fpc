@@ -163,6 +163,12 @@ begin
     else if A = '--keep' then begin if not Int(A, 1, 1000, K) then Exit; C.Keep := K; end
     else if A = '--slice' then begin if not Int(A, 1, MaxInt, K) then Exit; C.Slice := K; end
     else if A = '--split' then begin if not Int(A, 0, 1000, K) then Exit; C.Split := K; end
+    else if A = '--compute' then
+    begin
+      if V = 'fp32' then C.Compute := kFloat
+      else if V = 'bf16' then C.Compute := kBFloat16
+      else Exit(Format('--compute: fp32 or bf16, got "%s"', [V]));
+    end
     else if A = '--max-updates' then begin if not Int(A, 0, High(Int64), K) then Exit; C.MaxUpdates := K; end
     else if A = '--alpha' then begin if not Num(A, 0, X) then Exit; C.Alpha := X; end
     else if A = '--lr' then begin if not Num(A, 0, X) then Exit; C.Lr := X; end
@@ -300,6 +306,7 @@ begin
         M := TQwenModel.Load(G, TDevice.Cpu, TDevice.Cpu, 0)
       else
         M := TQwenModel.Load(G, TDevice.Cuda(0), TDevice.Cuda(1), C.Split);
+      M.Compute := C.Compute;
       ManualSeed(C.Seed);
       S := TLoraSet.Create(C.Rank, C.Alpha / C.Rank);
       M.AttachLora(S);

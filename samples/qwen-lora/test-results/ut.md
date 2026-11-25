@@ -761,3 +761,9 @@ When a case is run again, do not edit its row; append a new row below (the last 
 | UT-PackedLinear-303 | OK |  | 2026-11-25 | Forward, bf16 with a LoRA pair and backward |
 | UT-PackedLinear-304 | OK |  | 2026-11-25 | Forward, bf16 and a non-fp32 X |
 | UT-Lora-301 | OK |  | 2026-11-25 | Create, lora_a drawn on the CPU |
+| UT-QwenModel-301 | OK |  | 2026-11-25 | SetCompute, every matrix of the trunk blocks |
+| UT-QwenModel-302 | OK |  | 2026-11-25 | Logits, the head stays fp32 in bf16 |
+| UT-TrainCli-301 | OK |  | 2026-11-25 | --compute in the args, not in the hash |
+| UT-TrainCli-302 | OK |  | 2026-11-25 | bf16 run against the fp32 run |
+| UT-LogprobsCli-301 | OK |  | 2026-11-25 | --compute bf16 and fp32 logprobs |
+| UT-LogprobsCli-302 | OK |  | 2026-11-25 | --compute with no value and a bad value |

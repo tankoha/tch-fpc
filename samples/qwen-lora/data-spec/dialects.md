@@ -1,4 +1,4 @@
-# Dialects (spec-v3)
+# Dialects (spec-v4)
 
 Five dialects, each checked with its own compiler. Write only what the
 dialect's section allows. A sample tags the features it uses

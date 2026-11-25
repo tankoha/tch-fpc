@@ -23,12 +23,34 @@
 ;;   bb gen/gen.bb reverify OUT VERIFY verify the rejected records again
 ;;                                     (no Bedrock): errors, actual output
 ;;   bb gen/gen.bb stats OUT            counts, yield, tokens
+;;   bb gen/gen.bb fewshot OUT:ID...    write data-spec/fewshot.jsonl from
+;;                                     accepted records of earlier runs
+;; Few-shot: before each job the driver puts the example exchanges of the
+;; job's dialect from data-spec/fewshot.jsonl (a job line and the accepted
+;; reply), all of them generator output, never Claude's (GEN_FEWSHOT=0: none).
+;; The generator: Mistral Large 3 on Bedrock by default; with
+;; GEN_MODEL=ollama:<name> a local Ollama model (http://127.0.0.1:11434,
+;; the model's own renderer), thinking off unless GEN_THINK=1 (the
+;; thinking text is not kept; the record has the answer only).
 (require '[clojure.string :as str] '[cheshire.core :as json] '[babashka.process :as p]
-         '[clojure.java.io :as io] '[clojure.edn :as edn])
+         '[clojure.java.io :as io] '[clojure.edn :as edn] '[babashka.http-client :as http])
 
-(def model "mistral.mistral-large-3-675b-instruct")
+(def gen-model (or (System/getenv "GEN_MODEL") "mistral.mistral-large-3-675b-instruct"))
+(def ollama-model (when (str/starts-with? gen-model "ollama:") (subs gen-model 7)))
+(def think (= "1" (System/getenv "GEN_THINK")))
+(def model (or ollama-model gen-model))
+(def ollama-url (or (System/getenv "OLLAMA_URL") "http://127.0.0.1:11434"))
+(def model-version
+  ;; Bedrock: "bedrock"; Ollama: the model's digest
+  (delay (if ollama-model
+           (let [ms (-> (http/get (str ollama-url "/api/tags")) :body (json/parse-string true) :models)
+                 m (first (filter #(= ollama-model (:name %)) ms))]
+             (when-not m (throw (ex-info (str "ollama has no model " ollama-model) {})))
+             (str "ollama " (:digest m) (when think " think")))
+           "bedrock")))
 (def temperature 0.7)
 (def max-repairs 3)
+(declare fewshots)
 (def dialects ["objfpc" "fpc-delphi" "unleashed" "delphi" "oxygene"])
 (def feature-prefix {"objfpc" "objfpc." "fpc-delphi" "fpcdelphi." "unleashed" "unleashed."
                      "delphi" "delphi." "oxygene" "oxygene."})
@@ -82,7 +104,33 @@
     (spit (str out "/jobs.edn") (pr-str jobs))
     (println (count jobs) "jobs in" (str out "/jobs.edn"))))
 
+(defn chat-ollama [system messages]
+  ;; one /api/chat call with the Converse-shaped MESSAGES; returns
+  ;; {:text :usage :latency} like the Bedrock call
+  (let [body {:model ollama-model :stream false :think think
+              :messages (into [{:role "system" :content system}]
+                              (for [m messages] {:role (:role m) :content (str/join (map :text (:content m)))}))
+              :options {:temperature temperature :num_predict (if think 16000 6000)}}
+        r (try (http/post (str ollama-url "/api/chat")
+                          {:headers {"Content-Type" "application/json"}
+                           :body (json/generate-string body) :timeout 3600000 :throw false})
+               (catch Exception e (throw (ex-info (str "ollama failed: " (.getName (class e)) " " (ex-message e)) {}))))]
+    (when-not (= 200 (:status r))
+      (throw (ex-info (str "ollama failed: HTTP " (:status r) " " (:body r)) {})))
+    (let [o (json/parse-string (:body r) true)]
+      {:text (str (get-in o [:message :content]))
+       :usage {:inputTokens (:prompt_eval_count o 0) :outputTokens (:eval_count o 0)
+               :totalTokens (+ (:prompt_eval_count o 0) (:eval_count o 0))}
+       :latency (quot (:total_duration o 0) 1000000)})))
+
+(declare converse-bedrock)
+
 (defn converse [tmp system messages]
+  (if ollama-model
+    (chat-ollama system messages)
+    (converse-bedrock tmp system messages)))
+
+(defn converse-bedrock [tmp system messages]
   ;; one Converse call (request files in the worker's TMP); returns
   ;; {:text :usage :latency}
   (let [_ (.mkdirs (io/file tmp))
@@ -128,8 +176,9 @@
        :features (vec (remove str/blank? (map str/trim (str/split (str (:features s)) #","))))
        :language (:language job) :prompt (str/trim (:prompt s)) :answer (str (str/trim (:answer s)) "\n")
        :expected_stdout (if (= exp "") "" (str exp "\n"))
-       :generator {:model model :version "bedrock" :date (str (java.time.LocalDate/now))
-                   :prompt_id (:id job) :temperature temperature :repair_attempts attempt}})))
+       :generator {:model model :version @model-version :date (str (java.time.LocalDate/now))
+                   :prompt_id (:id job) :temperature temperature :repair_attempts attempt
+                   :fewshot (mapv :source (get @fewshots (:dialect job)))}})))
 
 (defn blocks [answer]
   (vec (map second (re-seq #"(?s)```[a-zA-Z]*\n(.*?)```" (or answer "")))))
@@ -262,8 +311,47 @@
     (.write w (str (json/generate-string o) "\n"))
     (.flush w)))
 
+(def fewshot-file "data-spec/fewshot.jsonl")
+
+(defn reply-text [rec]
+  ;; a record back in the reply format of spec.md section 2
+  (str "### prompt\n" (:prompt rec) "\n### answer\n" (:answer rec)
+       "\n### expected_stdout\n```text\n" (:expected_stdout rec) "```\n### features\n"
+       (str/join ", " (:features rec)) "\n"))
+
+(defn fewshot [srcs]
+  ;; writes data-spec/fewshot.jsonl from accepted generator records, each
+  ;; SRC as OUT:ID (e.g. work/gen/pilot3:objfpc-00012); the example's job
+  ;; line asks only for the job's features the record really lists, and its
+  ;; id is example-N (not a real job's id)
+  (with-open [w (io/writer fewshot-file)]
+    (doseq [[i src] (map-indexed vector srcs)]
+      (let [[out id] (str/split src #":")
+            rec (first (for [l (str/split-lines (slurp (str out "/raw.jsonl")))
+                             :let [r (json/parse-string l true)] :when (= id (:id r))] r))
+            _ (when-not (= "accepted" (:verify rec)) (throw (ex-info (str src ": not an accepted record") {})))
+            fs (filter (set (:features rec)) (get-in rec [:job :features]))
+            job (assoc (:job rec) :id (format "example-%02d" (inc i))
+                       :features (vec (if (seq fs) fs (take 3 (:features rec)))))]
+        (.write w (str (json/generate-string {:source src :generator (:generator rec)
+                                              :job job :reply (reply-text rec)}) "\n"))))))
+
+(def fewshots
+  ;; dialect -> the example exchanges put before the job (empty without the file
+  ;; or with GEN_FEWSHOT=0)
+  (delay (if (or (= "0" (System/getenv "GEN_FEWSHOT")) (not (.exists (io/file fewshot-file))))
+           {}
+           (group-by #(get-in % [:job :dialect])
+                     (for [l (str/split-lines (slurp fewshot-file)) :when (not (str/blank? l))]
+                       (json/parse-string l true))))))
+
+(defn fewshot-messages [dialect]
+  (vec (mapcat (fn [e] [{:role "user" :content [{:text (job-text (:job e))}]}
+                        {:role "assistant" :content [{:text (:reply e)}]}])
+               (get @fewshots dialect))))
+
 (defn run-job [tmp verify-bin system job logw raww]
-  (loop [messages [{:role "user" :content [{:text (job-text job)}]}]
+  (loop [messages (conj (fewshot-messages (:dialect job)) {:role "user" :content [{:text (job-text job)}]})
          attempt 0 first-fail nil prev nil]
     (let [r (converse tmp system messages)
           rec (parse-record (:text r) job attempt)
@@ -381,4 +469,5 @@
     "plan" (plan a b (parse-long (or c "1")))
     "run" (run a b (some-> c parse-long) (parse-long (or d "1")) (some-> e parse-long))
     "reverify" (reverify a b)
-    "stats" (stats a)))
+    "stats" (stats a)
+    "fewshot" (fewshot (rest *command-line-args*))))

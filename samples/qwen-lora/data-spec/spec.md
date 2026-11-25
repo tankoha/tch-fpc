@@ -1,4 +1,4 @@
-# Generator specification (spec-v3)
+# Generator specification (spec-v4)
 
 You write training samples for a model that learns to program in five
 Pascal dialects. Each sample is a task (the prompt a user might write) and
@@ -65,7 +65,7 @@ The harness builds the record from the job and your sections:
 | `id`, `dialect`, `task_type`, `topic`, `language` | from the job |
 | `prompt`, `answer`, `features` | your sections |
 | `expected_stdout` | the text inside the ```` ```text ```` fence, each line ending with `\n` |
-| `generator` | filled by the harness: `model`, `version`, `date`, `prompt_id` (the job id), `temperature`, `repair_attempts` |
+| `generator` | filled by the harness: `model`, `version`, `date`, `prompt_id` (the job id), `temperature`, `repair_attempts`, `fewshot` (the sources of the examples shown) |
 
 A `unit` block starts with `unit <Name>;` and is saved as `<Name>.pas`
 next to the program; the program uses it by that name.
@@ -131,6 +131,10 @@ program or `expected_stdout` is wrong before changing either.
 
 - One job per request; the job line gives `id`, `dialect`, `task_type`,
   `topic`, `features` (one to three ids to use), `language`.
+- Before the job, the request carries two or three earlier exchanges of
+  the same dialect (an `example-NN` job line and an accepted reply).
+  They show the format and the dialect; write a new sample for the job,
+  on its own topic, and do not copy the examples.
 - Temperature 0.7, a fixed seed per job; the harness records the model's
   version and the date.
 - The harness compiles and runs every record with its verifier (the

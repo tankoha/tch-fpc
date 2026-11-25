@@ -1,0 +1,4 @@
+write: a | b | c
+undo: a | b
+write: a | b | d
+undo2: a

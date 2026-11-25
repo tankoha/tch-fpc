@@ -106,14 +106,20 @@ within what both compilers accept.
   | `delphi.generic-method` | generic methods as `class function F<T>` of a class or record (no global generic routines) |
   | `delphi.collections` | `TList<T>`, `TDictionary<K, V>`, `TObjectList<T>` |
   | `delphi.inline-var` | `var X := ...;` and `for var I := ...` |
-  | `delphi.anonymous` | anonymous methods assigned to `reference to` types, `TProc`, `TFunc<T, TResult>` |
+  | `delphi.anonymous` | anonymous methods assigned to `reference to` types declared in the sample (`TProc` / `TFunc` of `System.SysUtils` are not available in the check) |
   | `delphi.string-helper` | string helpers: `S.Length`, `S.ToUpper`, `S.StartsWith`, `S.Split` |
   | `delphi.exception` | own exception classes, `on E: T do` |
   | `delphi.record` | records with methods and operators |
   | `delphi.set-enum` | enumerations, sets, `case`, `for ... in` |
 - **Not in this dialect**: managed-record operators (`Initialize` /
   `Finalize`), FPC units (`fgl`, `Contnrs`), `{$mode}` directives,
-  global generic routines.
+  global generic routines, `TProc` / `TFunc` (declare the `reference to`
+  type yourself).
+- **Rules of the check**: a list of numbers in `for X in [...]` is a set
+  of bytes there (use a typed constant array); sorting strings with the
+  default comparer fails (give `TComparer<string>.Construct` with
+  `CompareStr`); nested generic types are declared as aliases
+  (`TWordList = TList<TWordCount>`), not written inline.
 
 ## `oxygene` — RemObjects Oxygene (Elements 14), .NET Core
 

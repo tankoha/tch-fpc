@@ -1,0 +1,4 @@
+EEmptyInput: no input
+EBadNumber: "abc" is not a number
+EParseError: 200 is out of range
+ok 42

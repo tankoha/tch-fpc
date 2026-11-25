@@ -1,0 +1,1593 @@
+=== oxygene-w01 write
+--- prompt
+Write an Oxygene program that prints the sum, the product and the average (two decimals, invariant culture) of the numbers 3, 8, 12, 5 and 9, as "sum 37", "product 12960" and "average 7.40".
+--- ref
+namespace Numbers;
+
+uses
+  System.Globalization;
+
+type
+  Program = class
+  public
+    class method Main(args: array of String): Int32;
+    begin
+      var values: array of Integer := [3, 8, 12, 5, 9];
+      var sum := 0;
+      var product: Int64 := 1;
+      for each v in values do begin
+        sum := sum + v;
+        product := product * v;
+      end;
+      writeLn($'sum {sum}');
+      writeLn($'product {product}');
+      writeLn('average ' + (Double(sum) / values.Length).ToString('0.00', CultureInfo.InvariantCulture));
+    end;
+  end;
+
+end.
+=== oxygene-w02 write
+--- prompt
+Define a class BankAccount with a read-only Owner, a Balance auto-property with a private setter, and methods Deposit and Withdraw (Withdraw raises an exception when the balance is too small). Deposit 100 and 50, withdraw 30, then try to withdraw 500 and print the exception message, and finally print "Ida: 120".
+--- ref
+namespace Banking;
+
+type
+  BankAccount = public class
+  public
+    property Owner: String; readonly;
+    property Balance: Integer read private write;
+    constructor(aOwner: String);
+    begin
+      Owner := aOwner;
+    end;
+    method Deposit(aAmount: Integer);
+    begin
+      Balance := Balance + aAmount;
+    end;
+    method Withdraw(aAmount: Integer);
+    begin
+      if aAmount > Balance then
+        raise new Exception($'cannot withdraw {aAmount}, balance {Balance}');
+      Balance := Balance - aAmount;
+    end;
+  end;
+
+  Program = class
+  public
+    class method Main(args: array of String): Int32;
+    begin
+      var acc := new BankAccount('Ida');
+      acc.Deposit(100);
+      acc.Deposit(50);
+      acc.Withdraw(30);
+      try
+        acc.Withdraw(500);
+      except
+        on E: Exception do
+          writeLn(E.Message);
+      end;
+      writeLn($'{acc.Owner}: {acc.Balance}');
+    end;
+  end;
+
+end.
+=== oxygene-w03 write
+--- prompt
+Use a List<String> of the words "kiwi", "banana", "fig", "cherry", "apple". Print them sorted alphabetically on one line separated by commas, then the words with more than four letters in their original order (one line, separated by spaces), then the length of the longest word as "longest 6".
+--- ref
+namespace Words;
+
+uses
+  System.Collections.Generic;
+
+type
+  Program = class
+  public
+    class method Main(args: array of String): Int32;
+    begin
+      var words := new List<String>(['kiwi', 'banana', 'fig', 'cherry', 'apple']);
+      var sorted := new List<String>(words);
+      sorted.Sort((a, b) -> String.CompareOrdinal(a, b));
+      writeLn(String.Join(',', sorted));
+      var long := new List<String>;
+      var longest := 0;
+      for each w in words do begin
+        if w.Length > 4 then
+          long.Add(w);
+        if w.Length > longest then
+          longest := w.Length;
+      end;
+      writeLn(String.Join(' ', long));
+      writeLn($'longest {longest}');
+    end;
+  end;
+
+end.
+=== oxygene-w04 write
+--- prompt
+Write an abstract class Shape with an abstract method Area: Double and a method Describe that returns "Name area" with two decimals (invariant culture). Implement Rectangle (3 by 4) and Circle (radius 1.5), put both in a List<Shape> and print each description, then the total area the same way as "total ...".
+--- ref
+namespace Shapes;
+
+uses
+  System.Collections.Generic,
+  System.Globalization;
+
+type
+  Shape = public abstract class
+  public
+    method Area: Double; abstract;
+    method Name: String; abstract;
+    method Describe: String;
+    begin
+      result := Name + ' ' + Area.ToString('0.00', CultureInfo.InvariantCulture);
+    end;
+  end;
+
+  Rectangle = public class(Shape)
+  private
+    fW, fH: Double;
+  public
+    constructor(aW, aH: Double);
+    begin
+      fW := aW;
+      fH := aH;
+    end;
+    method Area: Double; override;
+    begin
+      result := fW * fH;
+    end;
+    method Name: String; override;
+    begin
+      result := 'Rectangle';
+    end;
+  end;
+
+  Circle = public class(Shape)
+  private
+    fR: Double;
+  public
+    constructor(aR: Double);
+    begin
+      fR := aR;
+    end;
+    method Area: Double; override;
+    begin
+      result := Math.PI * fR * fR;
+    end;
+    method Name: String; override;
+    begin
+      result := 'Circle';
+    end;
+  end;
+
+  Program = class
+  public
+    class method Main(args: array of String): Int32;
+    begin
+      var shapes := new List<Shape>;
+      shapes.Add(new Rectangle(3, 4));
+      shapes.Add(new Circle(1.5));
+      var total := 0.0;
+      for each s in shapes do begin
+        writeLn(s.Describe);
+        total := total + s.Area;
+      end;
+      writeLn('total ' + total.ToString('0.00', CultureInfo.InvariantCulture));
+    end;
+  end;
+
+end.
+=== oxygene-w05 write
+--- prompt
+Count the occurrences of each character (ignoring spaces) in "hello world" with a Dictionary<Char, Integer> and print the characters that occur more than once, in order of their first appearance, as "l: 3".
+--- ref
+namespace CharCount;
+
+uses
+  System.Collections.Generic;
+
+type
+  Program = class
+  public
+    class method Main(args: array of String): Int32;
+    begin
+      var text := 'hello world';
+      var counts := new Dictionary<Char, Integer>;
+      var order := new List<Char>;
+      for each c in text do begin
+        if c = ' ' then
+          continue;
+        if counts.ContainsKey(c) then
+          counts[c] := counts[c] + 1
+        else begin
+          counts[c] := 1;
+          order.Add(c);
+        end;
+      end;
+      for each c in order do
+        if counts[c] > 1 then
+          writeLn($'{c}: {counts[c]}');
+    end;
+  end;
+
+end.
+=== oxygene-w06 write
+--- prompt
+Use LINQ on the numbers 1 to 20: print the squares of the odd numbers greater than 10 on one line separated by spaces, the sum of the even numbers as "even sum 110", and the count of numbers divisible by 3 as "div3 6".
+--- ref
+namespace LinqDemo;
+
+uses
+  System.Linq;
+
+type
+  Program = class
+  public
+    class method Main(args: array of String): Int32;
+    begin
+      var nums := Enumerable.Range(1, 20);
+      var squares := nums.Where(n -> (n mod 2 = 1) and (n > 10)).Select(n -> n * n);
+      writeLn(String.Join(' ', squares));
+      writeLn($'even sum {nums.Where(n -> n mod 2 = 0).Sum}');
+      writeLn($'div3 {nums.Count(n -> n mod 3 = 0)}');
+    end;
+  end;
+
+end.
+=== oxygene-w07 write
+--- prompt
+Write a generic class Pair<T> with properties First and Second and a method Swap that returns a new Pair<T> with the values exchanged. Create Pair<Integer>(1, 2) and Pair<String>('left', 'right'), swap both and print them as "(2, 1)" and "(right, left)".
+--- ref
+namespace Pairs;
+
+type
+  Pair<T> = public class
+  public
+    property First: T;
+    property Second: T;
+    constructor(aFirst, aSecond: T);
+    begin
+      First := aFirst;
+      Second := aSecond;
+    end;
+    method Swap: Pair<T>;
+    begin
+      result := new Pair<T>(Second, First);
+    end;
+    method ToString: String; override;
+    begin
+      result := $'({First}, {Second})';
+    end;
+  end;
+
+  Program = class
+  public
+    class method Main(args: array of String): Int32;
+    begin
+      var p := new Pair<Integer>(1, 2);
+      var q := new Pair<String>('left', 'right');
+      writeLn(p.Swap.ToString);
+      writeLn(q.Swap.ToString);
+    end;
+  end;
+
+end.
+=== oxygene-w08 write
+--- prompt
+Write a class Thermometer with an event Changed: block(aOld, aNew: Integer). Subscribe a lambda that prints "old -> new" and a method of a Logger class that prints "logged new". Set the temperature to 20, 25 and 25 again (no event when unchanged), then unsubscribe the logger and set it to 18.
+--- ref
+namespace Thermo;
+
+type
+  Thermometer = public class
+  private
+    fValue: Integer;
+  public
+    event Changed: block(aOld, aNew: Integer);
+    method SetValue(aValue: Integer);
+    begin
+      if aValue = fValue then
+        exit;
+      var prev := fValue;
+      fValue := aValue;
+      if assigned(Changed) then
+        Changed(prev, aValue);
+    end;
+  end;
+
+  Logger = public class
+  public
+    method Log(aOld, aNew: Integer);
+    begin
+      writeLn($'logged {aNew}');
+    end;
+  end;
+
+  Program = class
+  public
+    class method Main(args: array of String): Int32;
+    begin
+      var t := new Thermometer;
+      var log := new Logger;
+      t.Changed += (o, n) -> writeLn($'{o} -> {n}');
+      t.Changed += @log.Log;
+      t.SetValue(20);
+      t.SetValue(25);
+      t.SetValue(25);
+      t.Changed -= @log.Log;
+      t.SetValue(18);
+    end;
+  end;
+
+end.
+=== oxygene-w09 write
+--- prompt
+Write a recursive method that computes the binomial coefficient C(n, k) with a cache in a Dictionary<String, Int64>, and print C(10, 3), C(20, 10) and C(30, 15) as "C(n,k) = value".
+--- ref
+namespace Binomial;
+
+uses
+  System.Collections.Generic;
+
+type
+  Program = class
+  private
+    class var fCache: Dictionary<String, Int64> := new Dictionary<String, Int64>;
+    class method C(n, k: Integer): Int64;
+    begin
+      if (k = 0) or (k = n) then
+        exit 1;
+      var key := $'{n},{k}';
+      if fCache.ContainsKey(key) then
+        exit fCache[key];
+      result := C(n - 1, k - 1) + C(n - 1, k);
+      fCache[key] := result;
+    end;
+  public
+    class method Main(args: array of String): Int32;
+    begin
+      for each (n, k) in [(10, 3), (20, 10), (30, 15)] do
+        writeLn($'C({n},{k}) = {C(n, k)}');
+    end;
+  end;
+
+end.
+=== oxygene-w10 write
+--- prompt
+Define an interface IAnimal with Name and Speak methods, implemented by Dog and Duck classes. Keep them in a List<IAnimal> and print "Rex: woof" and "Donald: quack"; then print how many of them are dogs using "is".
+--- ref
+namespace Animals;
+
+uses
+  System.Collections.Generic;
+
+type
+  IAnimal = public interface
+    method Name: String;
+    method Speak: String;
+  end;
+
+  Dog = public class(IAnimal)
+  private
+    fName: String;
+  public
+    constructor(aName: String);
+    begin
+      fName := aName;
+    end;
+    method Name: String;
+    begin
+      result := fName;
+    end;
+    method Speak: String;
+    begin
+      result := 'woof';
+    end;
+  end;
+
+  Duck = public class(IAnimal)
+  private
+    fName: String;
+  public
+    constructor(aName: String);
+    begin
+      fName := aName;
+    end;
+    method Name: String;
+    begin
+      result := fName;
+    end;
+    method Speak: String;
+    begin
+      result := 'quack';
+    end;
+  end;
+
+  Program = class
+  public
+    class method Main(args: array of String): Int32;
+    begin
+      var animals := new List<IAnimal>;
+      animals.Add(new Dog('Rex'));
+      animals.Add(new Duck('Donald'));
+      var dogs := 0;
+      for each a in animals do begin
+        writeLn($'{a.Name}: {a.Speak}');
+        if a is Dog then
+          inc(dogs);
+      end;
+      writeLn($'dogs {dogs}');
+    end;
+  end;
+
+end.
+=== oxygene-w11 write
+--- prompt
+Write a method IsPrime and print the prime numbers between 50 and 100 on one line separated by spaces, then the count as "count 10".
+--- ref
+namespace Primes;
+
+uses
+  System.Collections.Generic;
+
+type
+  Program = class
+  public
+    class method IsPrime(n: Integer): Boolean;
+    begin
+      if n < 2 then
+        exit false;
+      var d := 2;
+      while d * d <= n do begin
+        if n mod d = 0 then
+          exit false;
+        inc(d);
+      end;
+      exit true;
+    end;
+
+    class method Main(args: array of String): Int32;
+    begin
+      var found := new List<Integer>;
+      for i: Integer := 50 to 100 do
+        if IsPrime(i) then
+          found.Add(i);
+      writeLn(String.Join(' ', found));
+      writeLn($'count {found.Count}');
+    end;
+  end;
+
+end.
+=== oxygene-w12 write
+--- prompt
+Use an enumeration Suit (Hearts, Diamonds, Clubs, Spades) and a record Card (Rank: Integer; Suit: Suit) with a method Text that gives "Q of Spades" for rank 12 (J, Q, K, A for 11 to 14). Print the cards (14, Hearts), (2, Clubs), (12, Spades) and (11, Diamonds), one per line, and then whether each suit is red, as "Hearts red" etc. for all four suits using a case statement.
+--- ref
+namespace Cards;
+
+type
+  Suit = public enum (Hearts, Diamonds, Clubs, Spades);
+
+  Card = public record
+  public
+    Rank: Integer;
+    CardSuit: Suit;
+    method Text: String;
+    begin
+      var r := case Rank of
+        11: 'J';
+        12: 'Q';
+        13: 'K';
+        14: 'A';
+        else Rank.ToString;
+      end;
+      result := $'{r} of {CardSuit}';
+    end;
+  end;
+
+  Program = class
+  public
+    class method Make(aRank: Integer; aSuit: Suit): Card;
+    begin
+      result.Rank := aRank;
+      result.CardSuit := aSuit;
+    end;
+
+    class method Main(args: array of String): Int32;
+    begin
+      writeLn(Make(14, Suit.Hearts).Text);
+      writeLn(Make(2, Suit.Clubs).Text);
+      writeLn(Make(12, Suit.Spades).Text);
+      writeLn(Make(11, Suit.Diamonds).Text);
+      for each s in [Suit.Hearts, Suit.Diamonds, Suit.Clubs, Suit.Spades] do
+        case s of
+          Suit.Hearts, Suit.Diamonds: writeLn($'{s} red');
+          else writeLn($'{s} black');
+        end;
+    end;
+  end;
+
+end.
+=== oxygene-w13 write
+--- prompt
+Print the numbers from 100 down to 0 in steps of 25 on one line separated by spaces, then the even numbers from 2 to 10 with "for ... step", then sum 1+2+... with a "loop" statement until the sum exceeds 50 and print "stopped at 10 sum 55".
+--- ref
+namespace Loops;
+
+uses
+  System.Collections.Generic;
+
+type
+  Program = class
+  public
+    class method Main(args: array of String): Int32;
+    begin
+      var down := new List<Integer>;
+      for i: Integer := 100 downto 0 step 25 do
+        down.Add(i);
+      writeLn(String.Join(' ', down));
+      var evens := new List<Integer>;
+      for i: Integer := 2 to 10 step 2 do
+        evens.Add(i);
+      writeLn(String.Join(' ', evens));
+      var n := 0;
+      var sum := 0;
+      loop begin
+        inc(n);
+        sum := sum + n;
+        if sum > 50 then
+          break;
+      end;
+      writeLn($'stopped at {n} sum {sum}');
+    end;
+  end;
+
+end.
+=== oxygene-w14 write
+--- prompt
+Write a class Matrix with a constructor (rows, cols), an indexer-like method Get/SetAt and a Multiply method. Multiply [[1,2],[3,4]] by [[5,6],[7,8]] and print the result row by row with values separated by a space.
+--- ref
+namespace Matrices;
+
+type
+  Matrix = public class
+  private
+    fData: array of array of Integer;
+    fRows, fCols: Integer;
+  public
+    constructor(aRows, aCols: Integer);
+    begin
+      fRows := aRows;
+      fCols := aCols;
+      fData := new array of Integer[aRows];
+      for r: Integer := 0 to aRows - 1 do
+        fData[r] := new Integer[aCols];
+    end;
+    method Get(r, c: Integer): Integer;
+    begin
+      result := fData[r][c];
+    end;
+    method SetAt(r, c, v: Integer);
+    begin
+      fData[r][c] := v;
+    end;
+    method Multiply(other: Matrix): Matrix;
+    begin
+      result := new Matrix(fRows, other.fCols);
+      for r: Integer := 0 to fRows - 1 do
+        for c: Integer := 0 to other.fCols - 1 do begin
+          var s := 0;
+          for k: Integer := 0 to fCols - 1 do
+            s := s + fData[r][k] * other.fData[k][c];
+          result.SetAt(r, c, s);
+        end;
+    end;
+    property Rows: Integer read fRows;
+    property Cols: Integer read fCols;
+  end;
+
+  Program = class
+  public
+    class method Main(args: array of String): Int32;
+    begin
+      var a := new Matrix(2, 2);
+      var b := new Matrix(2, 2);
+      a.SetAt(0, 0, 1); a.SetAt(0, 1, 2); a.SetAt(1, 0, 3); a.SetAt(1, 1, 4);
+      b.SetAt(0, 0, 5); b.SetAt(0, 1, 6); b.SetAt(1, 0, 7); b.SetAt(1, 1, 8);
+      var m := a.Multiply(b);
+      for r: Integer := 0 to m.Rows - 1 do
+        writeLn($'{m.Get(r, 0)} {m.Get(r, 1)}');
+    end;
+  end;
+
+end.
+=== oxygene-w15 write
+--- prompt
+Define a custom exception class InvalidMoveException. A method Move(fromSquare, toSquare: Integer) on a 1..9 board raises it with a message for squares outside the board or equal squares. Try the moves (1,5), (3,3), (0,4) and (9,10), printing "moved 1 -> 5" or "error: ..." for each.
+--- ref
+namespace Moves;
+
+type
+  InvalidMoveException = public class(Exception);
+
+  Board = public class
+  public
+    method Move(aFrom, aTo: Integer);
+    begin
+      if (aFrom < 1) or (aFrom > 9) or (aTo < 1) or (aTo > 9) then
+        raise new InvalidMoveException($'square out of board: {aFrom} -> {aTo}');
+      if aFrom = aTo then
+        raise new InvalidMoveException($'same square {aFrom}');
+      writeLn($'moved {aFrom} -> {aTo}');
+    end;
+  end;
+
+  Program = class
+  public
+    class method Main(args: array of String): Int32;
+    begin
+      var b := new Board;
+      for each (f, t) in [(1, 5), (3, 3), (0, 4), (9, 10)] do
+        try
+          b.Move(f, t);
+        except
+          on E: InvalidMoveException do
+            writeLn('error: ' + E.Message);
+        end;
+    end;
+  end;
+
+end.
+=== oxygene-w16 write
+--- prompt
+Reverse the words of the sentence "Oxygene runs on the dotnet platform" (word order, not letters), print it, then print the sentence with every word capitalised.
+--- ref
+namespace Sentences;
+
+uses
+  System.Collections.Generic;
+
+type
+  Program = class
+  public
+    class method Main(args: array of String): Int32;
+    begin
+      var text := 'Oxygene runs on the dotnet platform';
+      var words := text.Split([' ']);
+      var rev := new List<String>;
+      for i: Integer := words.Length - 1 downto 0 do
+        rev.Add(words[i]);
+      writeLn(String.Join(' ', rev));
+      var caps := new List<String>;
+      for each w in words do
+        caps.Add(w.Substring(0, 1).ToUpper + w.Substring(1));
+      writeLn(String.Join(' ', caps));
+    end;
+  end;
+
+end.
+=== oxygene-w17 write
+--- prompt
+Implement a generic Stack<T> of your own named SimpleStack<T> on top of a List<T> with Push, Pop, Peek and Count. Use it to convert the decimal numbers 10, 255 and 4096 to base 16 strings (digits 0-9 A-F) and print "n = hex".
+--- ref
+namespace HexStack;
+
+uses
+  System.Collections.Generic;
+
+type
+  SimpleStack<T> = public class
+  private
+    fItems: List<T> := new List<T>;
+  public
+    method Push(aValue: T);
+    begin
+      fItems.Add(aValue);
+    end;
+    method Pop: T;
+    begin
+      result := fItems[fItems.Count - 1];
+      fItems.RemoveAt(fItems.Count - 1);
+    end;
+    method Peek: T;
+    begin
+      result := fItems[fItems.Count - 1];
+    end;
+    property Count: Integer read fItems.Count;
+  end;
+
+  Program = class
+  public
+    class method ToHex(n: Integer): String;
+    begin
+      var digits := '0123456789ABCDEF';
+      var s := new SimpleStack<Char>;
+      repeat
+        s.Push(digits[n mod 16]);
+        n := n div 16;
+      until n = 0;
+      result := '';
+      while s.Count > 0 do
+        result := result + s.Pop;
+    end;
+
+    class method Main(args: array of String): Int32;
+    begin
+      for each n in [10, 255, 4096] do
+        writeLn($'{n} = {ToHex(n)}');
+    end;
+  end;
+
+end.
+=== oxygene-w18 write
+--- prompt
+Simulate a parking lot with 3 spaces: cars arrive and leave in the order "arrive A", "arrive B", "arrive C", "arrive D", "leave B", "arrive D", "leave A". A full lot prints "full, D waits away"; print "A parks", "B leaves" etc., and at the end the parked cars in sorted order separated by spaces.
+--- ref
+namespace Parking;
+
+uses
+  System.Collections.Generic;
+
+type
+  Program = class
+  public
+    class method Main(args: array of String): Int32;
+    begin
+      var lot := new List<String>;
+      var events: array of String := ['arrive A', 'arrive B', 'arrive C', 'arrive D', 'leave B', 'arrive D', 'leave A'];
+      for each e in events do begin
+        var parts := e.Split([' ']);
+        var car := parts[1];
+        if parts[0] = 'arrive' then begin
+          if lot.Count = 3 then
+            writeLn($'full, {car} waits away')
+          else begin
+            lot.Add(car);
+            writeLn($'{car} parks');
+          end;
+        end
+        else begin
+          lot.Remove(car);
+          writeLn($'{car} leaves');
+        end;
+      end;
+      lot.Sort((a, b) -> String.CompareOrdinal(a, b));
+      writeLn(String.Join(' ', lot));
+    end;
+  end;
+
+end.
+=== oxygene-w19 write
+--- prompt
+Write a method that returns the n-th triangular number using a lambda stored in a variable of type "block(n: Integer): Integer", and print the first 8 triangular numbers on one line separated by spaces.
+--- ref
+namespace Triangles;
+
+uses
+  System.Collections.Generic;
+
+type
+  Program = class
+  public
+    class method Main(args: array of String): Int32;
+    begin
+      var tri: block(n: Integer): Integer := n -> n * (n + 1) div 2;
+      var list := new List<Integer>;
+      for i: Integer := 1 to 8 do
+        list.Add(tri(i));
+      writeLn(String.Join(' ', list));
+    end;
+  end;
+
+end.
+=== oxygene-w20 write
+--- prompt
+Use LINQ to group the words "ant", "bee", "cat", "eagle", "fox", "horse", "owl", "tiger" by their length, ordered by length, and print each group as "3: ant, bee, cat, fox, owl".
+--- ref
+namespace Grouping;
+
+uses
+  System.Linq;
+
+type
+  Program = class
+  public
+    class method Main(args: array of String): Int32;
+    begin
+      var words: array of String := ['ant', 'bee', 'cat', 'eagle', 'fox', 'horse', 'owl', 'tiger'];
+      for each g in words.GroupBy(w -> w.Length).OrderBy(g -> g.Key) do begin
+        var names := String.Join(', ', g);
+        writeLn($'{g.Key}: {names}');
+      end;
+    end;
+  end;
+
+end.
+=== oxygene-w21 write
+--- prompt
+Write a StringBuilder-based method that draws a hollow square of size 5 with '*' and spaces, and print it (5 lines).
+--- ref
+namespace Square;
+
+uses
+  System.Text;
+
+type
+  Program = class
+  public
+    class method Draw(n: Integer): String;
+    begin
+      var sb := new StringBuilder;
+      for r: Integer := 0 to n - 1 do begin
+        for c: Integer := 0 to n - 1 do
+          if (r = 0) or (r = n - 1) or (c = 0) or (c = n - 1) then
+            sb.Append('*')
+          else
+            sb.Append(' ');
+        sb.Append(#10);
+      end;
+      result := sb.ToString;
+    end;
+
+    class method Main(args: array of String): Int32;
+    begin
+      write(Draw(5));
+    end;
+  end;
+
+end.
+=== oxygene-w22 write
+--- prompt
+Compute the date that is 100 days after 2024-02-10 and the weekday of 2024-12-31 using System.DateTime, and print "2024-05-20" (format yyyy-MM-dd, invariant culture) and "Tuesday".
+--- ref
+namespace Dates;
+
+uses
+  System.Globalization;
+
+type
+  Program = class
+  public
+    class method Main(args: array of String): Int32;
+    begin
+      var d := new DateTime(2024, 2, 10).AddDays(100);
+      writeLn(d.ToString('yyyy-MM-dd', CultureInfo.InvariantCulture));
+      writeLn(new DateTime(2024, 12, 31).DayOfWeek.ToString);
+    end;
+  end;
+
+end.
+=== oxygene-w23 write
+--- prompt
+Write a class Inventory with a Dictionary<String, Integer> and methods Add and Remove (Remove returns false when there is not enough). Add 10 bolts, 4 nuts and 6 more bolts, remove 5 nuts (prints "cannot remove 5 nuts"), remove 7 bolts, and print the stock sorted by name as "bolts: 9".
+--- ref
+namespace Stock;
+
+uses
+  System.Collections.Generic,
+  System.Linq;
+
+type
+  Inventory = public class
+  private
+    fItems: Dictionary<String, Integer> := new Dictionary<String, Integer>;
+  public
+    method Add(aName: String; aQty: Integer);
+    begin
+      if fItems.ContainsKey(aName) then
+        fItems[aName] := fItems[aName] + aQty
+      else
+        fItems[aName] := aQty;
+    end;
+    method Remove(aName: String; aQty: Integer): Boolean;
+    begin
+      if (not fItems.ContainsKey(aName)) or (fItems[aName] < aQty) then
+        exit false;
+      fItems[aName] := fItems[aName] - aQty;
+      exit true;
+    end;
+    method Print;
+    begin
+      for each k in fItems.Keys.OrderBy(k -> k, StringComparer.Ordinal) do
+        writeLn($'{k}: {fItems[k]}');
+    end;
+  end;
+
+  Program = class
+  public
+    class method Main(args: array of String): Int32;
+    begin
+      var inv := new Inventory;
+      inv.Add('bolts', 10);
+      inv.Add('nuts', 4);
+      inv.Add('bolts', 6);
+      if not inv.Remove('nuts', 5) then
+        writeLn('cannot remove 5 nuts');
+      inv.Remove('bolts', 7);
+      inv.Print;
+    end;
+  end;
+
+end.
+=== oxygene-w24 write
+--- prompt
+Write a method Gcd and use it to reduce the fractions 18/24, 35/49 and 100/75 to lowest terms, printing "18/24 = 3/4".
+--- ref
+namespace Reduce;
+
+type
+  Program = class
+  public
+    class method Gcd(a, b: Integer): Integer;
+    begin
+      while b <> 0 do begin
+        var t := a mod b;
+        a := b;
+        b := t;
+      end;
+      result := a;
+    end;
+
+    class method Main(args: array of String): Int32;
+    begin
+      for each (n, d) in [(18, 24), (35, 49), (100, 75)] do begin
+        var g := Gcd(n, d);
+        writeLn($'{n}/{d} = {n div g}/{d div g}');
+      end;
+    end;
+  end;
+
+end.
+=== oxygene-w25 write
+--- prompt
+Write a class Queue-based round-robin scheduler: processes P1 (5 units), P2 (3 units), P3 (1 unit) run with a time slice of 2 units using System.Collections.Generic.Queue. Print each slice as "P1 runs 2, 3 left" and "P3 done at 5" when a process finishes, with the time counting from 0.
+--- ref
+namespace RoundRobin;
+
+uses
+  System.Collections.Generic;
+
+type
+  Job = public class
+  public
+    property Name: String;
+    property Left: Integer;
+  end;
+
+  Program = class
+  public
+    class method Main(args: array of String): Int32;
+    begin
+      var q := new Queue<Job>;
+      q.Enqueue(new Job(Name := 'P1', Left := 5));
+      q.Enqueue(new Job(Name := 'P2', Left := 3));
+      q.Enqueue(new Job(Name := 'P3', Left := 1));
+      var time := 0;
+      while q.Count > 0 do begin
+        var j := q.Dequeue;
+        var run := Math.Min(2, j.Left);
+        j.Left := j.Left - run;
+        time := time + run;
+        writeLn($'{j.Name} runs {run}, {j.Left} left');
+        if j.Left = 0 then
+          writeLn($'{j.Name} done at {time}')
+        else
+          q.Enqueue(j);
+      end;
+    end;
+  end;
+
+end.
+=== oxygene-w26 write
+--- prompt
+Check whether the strings "racecar", "Oxygene", "A man a plan a canal Panama" and "No lemon, no melon" are palindromes when ignoring case and everything that is not a letter, and print "text: yes" or "text: no".
+--- ref
+namespace Palin;
+
+uses
+  System.Text;
+
+type
+  Program = class
+  public
+    class method IsPalindrome(s: String): Boolean;
+    begin
+      var sb := new StringBuilder;
+      for each c in s.ToLowerInvariant do
+        if Char.IsLetter(c) then
+          sb.Append(c);
+      var t := sb.ToString;
+      for i: Integer := 0 to t.Length div 2 - 1 do
+        if t[i] <> t[t.Length - 1 - i] then
+          exit false;
+      exit true;
+    end;
+
+    class method Main(args: array of String): Int32;
+    begin
+      var texts: array of String := ['racecar', 'Oxygene', 'A man a plan a canal Panama', 'No lemon, no melon'];
+      for each t in texts do begin
+        var answer := if IsPalindrome(t) then 'yes' else 'no';
+        writeLn($'{t}: {answer}');
+      end;
+    end;
+  end;
+
+end.
+=== oxygene-w27 write
+--- prompt
+Write an anonymous method (method(...) begin ... end) passed to a helper Repeat(n, action) that appends the index to a List<Integer>; call it with 4 and print the list, then call it again with a lambda that prints "tick i" for i = 1..3.
+--- ref
+namespace Actions;
+
+uses
+  System.Collections.Generic;
+
+type
+  Program = class
+  public
+    class method RepeatN(n: Integer; aAction: block(i: Integer));
+    begin
+      for i: Integer := 1 to n do
+        aAction(i);
+    end;
+
+    class method Main(args: array of String): Int32;
+    begin
+      var list := new List<Integer>;
+      RepeatN(4, method(i: Integer); begin
+        list.Add(i * i);
+      end);
+      writeLn(String.Join(' ', list));
+      RepeatN(3, i -> writeLn($'tick {i}'));
+    end;
+  end;
+
+end.
+=== oxygene-w28 write
+--- prompt
+Implement a simple tokenizer for the expression "12 + (34 * 5) - 6" that splits it into numbers, operators and parentheses, and print each token on its own line prefixed by its kind ("num 12", "op +", "lpar (", "rpar )").
+--- ref
+namespace Tokens;
+
+type
+  Program = class
+  public
+    class method Main(args: array of String): Int32;
+    begin
+      var s := '12 + (34 * 5) - 6';
+      var i := 0;
+      while i < s.Length do begin
+        var c := s[i];
+        if Char.IsDigit(c) then begin
+          var start := i;
+          while (i < s.Length) and Char.IsDigit(s[i]) do
+            inc(i);
+          writeLn('num ' + s.Substring(start, i - start));
+          continue;
+        end;
+        case c of
+          '+', '-', '*', '/': writeLn($'op {c}');
+          '(': writeLn('lpar (');
+          ')': writeLn('rpar )');
+        end;
+        inc(i);
+      end;
+    end;
+  end;
+
+end.
+=== oxygene-w29 write
+--- prompt
+Write a generic method Max<T> where T is IComparable<T> that returns the largest element of an array, and print the largest of the integers 7, 42, 13, of the doubles 2.5, 0.5, 9.75 (formatted with invariant culture as "9.75") and of the strings 'pear', 'apple', 'zucchini'.
+--- ref
+namespace MaxDemo;
+
+uses
+  System.Globalization;
+
+type
+  Program = class
+  public
+    class method Max<T>(values: array of T): T; where T is IComparable<T>;
+    begin
+      result := values[0];
+      for each v in values do
+        if v.CompareTo(result) > 0 then
+          result := v;
+    end;
+
+    class method Main(args: array of String): Int32;
+    begin
+      writeLn(Max<Integer>([7, 42, 13]));
+      writeLn(Max<Double>([2.5, 0.5, 9.75]).ToString(CultureInfo.InvariantCulture));
+      writeLn(Max<String>(['pear', 'apple', 'zucchini']));
+    end;
+  end;
+
+end.
+=== oxygene-w30 write
+--- prompt
+Simulate two dice with fixed throws (3,4), (6,6), (1,2), (5,5), (2,6): count the doubles, the total of all throws, and print each throw as "3+4=7", then "doubles 2" and "total 40".
+--- ref
+namespace Dice;
+
+type
+  Program = class
+  public
+    class method Main(args: array of String): Int32;
+    begin
+      var doubles := 0;
+      var total := 0;
+      for each (a, b) in [(3, 4), (6, 6), (1, 2), (5, 5), (2, 6)] do begin
+        writeLn($'{a}+{b}={a + b}');
+        if a = b then
+          inc(doubles);
+        total := total + a + b;
+      end;
+      writeLn($'doubles {doubles}');
+      writeLn($'total {total}');
+    end;
+  end;
+
+end.
+=== oxygene-f01 fix
+--- prompt
+This Oxygene program does not compile. Fix it; it prints "count 3".
+--- given
+namespace Counting;
+
+uses
+  System.Collections.Generic;
+
+type
+  Program = class
+  public
+    class method Main(args: array of String): Int32;
+    begin
+      var list := List<String>.Create;
+      list.Add('a');
+      list.Add('b');
+      list.Add('c');
+      writeLn($'count {list.Count}');
+    end;
+  end;
+
+end.
+--- ref
+namespace Counting;
+
+uses
+  System.Collections.Generic;
+
+type
+  Program = class
+  public
+    class method Main(args: array of String): Int32;
+    begin
+      var list := new List<String>;
+      list.Add('a');
+      list.Add('b');
+      list.Add('c');
+      writeLn($'count {list.Count}');
+    end;
+  end;
+
+end.
+=== oxygene-f02 fix
+--- prompt
+Fix the compile error in this Oxygene program; it prints "found at 2".
+--- given
+namespace Finder;
+
+type
+  Finder = public class
+  public
+    class method IndexOf<T>(items: array of T; item: T): Integer;
+    begin
+      for i: Integer := 0 to items.Length - 1 do
+        if items[i] = item then
+          exit i;
+      exit -1;
+    end;
+  end;
+
+  Program = class
+  public
+    class method Main(args: array of String): Int32;
+    begin
+      var idx := Finder.IndexOf<String>(['x', 'y', 'z'], 'z');
+      writeLn($'found at {idx}');
+    end;
+  end;
+
+end.
+--- ref
+namespace Finder;
+
+type
+  Finder = public class
+  public
+    class method IndexOf<T>(items: array of T; item: T): Integer;
+    begin
+      for i: Integer := 0 to items.Length - 1 do
+        if items[i].Equals(item) then
+          exit i;
+      exit -1;
+    end;
+  end;
+
+  Program = class
+  public
+    class method Main(args: array of String): Int32;
+    begin
+      var idx := Finder.IndexOf<String>(['x', 'y', 'z'], 'z');
+      writeLn($'found at {idx}');
+    end;
+  end;
+
+end.
+=== oxygene-f03 fix
+--- prompt
+This program does not compile. Correct it so that it prints "Hi, Bo" and "Hi, Cy".
+--- given
+namespace Greet;
+
+type
+  Greeter = public class
+  public
+    method Greet(aName: String);
+    begin
+      writeLn('Hi, ' + aName);
+    end;
+    destructor Destroy; override;
+    begin
+      writeLn('bye');
+    end;
+  end;
+
+  Program = class
+  public
+    class method Main(args: array of String): Int32;
+    begin
+      var g := new Greeter;
+      g.Greet('Bo');
+      g.Greet('Cy');
+    end;
+  end;
+
+end.
+--- ref
+namespace Greet;
+
+type
+  Greeter = public class
+  public
+    method Greet(aName: String);
+    begin
+      writeLn('Hi, ' + aName);
+    end;
+  end;
+
+  Program = class
+  public
+    class method Main(args: array of String): Int32;
+    begin
+      var g := new Greeter;
+      g.Greet('Bo');
+      g.Greet('Cy');
+    end;
+  end;
+
+end.
+=== oxygene-f04 fix
+--- prompt
+Make this Oxygene program compile; it prints "parsed 42" and "bad input".
+--- given
+namespace Parse;
+
+type
+  Program = class
+  public
+    class method Main(args: array of String): Int32;
+    begin
+      for each s in ['42', 'x'] do begin
+        var value: Integer;
+        if Int32.TryParse(s, value) then
+          writeLn($'parsed {value}')
+        else
+          writeLn('bad input');
+      end;
+    end;
+  end;
+
+end.
+--- ref
+namespace Parse;
+
+type
+  Program = class
+  public
+    class method Main(args: array of String): Int32;
+    begin
+      for each s in ['42', 'x'] do begin
+        var value: Integer;
+        if Int32.TryParse(s, out value) then
+          writeLn($'parsed {value}')
+        else
+          writeLn('bad input');
+      end;
+    end;
+  end;
+
+end.
+=== oxygene-f05 fix
+--- prompt
+This Oxygene code does not compile. Fix it; it prints "total 6".
+--- given
+namespace Totals;
+
+type
+  Program = class
+  public
+    class method Sum(values: array of Integer): Integer;
+    begin
+      result := 0;
+      for each v in values do
+        result := result + v
+    end;
+
+    class method Main(args: array of String): Int32;
+    var
+      t: Integer;
+    begin
+      t := Sum([1, 2, 3]);
+      writeLn($'total {t}')
+      exit 0;
+    end;
+  end;
+
+end.
+--- ref
+namespace Totals;
+
+type
+  Program = class
+  public
+    class method Sum(values: array of Integer): Integer;
+    begin
+      result := 0;
+      for each v in values do
+        result := result + v
+    end;
+
+    class method Main(args: array of String): Int32;
+    begin
+      var t := Sum([1, 2, 3]);
+      writeLn($'total {t}');
+      exit 0;
+    end;
+  end;
+
+end.
+=== oxygene-c01 convert
+--- prompt
+Convert this Free Pascal objfpc program to Oxygene for .NET. Keep the output identical.
+--- given
+program Squares;
+{$mode objfpc}{$H+}
+var
+  I: Integer;
+begin
+  for I := 1 to 5 do
+    WriteLn(I, ' squared is ', I * I);
+end.
+--- ref
+namespace Squares;
+
+type
+  Program = class
+  public
+    class method Main(args: array of String): Int32;
+    begin
+      for i: Integer := 1 to 5 do
+        writeLn($'{i} squared is {i * i}');
+    end;
+  end;
+
+end.
+=== oxygene-c02 convert
+--- prompt
+Port this Delphi class to Oxygene (no destructor or Free needed there). Same output.
+--- given
+program People;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils;
+type
+  TPerson = class
+  private
+    FName: string;
+    FAge: Integer;
+  public
+    constructor Create(const AName: string; AAge: Integer);
+    function Describe: string;
+  end;
+
+constructor TPerson.Create(const AName: string; AAge: Integer);
+begin
+  inherited Create;
+  FName := AName;
+  FAge := AAge;
+end;
+
+function TPerson.Describe: string;
+begin
+  Result := Format('%s is %d', [FName, FAge]);
+end;
+
+var
+  P: TPerson;
+begin
+  P := TPerson.Create('Lin', 34);
+  try
+    Writeln(P.Describe);
+  finally
+    P.Free;
+  end;
+end.
+--- ref
+namespace People;
+
+type
+  Person = public class
+  private
+    fName: String;
+    fAge: Integer;
+  public
+    constructor(aName: String; aAge: Integer);
+    begin
+      fName := aName;
+      fAge := aAge;
+    end;
+    method Describe: String;
+    begin
+      result := $'{fName} is {fAge}';
+    end;
+  end;
+
+  Program = class
+  public
+    class method Main(args: array of String): Int32;
+    begin
+      var p := new Person('Lin', 34);
+      writeLn(p.Describe);
+    end;
+  end;
+
+end.
+=== oxygene-c03 convert
+--- prompt
+Rewrite this Unleashed Pascal program in Oxygene with the same output.
+--- given
+program Pairs;
+{$mode unleashed}
+
+function SumDiff(A, B: Integer): (sum, diff: Integer);
+begin
+  Result := (A + B, A - B);
+end;
+
+begin
+  var (s, d) := SumDiff(10, 4);
+  WriteLn($'sum={s} diff={d}');
+end.
+--- ref
+namespace Pairs;
+
+type
+  Program = class
+  public
+    class method SumDiff(a, b: Integer): tuple of (Integer, Integer);
+    begin
+      result := (a + b, a - b);
+    end;
+
+    class method Main(args: array of String): Int32;
+    begin
+      var (s, d) := SumDiff(10, 4);
+      writeLn($'sum={s} diff={d}');
+    end;
+  end;
+
+end.
+=== oxygene-c04 convert
+--- prompt
+Convert this Free Pascal {$mode delphi} program with a generic list to Oxygene; same output.
+--- given
+program Evens;
+{$mode delphi}
+uses
+  Generics.Collections;
+var
+  L: TList<Integer>;
+  I: Integer;
+begin
+  L := TList<Integer>.Create;
+  try
+    for I := 1 to 10 do
+      if not Odd(I) then
+        L.Add(I);
+    WriteLn('count ', L.Count);
+    WriteLn('last ', L[L.Count - 1]);
+  finally
+    L.Free;
+  end;
+end.
+--- ref
+namespace Evens;
+
+uses
+  System.Collections.Generic;
+
+type
+  Program = class
+  public
+    class method Main(args: array of String): Int32;
+    begin
+      var l := new List<Integer>;
+      for i: Integer := 1 to 10 do
+        if i mod 2 = 0 then
+          l.Add(i);
+      writeLn($'count {l.Count}');
+      writeLn($'last {l[l.Count - 1]}');
+    end;
+  end;
+
+end.
+=== oxygene-c05 convert
+--- prompt
+Translate this Delphi program with an anonymous method to Oxygene (use a lambda). Same output.
+--- given
+program Apply;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils;
+type
+  TIntFunc = reference to function(X: Integer): Integer;
+
+procedure ApplyAll(const F: TIntFunc);
+var
+  I: Integer;
+begin
+  for I := 1 to 3 do
+    Writeln(F(I));
+end;
+
+begin
+  ApplyAll(
+    function(X: Integer): Integer
+    begin
+      Result := X * 10;
+    end);
+end.
+--- ref
+namespace Apply;
+
+type
+  Program = class
+  public
+    class method ApplyAll(f: block(x: Integer): Integer);
+    begin
+      for i: Integer := 1 to 3 do
+        writeLn(f(i));
+    end;
+
+    class method Main(args: array of String): Int32;
+    begin
+      ApplyAll(x -> x * 10);
+    end;
+  end;
+
+end.

@@ -1,0 +1,1405 @@
+=== unleashed-w01 write
+--- prompt
+Using inline variables and string interpolation, print the numbers 1 to 10 with their squares and cubes, one line each as "n: square cube" (e.g. "3: 9 27").
+--- ref
+program Powers;
+{$mode unleashed}
+begin
+  for var I := 1 to 10 do
+    WriteLn($'{I}: {I * I} {I * I * I}');
+end.
+=== unleashed-w02 write
+--- prompt
+Write a function that classifies an integer with an if-expression as 'negative', 'zero' or 'positive', and use a match expression to name the remainder of the number modulo 3 ('fizz-ish' for 0, 'one' for 1, otherwise 'two'). Print both for -4, 0, 7 and 9 as "n: sign, mod".
+--- ref
+program Classify;
+{$mode unleashed}
+
+function Sign(N: Integer): string;
+begin
+  Result := if N < 0 then 'negative' else if N = 0 then 'zero' else 'positive';
+end;
+
+function ModName(N: Integer): string;
+begin
+  Result := match ((N mod 3) + 3) mod 3 of
+    0: 'fizz-ish';
+    1: 'one';
+    _: 'two';
+  end;
+end;
+
+begin
+  for var N in [-4, 0, 7, 9] do
+    WriteLn($'{N}: {Sign(N)}, {ModName(N)}');
+end.
+=== unleashed-w03 write
+--- prompt
+Write a function MinMaxAvg that returns a tuple (lo, hi, avg) for an array of integers, where avg is the integer average (div). Call it on 12, 5, 33, 8, 20, unpack the tuple into three variables and print "lo=5 hi=33 avg=15".
+--- ref
+program Tuples;
+{$mode unleashed}
+
+function MinMaxAvg(const A: array of Integer): (lo, hi, avg: Integer);
+begin
+  var Sum := 0;
+  Result := (A[0], A[0], 0);
+  for var V in A do
+  begin
+    if V < Result.lo then Result.lo := V;
+    if V > Result.hi then Result.hi := V;
+    Sum += V;
+  end;
+  Result.avg := Sum div Length(A);
+end;
+
+begin
+  var (lo, hi, avg) := MinMaxAvg([12, 5, 33, 8, 20]);
+  WriteLn($'lo={lo} hi={hi} avg={avg}');
+end.
+=== unleashed-w04 write
+--- prompt
+Write a class TTodoList that keeps tasks in a TStringList (created in the constructor, freed in the destructor) with Add and Done (removes a task by name). Use autofree for the list object in the main program. Add "write", "test", "ship", mark "test" done, and print the remaining tasks numbered from 1 as "1. write".
+--- ref
+program Todo;
+{$mode unleashed}
+uses
+  SysUtils, Classes;
+type
+  TTodoList = class
+  private
+    FItems: TStringList;
+  public
+    constructor Create;
+    destructor Destroy; override;
+    procedure Add(const S: string);
+    procedure Done(const S: string);
+    procedure Print;
+  end;
+
+constructor TTodoList.Create;
+begin
+  inherited Create;
+  FItems := TStringList.Create;
+end;
+
+destructor TTodoList.Destroy;
+begin
+  FItems.Free;
+  inherited Destroy;
+end;
+
+procedure TTodoList.Add(const S: string);
+begin
+  FItems.Add(S);
+end;
+
+procedure TTodoList.Done(const S: string);
+begin
+  var I := FItems.IndexOf(S);
+  if I >= 0 then
+    FItems.Delete(I);
+end;
+
+procedure TTodoList.Print;
+begin
+  for var I := 0 to FItems.Count - 1 do
+    WriteLn($'{I + 1}. {FItems[I]}');
+end;
+
+begin
+  var L := autofree TTodoList.Create;
+  L.Add('write');
+  L.Add('test');
+  L.Add('ship');
+  L.Done('test');
+  L.Print;
+end.
+=== unleashed-w05 write
+--- prompt
+Show defer: in a procedure that "opens" three resources (just prints "open A", "open B", "open C"), register a deferred "close X" right after each open, then print "working". The closes must come out in reverse order when the procedure ends. Call the procedure and then print "done".
+--- ref
+program Resources;
+{$mode unleashed}
+
+procedure Work;
+begin
+  WriteLn('open A');
+  defer WriteLn('close A');
+  WriteLn('open B');
+  defer WriteLn('close B');
+  WriteLn('open C');
+  defer WriteLn('close C');
+  WriteLn('working');
+end;
+
+begin
+  Work;
+  WriteLn('done');
+end.
+=== unleashed-w06 write
+--- prompt
+Write a generic function Largest<T> that returns the largest element of an open array (using >). Print the largest of the integers 4, 19, 7 and of the strings 'pear', 'apple', 'plum', using explicit type arguments.
+--- ref
+program LargestDemo;
+{$mode unleashed}
+
+function Largest<T>(const A: array of T): T;
+begin
+  Result := A[0];
+  for var X in A do
+    if X > Result then
+      Result := X;
+end;
+
+begin
+  WriteLn(Largest<Integer>([4, 19, 7]));
+  WriteLn(Largest<string>(['pear', 'apple', 'plum']));
+end.
+=== unleashed-w07 write
+--- prompt
+Parse the commands "add 5", "add 3", "mul 4", "sub 2", "noop" and "div 0" with a match statement on the command word, applying them to an accumulator that starts at 0. Unknown commands print "unknown: noop"; division by zero prints "skip: div 0". Print "result: N" at the end.
+--- ref
+program Calc;
+{$mode unleashed}
+uses
+  SysUtils;
+
+begin
+  var Acc := 0;
+  for var Line in ['add 5', 'add 3', 'mul 4', 'sub 2', 'noop', 'div 0'] do
+  begin
+    var P := Pos(' ', Line);
+    var Cmd := if P > 0 then Copy(Line, 1, P - 1) else Line;
+    var Arg := if P > 0 then StrToInt(Copy(Line, P + 1, MaxInt)) else 0;
+    match Cmd of
+      'add': Acc += Arg;
+      'sub': Acc -= Arg;
+      'mul': Acc *= Arg;
+      'div':
+        if Arg = 0 then
+          WriteLn($'skip: {Line}')
+        else
+          Acc := Acc div Arg;
+      _: WriteLn($'unknown: {Line}');
+    end;
+  end;
+  WriteLn($'result: {Acc}');
+end.
+=== unleashed-w08 write
+--- prompt
+Use a try expression to convert the strings '42', 'q7', '-3' and '' to integers, falling back to -1 when the conversion fails (catch EConvertError, with an else branch giving -2). Print each as "'text' -> value".
+--- ref
+program SafeParse;
+{$mode unleashed}
+uses
+  SysUtils;
+
+begin
+  for var S in ['42', 'q7', '-3', ''] do
+  begin
+    var N := try StrToInt(S) except on E: EConvertError do -1 else -2 end;
+    WriteLn($'''{S}'' -> {N}');
+  end;
+end.
+=== unleashed-w09 write
+--- prompt
+Compute the sum of the integers 1 to 1000 in a "for parallel" loop, protecting the shared total with lock. Print "total 500500".
+--- ref
+program ParallelSum;
+{$mode unleashed}
+uses
+  {$ifdef UNIX}cthreads,{$endif} SysUtils;
+
+var
+  Total: Int64;
+
+begin
+  Total := 0;
+  for parallel var I := 1 to 1000 do
+    lock(Total) do Total += I;
+  WriteLn($'total {Total}');
+end.
+=== unleashed-w10 write
+--- prompt
+Start two computations asynchronously with async: the number of primes below 20000 and the 30th Fibonacci number (recursive). Await both and print "primes 2262" and "fib 832040" in that order.
+--- ref
+program AsyncWork;
+{$mode unleashed}
+uses
+  {$ifdef UNIX}cthreads,{$endif} SysUtils;
+
+function CountPrimes(N: Integer): Integer;
+begin
+  Result := 0;
+  for var I := 2 to N - 1 do
+  begin
+    var Prime := True;
+    var D := 2;
+    while D * D <= I do
+    begin
+      if I mod D = 0 then
+      begin
+        Prime := False;
+        Break;
+      end;
+      Inc(D);
+    end;
+    if Prime then
+      Inc(Result);
+  end;
+end;
+
+function Fib(N: Integer): Int64;
+begin
+  Result := if N < 2 then N else Fib(N - 1) + Fib(N - 2);
+end;
+
+begin
+  var P := async CountPrimes(20000);
+  var F := async Fib(30);
+  WriteLn($'primes {await P}');
+  WriteLn($'fib {await F}');
+end.
+=== unleashed-w11 write
+--- prompt
+Write a class TShoppingCart with auto-properties (Owner read-only, Discount in percent) and a TList<Integer> of prices in cents. Add 1999, 550 and 1250 for owner 'Kim' with 10 percent discount, and print "Kim pays 34.19" (the total after discount, rounded down to whole cents, formatted with two decimals).
+--- ref
+program Cart;
+{$mode unleashed}
+uses
+  SysUtils, Generics.Collections;
+type
+  TShoppingCart = class
+  private
+    FPrices: TList<Integer>;
+  public
+    property Owner: string; readonly;
+    property Discount: Integer;
+    constructor Create(const AOwner: string);
+    destructor Destroy; override;
+    procedure Add(ACents: Integer);
+    function TotalCents: Integer;
+  end;
+
+constructor TShoppingCart.Create(const AOwner: string);
+begin
+  inherited Create;
+  FOwner := AOwner;
+  FPrices := TList<Integer>.Create;
+end;
+
+destructor TShoppingCart.Destroy;
+begin
+  FPrices.Free;
+  inherited Destroy;
+end;
+
+procedure TShoppingCart.Add(ACents: Integer);
+begin
+  FPrices.Add(ACents);
+end;
+
+function TShoppingCart.TotalCents: Integer;
+begin
+  var Sum := 0;
+  for var P in FPrices do
+    Sum += P;
+  Result := Sum * (100 - FDiscount) div 100;
+end;
+
+begin
+  var C := autofree TShoppingCart.Create('Kim');
+  C.Discount := 10;
+  C.Add(1999);
+  C.Add(550);
+  C.Add(1250);
+  var T := C.TotalCents;
+  WriteLn($'{C.Owner} pays {T div 100}.{Format('%.2d', [T mod 100])}');
+end.
+=== unleashed-w12 write
+--- prompt
+Write a recursive function that counts the ways to climb a staircase of n steps taking 1, 2 or 3 steps at a time, with memoisation in a TDictionary<Integer, Int64>. Print the counts for n = 1, 5, 10 and 30 as "n: ways".
+--- ref
+program Stairs;
+{$mode unleashed}
+uses
+  SysUtils, Generics.Collections;
+
+var
+  Memo: TDictionary<Integer, Int64>;
+
+function Ways(N: Integer): Int64;
+begin
+  if N < 0 then
+    Exit(0);
+  if N = 0 then
+    Exit(1);
+  if Memo.TryGetValue(N, Result) then
+    Exit;
+  Result := Ways(N - 1) + Ways(N - 2) + Ways(N - 3);
+  Memo.Add(N, Result);
+end;
+
+begin
+  Memo := TDictionary<Integer, Int64>.Create;
+  defer Memo.Free;
+  for var N in [1, 5, 10, 30] do
+    WriteLn($'{N}: {Ways(N)}');
+end.
+=== unleashed-w13 write
+--- prompt
+Model vehicles: a base class TVehicle with a virtual function Wheels and a Describe method that uses string interpolation ("Car has 4 wheels"), and subclasses TCar, TBike and TTruck (6 wheels). Keep them in a TObjectList<TVehicle> (owning, freed with defer) and print each description.
+--- ref
+program Vehicles;
+{$mode unleashed}
+uses
+  SysUtils, Generics.Collections;
+type
+  TVehicle = class
+  public
+    function Wheels: Integer; virtual; abstract;
+    function Describe: string;
+  end;
+
+  TCar = class(TVehicle)
+    function Wheels: Integer; override;
+  end;
+
+  TBike = class(TVehicle)
+    function Wheels: Integer; override;
+  end;
+
+  TTruck = class(TVehicle)
+    function Wheels: Integer; override;
+  end;
+
+function TVehicle.Describe: string;
+begin
+  var N := ClassName.Substring(1);
+  Result := $'{N} has {Wheels} wheels';
+end;
+
+function TCar.Wheels: Integer;
+begin
+  Result := 4;
+end;
+
+function TBike.Wheels: Integer;
+begin
+  Result := 2;
+end;
+
+function TTruck.Wheels: Integer;
+begin
+  Result := 6;
+end;
+
+begin
+  var L := TObjectList<TVehicle>.Create(True);
+  defer L.Free;
+  L.Add(TCar.Create);
+  L.Add(TBike.Create);
+  L.Add(TTruck.Create);
+  for var V in L do
+    WriteLn(V.Describe);
+end.
+=== unleashed-w14 write
+--- prompt
+Print the Collatz sequence of 27 truncated: the number of steps until it reaches 1, the largest value reached, and the first 10 values on one line separated by spaces. Use inline variables throughout.
+--- ref
+program Collatz;
+{$mode unleashed}
+uses
+  SysUtils;
+
+begin
+  var N: Int64 := 27;
+  var Steps := 0;
+  var Peak := N;
+  var First := '';
+  var Shown := 0;
+  while True do
+  begin
+    if Shown < 10 then
+    begin
+      First += (if Shown > 0 then ' ' else '') + IntToStr(N);
+      Inc(Shown);
+    end;
+    if N = 1 then
+      Break;
+    N := if Odd(N) then 3 * N + 1 else N div 2;
+    Inc(Steps);
+    if N > Peak then
+      Peak := N;
+  end;
+  WriteLn($'steps {Steps}');
+  WriteLn($'peak {Peak}');
+  WriteLn(First);
+end.
+=== unleashed-w15 write
+--- prompt
+Write an interface IShape with Area and Name, implemented by TSquare and TTriangle (base and height). Put a square of side 3 and a triangle 4 by 5 into an array of IShape and print "Name: area" with the area to one decimal, then the shape with the larger area as "larger: Name".
+--- ref
+program IShapes;
+{$mode unleashed}
+uses
+  SysUtils;
+type
+  IShape = interface
+    ['{7C2D1E9A-3B4F-4A6C-8D2E-5F1A0B9C8D7E}']
+    function Area: Double;
+    function Name: string;
+  end;
+
+  TSquare = class(TInterfacedObject, IShape)
+  private
+    FSide: Double;
+  public
+    constructor Create(ASide: Double);
+    function Area: Double;
+    function Name: string;
+  end;
+
+  TTriangle = class(TInterfacedObject, IShape)
+  private
+    FBase, FHeight: Double;
+  public
+    constructor Create(ABase, AHeight: Double);
+    function Area: Double;
+    function Name: string;
+  end;
+
+constructor TSquare.Create(ASide: Double);
+begin
+  inherited Create;
+  FSide := ASide;
+end;
+
+function TSquare.Area: Double;
+begin
+  Result := FSide * FSide;
+end;
+
+function TSquare.Name: string;
+begin
+  Result := 'Square';
+end;
+
+constructor TTriangle.Create(ABase, AHeight: Double);
+begin
+  inherited Create;
+  FBase := ABase;
+  FHeight := AHeight;
+end;
+
+function TTriangle.Area: Double;
+begin
+  Result := FBase * FHeight / 2;
+end;
+
+function TTriangle.Name: string;
+begin
+  Result := 'Triangle';
+end;
+
+var
+  Shapes: array[0..1] of IShape;
+begin
+  Shapes[0] := TSquare.Create(3);
+  Shapes[1] := TTriangle.Create(4, 5);
+  var FS := DefaultFormatSettings;
+  FS.DecimalSeparator := '.';
+  for var S in Shapes do
+    WriteLn(S.Name, ': ', FormatFloat('0.0', S.Area, FS));
+  var Larger := if Shapes[0].Area > Shapes[1].Area then Shapes[0].Name else Shapes[1].Name;
+  WriteLn($'larger: {Larger}');
+end.
+=== unleashed-w16 write
+--- prompt
+Encode the string "Unleashed" in hexadecimal (two upper-case hex digits per character, no separators) and decode it back. Print both lines.
+--- ref
+program HexCodec;
+{$mode unleashed}
+uses
+  SysUtils;
+
+function ToHex(const S: string): string;
+begin
+  Result := '';
+  for var C in S do
+    Result += IntToHex(Ord(C), 2);
+end;
+
+function FromHex(const S: string): string;
+begin
+  Result := '';
+  var I := 1;
+  while I < Length(S) do
+  begin
+    Result += Chr(StrToInt('$' + Copy(S, I, 2)));
+    Inc(I, 2);
+  end;
+end;
+
+begin
+  var H := ToHex('Unleashed');
+  WriteLn(H);
+  WriteLn(FromHex(H));
+end.
+=== unleashed-w17 write
+--- prompt
+Write a TEventBus class whose subscribers are method pointers of type "procedure(const Topic, Msg: string) of object" kept in a list. Two listener objects (prefixing their output with their own name, "audit" and "mail") subscribe; publish ("order", "#17 created") and ("order", "#17 paid"). Each listener prints "name got topic: msg".
+--- ref
+program EventBus;
+{$mode unleashed}
+uses
+  SysUtils;
+type
+  THandler = procedure(const Topic, Msg: string) of object;
+
+  TEventBus = class
+  private
+    FHandlers: array of THandler;
+  public
+    procedure Subscribe(H: THandler);
+    procedure Publish(const Topic, Msg: string);
+  end;
+
+  TListener = class
+  private
+    FName: string;
+  public
+    constructor Create(const AName: string);
+    procedure Handle(const Topic, Msg: string);
+  end;
+
+procedure TEventBus.Subscribe(H: THandler);
+begin
+  SetLength(FHandlers, Length(FHandlers) + 1);
+  FHandlers[High(FHandlers)] := H;
+end;
+
+procedure TEventBus.Publish(const Topic, Msg: string);
+begin
+  for var H in FHandlers do
+    H(Topic, Msg);
+end;
+
+constructor TListener.Create(const AName: string);
+begin
+  inherited Create;
+  FName := AName;
+end;
+
+procedure TListener.Handle(const Topic, Msg: string);
+begin
+  WriteLn($'{FName} got {Topic}: {Msg}');
+end;
+
+begin
+  var Bus := autofree TEventBus.Create;
+  var A := autofree TListener.Create('audit');
+  var M := autofree TListener.Create('mail');
+  Bus.Subscribe(@A.Handle);
+  Bus.Subscribe(@M.Handle);
+  Bus.Publish('order', '#17 created');
+  Bus.Publish('order', '#17 paid');
+end.
+=== unleashed-w18 write
+--- prompt
+Print the perfect numbers below 10000 (a perfect number equals the sum of its proper divisors), one per line, and then "found N" with their count.
+--- ref
+program Perfect;
+{$mode unleashed}
+
+begin
+  var Found := 0;
+  for var N := 2 to 9999 do
+  begin
+    var Sum := 1;
+    var D := 2;
+    while D * D <= N do
+    begin
+      if N mod D = 0 then
+      begin
+        Sum += D;
+        if D <> N div D then
+          Sum += N div D;
+      end;
+      Inc(D);
+    end;
+    if Sum = N then
+    begin
+      WriteLn(N);
+      Inc(Found);
+    end;
+  end;
+  WriteLn($'found {Found}');
+end.
+=== unleashed-w19 write
+--- prompt
+Simulate a vending machine with the states Idle, HasCoin and Dispensing (an enumeration) and the events coin, push, coin, coin, push, push. Use a match on (state) inside a loop: coin in Idle -> HasCoin; coin in HasCoin -> "refund extra coin"; push in HasCoin -> Dispensing (print "dispense") then back to Idle; push in Idle -> "insert coin first". Print the state after each event as "event -> State".
+--- ref
+program Vending;
+{$mode unleashed}
+uses
+  SysUtils, TypInfo;
+type
+  TState = (Idle, HasCoin, Dispensing);
+
+begin
+  var State := Idle;
+  for var Ev in ['coin', 'push', 'coin', 'coin', 'push', 'push'] do
+  begin
+    match State of
+      Idle:
+        if Ev = 'coin' then
+          State := HasCoin
+        else
+          WriteLn('insert coin first');
+      HasCoin:
+        if Ev = 'coin' then
+          WriteLn('refund extra coin')
+        else
+        begin
+          State := Dispensing;
+          WriteLn('dispense');
+          State := Idle;
+        end;
+      _: State := Idle;
+    end;
+    WriteLn($'{Ev} -> {GetEnumName(TypeInfo(TState), Ord(State))}');
+  end;
+end.
+=== unleashed-w20 write
+--- prompt
+Write a generic class TRing<T> (a fixed-size ring buffer of capacity 3 that overwrites the oldest element) with Add and an Items function returning the elements oldest first as an array. Add 1, 2, 3, 4, 5 and print the contents on one line, then do the same with the strings 'a' to 'd'.
+--- ref
+program Rings;
+{$mode unleashed}
+uses
+  SysUtils;
+type
+  TRing<T> = class
+  private
+    FData: array[0..2] of T;
+    FStart, FCount: Integer;
+  public
+    procedure Add(const V: T);
+    function Items: TArray<T>;
+  end;
+
+procedure TRing<T>.Add(const V: T);
+begin
+  if FCount < 3 then
+  begin
+    FData[(FStart + FCount) mod 3] := V;
+    Inc(FCount);
+  end
+  else
+  begin
+    FData[FStart] := V;
+    FStart := (FStart + 1) mod 3;
+  end;
+end;
+
+function TRing<T>.Items: TArray<T>;
+begin
+  SetLength(Result, FCount);
+  for var I := 0 to FCount - 1 do
+    Result[I] := FData[(FStart + I) mod 3];
+end;
+
+begin
+  var R := autofree TRing<Integer>.Create;
+  for var I := 1 to 5 do
+    R.Add(I);
+  var Line := '';
+  for var V in R.Items do
+    Line += IntToStr(V) + ' ';
+  WriteLn(Line.Trim);
+  var S := autofree TRing<string>.Create;
+  for var C in ['a', 'b', 'c', 'd'] do
+    S.Add(C);
+  WriteLn(string.Join(' ', S.Items));
+end.
+=== unleashed-w21 write
+--- prompt
+Compute pi with the Leibniz series using 1,000,000 terms, split into 4 chunks computed with async and awaited, and print it with 5 decimals as "pi ~ 3.14159".
+--- ref
+program LeibnizPi;
+{$mode unleashed}
+uses
+  {$ifdef UNIX}cthreads,{$endif} SysUtils;
+
+function Chunk(AFrom, ATo: Integer): Double;
+begin
+  Result := 0;
+  for var K := AFrom to ATo do
+    Result += (if Odd(K) then -1.0 else 1.0) / (2 * K + 1);
+end;
+
+begin
+  var A := async Chunk(0, 249999);
+  var B := async Chunk(250000, 499999);
+  var C := async Chunk(500000, 749999);
+  var D := async Chunk(750000, 999999);
+  var Sum := await A;
+  Sum += await B;
+  Sum += await C;
+  Sum += await D;
+  var FS := DefaultFormatSettings;
+  FS.DecimalSeparator := '.';
+  WriteLn('pi ~ ', FormatFloat('0.00000', 4 * Sum, FS));
+end.
+=== unleashed-w22 write
+--- prompt
+Write a word-wrap function that breaks the text "Unleashed Pascal adds inline variables, match expressions, tuples and async to the objfpc dialect." into lines of at most 24 characters without splitting words, and print the lines.
+--- ref
+program Wrap;
+{$mode unleashed}
+uses
+  SysUtils;
+
+begin
+  var Text := 'Unleashed Pascal adds inline variables, match expressions, tuples and async to the objfpc dialect.';
+  var Line := '';
+  for var W in Text.Split([' ']) do
+  begin
+    if Line = '' then
+      Line := W
+    else if Length(Line) + 1 + Length(W) <= 24 then
+      Line += ' ' + W
+    else
+    begin
+      WriteLn(Line);
+      Line := W;
+    end;
+  end;
+  if Line <> '' then
+    WriteLn(Line);
+end.
+=== unleashed-w23 write
+--- prompt
+Implement merge sort on dynamic arrays (a recursive function returning a new sorted array) and sort 38, 27, 43, 3, 9, 82, 10. Print the result on one line separated by spaces.
+--- ref
+program MergeSort;
+{$mode unleashed}
+uses
+  SysUtils;
+type
+  TInts = array of Integer;
+
+function Sort(const A: TInts): TInts;
+begin
+  if Length(A) <= 1 then
+    Exit(A);
+  var Mid := Length(A) div 2;
+  var L := Sort(Copy(A, 0, Mid));
+  var R := Sort(Copy(A, Mid, Length(A) - Mid));
+  SetLength(Result, Length(A));
+  var I := 0;
+  var J := 0;
+  for var K := 0 to High(Result) do
+    if (J > High(R)) or ((I <= High(L)) and (L[I] <= R[J])) then
+    begin
+      Result[K] := L[I];
+      Inc(I);
+    end
+    else
+    begin
+      Result[K] := R[J];
+      Inc(J);
+    end;
+end;
+
+begin
+  var S := Sort([38, 27, 43, 3, 9, 82, 10]);
+  var Line := '';
+  for var V in S do
+    Line += $'{V} ';
+  WriteLn(Line.TrimRight);
+end.
+=== unleashed-w24 write
+--- prompt
+Compute the distance between pairs of 2D integer points given as tuples: (0,0)-(3,4), (1,1)-(2,3), (-2,3)-(4,-5). Use a function returning a tuple (dx, dy) and print each distance with two decimals as "d = 5.00".
+--- ref
+program Distances;
+{$mode unleashed}
+uses
+  SysUtils;
+
+function Delta(X1, Y1, X2, Y2: Integer): (dx, dy: Integer);
+begin
+  Result := (X2 - X1, Y2 - Y1);
+end;
+
+procedure Show(X1, Y1, X2, Y2: Integer);
+begin
+  var (dx, dy) := Delta(X1, Y1, X2, Y2);
+  var FS := DefaultFormatSettings;
+  FS.DecimalSeparator := '.';
+  WriteLn('d = ', FormatFloat('0.00', Sqrt(dx * dx + dy * dy), FS));
+end;
+
+begin
+  Show(0, 0, 3, 4);
+  Show(1, 1, 2, 3);
+  Show(-2, 3, 4, -5);
+end.
+=== unleashed-w25 write
+--- prompt
+Read the grades in the string "Ann:91,Ben:58,Cara:77,Dev:84,Eli:63" and map each score to a letter with a match expression on conditions (>= 90 A, >= 80 B, >= 70 C, >= 60 D, otherwise F). Print "name: score letter" for each, then the class average with one decimal.
+--- ref
+program Grades;
+{$mode unleashed}
+uses
+  SysUtils;
+
+function Letter(S: Integer): string;
+begin
+  Result := match
+    S >= 90: 'A';
+    S >= 80: 'B';
+    S >= 70: 'C';
+    S >= 60: 'D';
+    _: 'F';
+  end;
+end;
+
+begin
+  var Sum := 0;
+  var N := 0;
+  for var Item in 'Ann:91,Ben:58,Cara:77,Dev:84,Eli:63'.Split([',']) do
+  begin
+    var Parts := Item.Split([':']);
+    var Score := StrToInt(Parts[1]);
+    WriteLn($'{Parts[0]}: {Score} {Letter(Score)}');
+    Sum += Score;
+    Inc(N);
+  end;
+  var FS := DefaultFormatSettings;
+  FS.DecimalSeparator := '.';
+  WriteLn('average ', FormatFloat('0.0', Sum / N, FS));
+end.
+=== unleashed-w26 write
+--- prompt
+Count, with "for parallel" over the numbers 1 to 20000, how many are divisible by 7 and how many by 11 (two shared counters, each protected by lock). Print "by7 2857" and "by11 1818".
+--- ref
+program ParCount;
+{$mode unleashed}
+uses
+  {$ifdef UNIX}cthreads,{$endif} SysUtils;
+
+var
+  By7, By11: Integer;
+
+begin
+  By7 := 0;
+  By11 := 0;
+  for parallel var I := 1 to 20000 do
+  begin
+    if I mod 7 = 0 then
+      lock(By7) do By7 += 1;
+    if I mod 11 = 0 then
+      lock(By11) do By11 += 1;
+  end;
+  WriteLn($'by7 {By7}');
+  WriteLn($'by11 {By11}');
+end.
+=== unleashed-w27 write
+--- prompt
+Write a class TCounterSet that counts named events in a TDictionary<string, Integer> and has a Report function that returns the counts sorted by count descending (ties by name) as lines "name count". Record login, view, view, logout, view, login and print the report.
+--- ref
+program EventCounts;
+{$mode unleashed}
+uses
+  SysUtils, Classes, Generics.Collections, Generics.Defaults;
+type
+  TEntry = TPair<string, Integer>;
+  TEntryList = TList<TEntry>;
+
+  TCounterSet = class
+  private
+    FCounts: TDictionary<string, Integer>;
+  public
+    constructor Create;
+    destructor Destroy; override;
+    procedure Hit(const AName: string);
+    function Report: TStringList;
+  end;
+
+constructor TCounterSet.Create;
+begin
+  inherited Create;
+  FCounts := TDictionary<string, Integer>.Create;
+end;
+
+destructor TCounterSet.Destroy;
+begin
+  FCounts.Free;
+  inherited Destroy;
+end;
+
+procedure TCounterSet.Hit(const AName: string);
+begin
+  var N := 0;
+  if FCounts.TryGetValue(AName, N) then
+    FCounts[AName] := N + 1
+  else
+    FCounts.Add(AName, 1);
+end;
+
+function CompareEntries(const A, B: TEntry): Integer;
+begin
+  Result := B.Value - A.Value;
+  if Result = 0 then
+    Result := CompareStr(A.Key, B.Key);
+end;
+
+function TCounterSet.Report: TStringList;
+begin
+  var L := TEntryList.Create(TComparer<TEntry>.Construct(@CompareEntries));
+  defer L.Free;
+  for var P in FCounts do
+    L.Add(P);
+  L.Sort;
+  Result := TStringList.Create;
+  for var P in L do
+    Result.Add($'{P.Key} {P.Value}');
+end;
+
+begin
+  var C := autofree TCounterSet.Create;
+  for var E in ['login', 'view', 'view', 'logout', 'view', 'login'] do
+    C.Hit(E);
+  var R := autofree C.Report;
+  for var Line in R do
+    WriteLn(Line);
+end.
+=== unleashed-w28 write
+--- prompt
+Check whether the words "listen"/"silent", "triangle"/"integral", "apple"/"paple" and "rat"/"car" are anagrams (sorting the letters) and print "a b: yes" or "a b: no" using an if-expression in the interpolated output.
+--- ref
+program Anagrams;
+{$mode unleashed}
+uses
+  SysUtils;
+
+function SortedLetters(const S: string): string;
+begin
+  Result := S;
+  for var I := 1 to Length(Result) - 1 do
+    for var J := I + 1 to Length(Result) do
+      if Result[J] < Result[I] then
+      begin
+        var T := Result[I];
+        Result[I] := Result[J];
+        Result[J] := T;
+      end;
+end;
+
+procedure Check(const A, B: string);
+begin
+  WriteLn($'{A} {B}: {if SortedLetters(A) = SortedLetters(B) then 'yes' else 'no'}');
+end;
+
+begin
+  Check('listen', 'silent');
+  Check('triangle', 'integral');
+  Check('apple', 'paple');
+  Check('rat', 'car');
+end.
+=== unleashed-w29 write
+--- prompt
+Simulate an elevator that serves the requested floors 5, 2, 8, 3 in order starting at floor 0; print each move as "0 -> 5 (5 floors)" and at the end the total number of floors travelled. Use inline variables and a tuple-returning helper Move(from, to) -> (dest, dist).
+--- ref
+program Elevator;
+{$mode unleashed}
+const
+  Requests: array[0..3] of Integer = (5, 2, 8, 3);
+
+function Move(AFrom, ATo: Integer): (dest, dist: Integer);
+begin
+  Result := (ATo, Abs(ATo - AFrom));
+end;
+
+begin
+  var Floor := 0;
+  var Total := 0;
+  for var Req in Requests do
+  begin
+    var (dest, dist) := Move(Floor, Req);
+    WriteLn($'{Floor} -> {dest} ({dist} floors)');
+    Floor := dest;
+    Total += dist;
+  end;
+  WriteLn($'total {Total}');
+end.
+=== unleashed-w30 write
+--- prompt
+Write a function that formats a duration in seconds as "Xh Ym Zs", omitting zero parts (but "0s" for zero), using an if-expression per part. Print the formatted values of 0, 59, 61, 3600, 3725 and 86399.
+--- ref
+program Durations;
+{$mode unleashed}
+uses
+  SysUtils;
+
+function Fmt(S: Integer): string;
+begin
+  var H := S div 3600;
+  var M := (S mod 3600) div 60;
+  var Sec := S mod 60;
+  Result := (if H > 0 then $'{H}h ' else '') + (if M > 0 then $'{M}m ' else '') +
+    (if Sec > 0 then $'{Sec}s' else '');
+  Result := Result.Trim;
+  if Result = '' then
+    Result := '0s';
+end;
+
+begin
+  for var S in [0, 59, 61, 3600, 3725, 86399] do
+    WriteLn(Fmt(S));
+end.
+=== unleashed-f01 fix
+--- prompt
+This Unleashed Pascal program does not compile. Fix it; it prints "sum 15".
+--- given
+program SumUp;
+{$mode unleashed}
+begin
+  var Sum = 0;
+  for var I := 1 to 5 do
+    Sum += I;
+  WriteLn($'sum {Sum}');
+end.
+--- ref
+program SumUp;
+{$mode unleashed}
+begin
+  var Sum := 0;
+  for var I := 1 to 5 do
+    Sum += I;
+  WriteLn($'sum {Sum}');
+end.
+=== unleashed-f02 fix
+--- prompt
+The compiler rejects this program. Make it compile; it should print "max 9".
+--- given
+program MaxIt;
+{$mode unleashed}
+uses
+  SysUtils;
+
+generic function MaxOf<T>(const A, B: T): T;
+begin
+  Result := if A > B then A else B;
+end;
+
+begin
+  WriteLn($'max {specialize MaxOf<Integer>(4, 9)}');
+end.
+--- ref
+program MaxIt;
+{$mode unleashed}
+uses
+  SysUtils;
+
+function MaxOf<T>(const A, B: T): T;
+begin
+  Result := if A > B then A else B;
+end;
+
+begin
+  WriteLn($'max {MaxOf<Integer>(4, 9)}');
+end.
+=== unleashed-f03 fix
+--- prompt
+Fix the compile error; the program prints the label of each code.
+--- given
+program Codes;
+{$mode unleashed}
+begin
+  for var Code in [200, 404, 500] do
+    WriteLn(match Code of
+      200: 'ok';
+      404: 'not found';
+    end);
+end.
+--- ref
+program Codes;
+{$mode unleashed}
+begin
+  for var Code in [200, 404, 500] do
+    WriteLn(match Code of
+      200: 'ok';
+      404: 'not found';
+      _: 'error';
+    end);
+end.
+=== unleashed-f04 fix
+--- prompt
+This program fails to compile. Fix it; it prints "clicked by Form".
+--- given
+program Clicks;
+{$mode unleashed}
+type
+  TClick = procedure(const Who: string) of object;
+
+  TForm = class
+    procedure OnClick(const Who: string);
+  end;
+
+procedure TForm.OnClick(const Who: string);
+begin
+  WriteLn('clicked by ', Who);
+end;
+
+begin
+  var F := autofree TForm.Create;
+  var H: TClick := F.OnClick;
+  H('Form');
+end.
+--- ref
+program Clicks;
+{$mode unleashed}
+type
+  TClick = procedure(const Who: string) of object;
+
+  TForm = class
+    procedure OnClick(const Who: string);
+  end;
+
+procedure TForm.OnClick(const Who: string);
+begin
+  WriteLn('clicked by ', Who);
+end;
+
+begin
+  var F := autofree TForm.Create;
+  var H: TClick := @F.OnClick;
+  H('Form');
+end.
+=== unleashed-f05 fix
+--- prompt
+Make this program compile. It should print "ten" for 10 and "other" for 3.
+--- given
+program Words;
+{$mode unleashed}
+
+function Name(N: Integer): string;
+begin
+  Result := if N = 10 then begin Exit('ten') end else 'other';
+end;
+
+begin
+  WriteLn(Name(10));
+  WriteLn(Name(3));
+end.
+--- ref
+program Words;
+{$mode unleashed}
+
+function Name(N: Integer): string;
+begin
+  Result := if N = 10 then 'ten' else 'other';
+end;
+
+begin
+  WriteLn(Name(10));
+  WriteLn(Name(3));
+end.
+=== unleashed-c01 convert
+--- prompt
+Convert this objfpc program to Unleashed Pascal, using inline variables, autofree and string interpolation where they fit. The output must stay the same.
+--- given
+program Names;
+{$mode objfpc}{$H+}
+uses
+  Classes, SysUtils;
+var
+  L: TStringList;
+  I: Integer;
+begin
+  L := TStringList.Create;
+  try
+    L.Add('Ada');
+    L.Add('Linus');
+    L.Add('Grace');
+    L.Sort;
+    for I := 0 to L.Count - 1 do
+      WriteLn(IntToStr(I + 1) + ': ' + L[I]);
+  finally
+    L.Free;
+  end;
+end.
+--- ref
+program Names;
+{$mode unleashed}
+uses
+  Classes, SysUtils;
+begin
+  var L := autofree TStringList.Create;
+  L.Add('Ada');
+  L.Add('Linus');
+  L.Add('Grace');
+  L.Sort;
+  for var I := 0 to L.Count - 1 do
+    WriteLn($'{I + 1}: {L[I]}');
+end.
+=== unleashed-c02 convert
+--- prompt
+Port this Free Pascal {$mode delphi} program to Unleashed Pascal; note that Unleashed assigns method pointers with @. Same output.
+--- given
+program Hooks;
+{$mode delphi}
+type
+  THook = procedure(N: Integer) of object;
+
+  TPrinter = class
+    procedure Show(N: Integer);
+  end;
+
+procedure TPrinter.Show(N: Integer);
+begin
+  WriteLn('value ', N);
+end;
+
+var
+  P: TPrinter;
+  H: THook;
+  I: Integer;
+begin
+  P := TPrinter.Create;
+  H := P.Show;
+  for I := 1 to 3 do
+    H(I * 10);
+  P.Free;
+end.
+--- ref
+program Hooks;
+{$mode unleashed}
+type
+  THook = procedure(N: Integer) of object;
+
+  TPrinter = class
+    procedure Show(N: Integer);
+  end;
+
+procedure TPrinter.Show(N: Integer);
+begin
+  WriteLn('value ', N);
+end;
+
+begin
+  var P := autofree TPrinter.Create;
+  var H: THook := @P.Show;
+  for var I := 1 to 3 do
+    H(I * 10);
+end.
+=== unleashed-c03 convert
+--- prompt
+Rewrite this Delphi program in Unleashed Pascal with the same output.
+--- given
+program Squares;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils, System.Generics.Collections;
+begin
+  var L := TList<Integer>.Create;
+  try
+    for var I := 1 to 5 do
+      L.Add(I * I);
+    for var V in L do
+      Write(V, ' ');
+    WriteLn;
+  finally
+    L.Free;
+  end;
+end.
+--- ref
+program Squares;
+{$mode unleashed}
+uses
+  SysUtils, Generics.Collections;
+begin
+  var L := autofree TList<Integer>.Create;
+  for var I := 1 to 5 do
+    L.Add(I * I);
+  for var V in L do
+    Write(V, ' ');
+  WriteLn;
+end.
+=== unleashed-c04 convert
+--- prompt
+Convert this objfpc program to Unleashed Pascal; replace the case statement with a match expression and keep the output.
+--- given
+program Seasons;
+{$mode objfpc}{$H+}
+var
+  M: Integer;
+  S: string;
+begin
+  for M := 1 to 12 do
+  begin
+    case M of
+      12, 1, 2: S := 'winter';
+      3..5: S := 'spring';
+      6..8: S := 'summer';
+    else
+      S := 'autumn';
+    end;
+    WriteLn(M, ' ', S);
+  end;
+end.
+--- ref
+program Seasons;
+{$mode unleashed}
+begin
+  for var M := 1 to 12 do
+  begin
+    var S := match M of
+      12, 1, 2: 'winter';
+      3..5: 'spring';
+      6..8: 'summer';
+      _: 'autumn';
+    end;
+    WriteLn(M, ' ', S);
+  end;
+end.
+=== unleashed-c05 convert
+--- prompt
+Translate this Oxygene program to Unleashed Pascal with the same output.
+--- given
+namespace Evens;
+
+type
+  Program = class
+  public
+    class method Main(args: array of String): Int32;
+    begin
+      var total := 0;
+      for i: Integer := 2 to 10 step 2 do begin
+        writeLn($'even {i}');
+        total := total + i;
+      end;
+      writeLn($'total {total}');
+    end;
+  end;
+
+end.
+--- ref
+program Evens;
+{$mode unleashed}
+begin
+  var Total := 0;
+  var I := 2;
+  while I <= 10 do
+  begin
+    WriteLn($'even {I}');
+    Total += I;
+    I += 2;
+  end;
+  WriteLn($'total {Total}');
+end.

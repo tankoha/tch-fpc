@@ -1,0 +1,3 @@
+unknown: noop
+skip: div 0
+result: 30

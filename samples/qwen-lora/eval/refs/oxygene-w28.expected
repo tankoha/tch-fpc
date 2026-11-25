@@ -1,0 +1,9 @@
+num 12
+op +
+lpar (
+num 34
+op *
+num 5
+rpar )
+op -
+num 6

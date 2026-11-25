@@ -1,0 +1,1799 @@
+=== fpcdelphi-w01 write
+--- prompt
+Print the multiplication table from 1 to 6 as a grid: six lines, each with the six products of that row right-aligned in 4 characters.
+--- ref
+program Table;
+{$mode delphi}
+uses
+  SysUtils;
+var
+  R, C: Integer;
+begin
+  for R := 1 to 6 do
+  begin
+    for C := 1 to 6 do
+      Write(Format('%4d', [R * C]));
+    WriteLn;
+  end;
+end.
+=== fpcdelphi-w02 write
+--- prompt
+Write a generic record TPair<TKey, TValue> with fields Key and Value and a function MakePair. Create the pairs ('one', 1), ('two', 2) and ('three', 3) in an array and print each as "key=value".
+--- ref
+program Pairs;
+{$mode delphi}
+uses
+  SysUtils;
+type
+  TPair<TKey, TValue> = record
+    Key: TKey;
+    Value: TValue;
+  end;
+  TNamePair = TPair<string, Integer>;
+
+function MakePair(const AKey: string; AValue: Integer): TNamePair;
+begin
+  Result.Key := AKey;
+  Result.Value := AValue;
+end;
+
+var
+  P: array[0..2] of TNamePair;
+  I: Integer;
+begin
+  P[0] := MakePair('one', 1);
+  P[1] := MakePair('two', 2);
+  P[2] := MakePair('three', 3);
+  for I := 0 to High(P) do
+    WriteLn(P[I].Key, '=', P[I].Value);
+end.
+=== fpcdelphi-w03 write
+--- prompt
+Use TDictionary<string, Integer> from Generics.Collections to count the letters of the word "mississippi". Print the letters in alphabetical order as "letter count", one per line.
+--- ref
+program Letters;
+{$mode delphi}
+uses
+  SysUtils, Generics.Collections;
+var
+  D: TDictionary<Char, Integer>;
+  Keys: TList<Char>;
+  C: Char;
+  N: Integer;
+begin
+  D := TDictionary<Char, Integer>.Create;
+  Keys := TList<Char>.Create;
+  try
+    for C in 'mississippi' do
+      if D.TryGetValue(C, N) then
+        D[C] := N + 1
+      else
+        D.Add(C, 1);
+    for C in D.Keys do
+      Keys.Add(C);
+    Keys.Sort;
+    for C in Keys do
+      WriteLn(C, ' ', D[C]);
+  finally
+    D.Free;
+    Keys.Free;
+  end;
+end.
+=== fpcdelphi-w04 write
+--- prompt
+Write a recursive function that returns all permutations of the string "abc" (in lexicographic order of generation by choosing each character first) and print them one per line, then the line "6 permutations".
+--- ref
+program Perms;
+{$mode delphi}
+uses
+  SysUtils, Classes;
+
+procedure Permute(const Prefix, Rest: string; AOut: TStrings);
+var
+  I: Integer;
+begin
+  if Rest = '' then
+    AOut.Add(Prefix)
+  else
+    for I := 1 to Length(Rest) do
+      Permute(Prefix + Rest[I], Copy(Rest, 1, I - 1) + Copy(Rest, I + 1, MaxInt), AOut);
+end;
+
+var
+  L: TStringList;
+  S: string;
+begin
+  L := TStringList.Create;
+  try
+    Permute('', 'abc', L);
+    for S in L do
+      WriteLn(S);
+    WriteLn(L.Count, ' permutations');
+  finally
+    L.Free;
+  end;
+end.
+=== fpcdelphi-w05 write
+--- prompt
+Model animals with a base class TAnimal (virtual function Sound and a Name property set in the constructor) and subclasses TDog, TCat and TCow. Put one of each in a TObjectList<TAnimal> that owns them and print "Name says Sound" for each.
+--- ref
+program Animals;
+{$mode delphi}
+uses
+  SysUtils, Generics.Collections;
+type
+  TAnimal = class
+  private
+    FName: string;
+  public
+    constructor Create(const AName: string);
+    function Sound: string; virtual; abstract;
+    property Name: string read FName;
+  end;
+
+  TDog = class(TAnimal)
+    function Sound: string; override;
+  end;
+
+  TCat = class(TAnimal)
+    function Sound: string; override;
+  end;
+
+  TCow = class(TAnimal)
+    function Sound: string; override;
+  end;
+
+constructor TAnimal.Create(const AName: string);
+begin
+  FName := AName;
+end;
+
+function TDog.Sound: string;
+begin
+  Result := 'woof';
+end;
+
+function TCat.Sound: string;
+begin
+  Result := 'meow';
+end;
+
+function TCow.Sound: string;
+begin
+  Result := 'moo';
+end;
+
+var
+  L: TObjectList<TAnimal>;
+  A: TAnimal;
+begin
+  L := TObjectList<TAnimal>.Create(True);
+  try
+    L.Add(TDog.Create('Rex'));
+    L.Add(TCat.Create('Tom'));
+    L.Add(TCow.Create('Bella'));
+    for A in L do
+      WriteLn(A.Name, ' says ', A.Sound);
+  finally
+    L.Free;
+  end;
+end.
+=== fpcdelphi-w06 write
+--- prompt
+Compute the sum of the digits and the digital root of 987654321, 1000 and 49. Print each as "n: sum S, root R".
+--- ref
+program Digits;
+{$mode delphi}
+
+function DigitSum(N: Int64): Int64;
+begin
+  Result := 0;
+  while N > 0 do
+  begin
+    Inc(Result, N mod 10);
+    N := N div 10;
+  end;
+end;
+
+function DigitalRoot(N: Int64): Int64;
+begin
+  Result := N;
+  while Result >= 10 do
+    Result := DigitSum(Result);
+end;
+
+procedure Show(N: Int64);
+begin
+  WriteLn(N, ': sum ', DigitSum(N), ', root ', DigitalRoot(N));
+end;
+
+begin
+  Show(987654321);
+  Show(1000);
+  Show(49);
+end.
+=== fpcdelphi-w07 write
+--- prompt
+Implement bubble sort as a generic class method TSorter.Sort<T> taking an array and a comparison function. Sort the integers 5, 2, 9, 1, 7 ascending and the strings 'pear', 'kiwi', 'apple' descending, and print each sorted array on one line separated by spaces.
+--- ref
+program GenericSort;
+{$mode delphi}
+uses
+  SysUtils;
+type
+  TCompare<T> = function(const A, B: T): Integer;
+
+  TSorter = class
+    class procedure Sort<T>(var A: array of T; Compare: TCompare<T>);
+  end;
+
+class procedure TSorter.Sort<T>(var A: array of T; Compare: TCompare<T>);
+var
+  I, J: Integer;
+  Tmp: T;
+begin
+  for I := High(A) downto 1 do
+    for J := 0 to I - 1 do
+      if Compare(A[J], A[J + 1]) > 0 then
+      begin
+        Tmp := A[J];
+        A[J] := A[J + 1];
+        A[J + 1] := Tmp;
+      end;
+end;
+
+function IntAsc(const A, B: Integer): Integer;
+begin
+  Result := A - B;
+end;
+
+function StrDesc(const A, B: string): Integer;
+begin
+  Result := CompareStr(B, A);
+end;
+
+var
+  Nums: array[0..4] of Integer = (5, 2, 9, 1, 7);
+  Words: array[0..2] of string = ('pear', 'kiwi', 'apple');
+  I: Integer;
+begin
+  TSorter.Sort<Integer>(Nums, IntAsc);
+  TSorter.Sort<string>(Words, StrDesc);
+  for I := 0 to High(Nums) do
+  begin
+    if I > 0 then
+      Write(' ');
+    Write(Nums[I]);
+  end;
+  WriteLn;
+  for I := 0 to High(Words) do
+  begin
+    if I > 0 then
+      Write(' ');
+    Write(Words[I]);
+  end;
+  WriteLn;
+end.
+=== fpcdelphi-w08 write
+--- prompt
+Write a class TTemperature with a Celsius property and read-only Fahrenheit and Kelvin properties computed by getter methods. For -40, 0, 37 and 100 degrees Celsius print "C: F / K" with Celsius and Fahrenheit formatted to one decimal and Kelvin to two decimals.
+--- ref
+program Temperature;
+{$mode delphi}
+uses
+  SysUtils;
+type
+  TTemperature = class
+  private
+    FCelsius: Double;
+    function GetFahrenheit: Double;
+    function GetKelvin: Double;
+  public
+    property Celsius: Double read FCelsius write FCelsius;
+    property Fahrenheit: Double read GetFahrenheit;
+    property Kelvin: Double read GetKelvin;
+  end;
+
+function TTemperature.GetFahrenheit: Double;
+begin
+  Result := FCelsius * 9 / 5 + 32;
+end;
+
+function TTemperature.GetKelvin: Double;
+begin
+  Result := FCelsius + 273.15;
+end;
+
+const
+  Values: array[0..3] of Double = (-40, 0, 37, 100);
+var
+  T: TTemperature;
+  I: Integer;
+  FS: TFormatSettings;
+begin
+  FS := DefaultFormatSettings;
+  FS.DecimalSeparator := '.';
+  T := TTemperature.Create;
+  try
+    for I := 0 to High(Values) do
+    begin
+      T.Celsius := Values[I];
+      WriteLn(FormatFloat('0.0', T.Celsius, FS), ': ', FormatFloat('0.0', T.Fahrenheit, FS),
+        ' / ', FormatFloat('0.00', T.Kelvin, FS));
+    end;
+  finally
+    T.Free;
+  end;
+end.
+=== fpcdelphi-w09 write
+--- prompt
+Split the CSV line "id,name,score;1,Ann,88;2,Bob,72;3,Cid,95" into records (records separated by ';', fields by ','; the first record is the header). Print the name with the highest score as "best: Cid 95" and the average score with two decimals as "average: 85.00".
+--- ref
+program CsvScores;
+{$mode delphi}
+uses
+  SysUtils, Classes;
+var
+  Rows, Fields: TStringList;
+  I, Score, Best, Sum: Integer;
+  BestName: string;
+  FS: TFormatSettings;
+begin
+  FS := DefaultFormatSettings;
+  FS.DecimalSeparator := '.';
+  Rows := TStringList.Create;
+  Fields := TStringList.Create;
+  try
+    Rows.Delimiter := ';';
+    Rows.StrictDelimiter := True;
+    Rows.DelimitedText := 'id,name,score;1,Ann,88;2,Bob,72;3,Cid,95';
+    Fields.Delimiter := ',';
+    Fields.StrictDelimiter := True;
+    Best := -1;
+    Sum := 0;
+    for I := 1 to Rows.Count - 1 do
+    begin
+      Fields.DelimitedText := Rows[I];
+      Score := StrToInt(Fields[2]);
+      Inc(Sum, Score);
+      if Score > Best then
+      begin
+        Best := Score;
+        BestName := Fields[1];
+      end;
+    end;
+    WriteLn('best: ', BestName, ' ', Best);
+    WriteLn('average: ', FormatFloat('0.00', Sum / (Rows.Count - 1), FS));
+  finally
+    Rows.Free;
+    Fields.Free;
+  end;
+end.
+=== fpcdelphi-w10 write
+--- prompt
+Write a TStack<Integer> based checker for balanced brackets. Check the strings "(a[b]{c})", "([)]", "((x)" and "{[()()]}" and print each followed by " balanced" or " unbalanced".
+--- ref
+program Brackets;
+{$mode delphi}
+uses
+  SysUtils, Generics.Collections;
+
+function Balanced(const S: string): Boolean;
+var
+  St: TStack<Char>;
+  C: Char;
+begin
+  St := TStack<Char>.Create;
+  try
+    for C in S do
+      case C of
+        '(', '[', '{': St.Push(C);
+        ')', ']', '}':
+          begin
+            if St.Count = 0 then
+              Exit(False);
+            if ((C = ')') and (St.Peek <> '(')) or ((C = ']') and (St.Peek <> '[')) or
+               ((C = '}') and (St.Peek <> '{')) then
+              Exit(False);
+            St.Pop;
+          end;
+      end;
+    Result := St.Count = 0;
+  finally
+    St.Free;
+  end;
+end;
+
+procedure Check(const S: string);
+begin
+  if Balanced(S) then
+    WriteLn(S, ' balanced')
+  else
+    WriteLn(S, ' unbalanced');
+end;
+
+begin
+  Check('(a[b]{c})');
+  Check('([)]');
+  Check('((x)');
+  Check('{[()()]}');
+end.
+=== fpcdelphi-w11 write
+--- prompt
+Write a record TFraction with Num and Den, normalised by the gcd (denominator positive), with overloaded + and * operators and a ToString method. Print 1/2 + 1/3, 3/4 * 2/9 and -2/4 + 1/4 as "a/b", one per line.
+--- ref
+program Fractions;
+{$mode delphi}
+uses
+  SysUtils;
+type
+  TFraction = record
+    Num, Den: Integer;
+    class function Make(N, D: Integer): TFraction; static;
+    class operator Add(const A, B: TFraction): TFraction;
+    class operator Multiply(const A, B: TFraction): TFraction;
+    function ToString: string;
+  end;
+
+function Gcd(A, B: Integer): Integer;
+begin
+  A := Abs(A);
+  B := Abs(B);
+  while B <> 0 do
+  begin
+    Result := A mod B;
+    A := B;
+    B := Result;
+  end;
+  Result := A;
+end;
+
+class function TFraction.Make(N, D: Integer): TFraction;
+var
+  G: Integer;
+begin
+  if D < 0 then
+  begin
+    N := -N;
+    D := -D;
+  end;
+  G := Gcd(N, D);
+  if G = 0 then
+    G := 1;
+  Result.Num := N div G;
+  Result.Den := D div G;
+end;
+
+class operator TFraction.Add(const A, B: TFraction): TFraction;
+begin
+  Result := Make(A.Num * B.Den + B.Num * A.Den, A.Den * B.Den);
+end;
+
+class operator TFraction.Multiply(const A, B: TFraction): TFraction;
+begin
+  Result := Make(A.Num * B.Num, A.Den * B.Den);
+end;
+
+function TFraction.ToString: string;
+begin
+  Result := IntToStr(Num) + '/' + IntToStr(Den);
+end;
+
+begin
+  WriteLn((TFraction.Make(1, 2) + TFraction.Make(1, 3)).ToString);
+  WriteLn((TFraction.Make(3, 4) * TFraction.Make(2, 9)).ToString);
+  WriteLn((TFraction.Make(-2, 4) + TFraction.Make(1, 4)).ToString);
+end.
+=== fpcdelphi-w12 write
+--- prompt
+Run-length encode the string "aaabccddddde" as count followed by character ("3a1b2c5d1e") and decode the result again. Print the encoded and the decoded string on two lines.
+--- ref
+program RunLength;
+{$mode delphi}
+uses
+  SysUtils;
+
+function Encode(const S: string): string;
+var
+  I, N: Integer;
+begin
+  Result := '';
+  I := 1;
+  while I <= Length(S) do
+  begin
+    N := 1;
+    while (I + N <= Length(S)) and (S[I + N] = S[I]) do
+      Inc(N);
+    Result := Result + IntToStr(N) + S[I];
+    Inc(I, N);
+  end;
+end;
+
+function Decode(const S: string): string;
+var
+  I, N: Integer;
+begin
+  Result := '';
+  N := 0;
+  for I := 1 to Length(S) do
+    if S[I] in ['0'..'9'] then
+      N := N * 10 + Ord(S[I]) - Ord('0')
+    else
+    begin
+      Result := Result + StringOfChar(S[I], N);
+      N := 0;
+    end;
+end;
+
+var
+  E: string;
+begin
+  E := Encode('aaabccddddde');
+  WriteLn(E);
+  WriteLn(Decode(E));
+end.
+=== fpcdelphi-w13 write
+--- prompt
+Simulate a bank with two accounts (Alice 500, Bob 300) as objects in a TDictionary<string, TAccount>. Apply the transfers Alice->Bob 120, Bob->Alice 50 and Bob->Alice 400; a transfer that would make a balance negative is refused with a line "refused: Bob->Alice 400". At the end print "Alice N" and "Bob N".
+--- ref
+program Bank;
+{$mode delphi}
+uses
+  SysUtils, Generics.Collections;
+type
+  TAccount = class
+    Balance: Integer;
+    constructor Create(ABalance: Integer);
+  end;
+
+constructor TAccount.Create(ABalance: Integer);
+begin
+  Balance := ABalance;
+end;
+
+var
+  Accounts: TObjectDictionary<string, TAccount>;
+
+procedure Transfer(const AFrom, ATo: string; AAmount: Integer);
+begin
+  if Accounts[AFrom].Balance < AAmount then
+    WriteLn('refused: ', AFrom, '->', ATo, ' ', AAmount)
+  else
+  begin
+    Dec(Accounts[AFrom].Balance, AAmount);
+    Inc(Accounts[ATo].Balance, AAmount);
+  end;
+end;
+
+begin
+  Accounts := TObjectDictionary<string, TAccount>.Create([doOwnsValues]);
+  try
+    Accounts.Add('Alice', TAccount.Create(500));
+    Accounts.Add('Bob', TAccount.Create(300));
+    Transfer('Alice', 'Bob', 120);
+    Transfer('Bob', 'Alice', 50);
+    Transfer('Bob', 'Alice', 400);
+    WriteLn('Alice ', Accounts['Alice'].Balance);
+    WriteLn('Bob ', Accounts['Bob'].Balance);
+  finally
+    Accounts.Free;
+  end;
+end.
+=== fpcdelphi-w14 write
+--- prompt
+Find all pairs of numbers in 1, 4, 6, 9, 11, 15, 20 whose sum is 21 (each pair once, smaller number first) and print them as "a + b", then "pairs: N".
+--- ref
+program PairSums;
+{$mode delphi}
+const
+  A: array[0..6] of Integer = (1, 4, 6, 9, 11, 15, 20);
+var
+  I, J, N: Integer;
+begin
+  N := 0;
+  for I := 0 to High(A) - 1 do
+    for J := I + 1 to High(A) do
+      if A[I] + A[J] = 21 then
+      begin
+        WriteLn(A[I], ' + ', A[J]);
+        Inc(N);
+      end;
+  WriteLn('pairs: ', N);
+end.
+=== fpcdelphi-w15 write
+--- prompt
+Write an interface ILogger with a procedure Log(const Msg: string). Implement TPrefixLogger, which prints messages with a prefix given in its constructor, and a TCountingLogger, which wraps another ILogger and numbers the messages ("1: ..."). Log "start", "work", "stop" through a counting logger around a prefix logger with prefix "[app] ".
+--- ref
+program Loggers;
+{$mode delphi}
+uses
+  SysUtils;
+type
+  ILogger = interface
+    ['{2B1E7C0A-4D5F-4C21-8E36-1A9B0C7D3E42}']
+    procedure Log(const Msg: string);
+  end;
+
+  TPrefixLogger = class(TInterfacedObject, ILogger)
+  private
+    FPrefix: string;
+  public
+    constructor Create(const APrefix: string);
+    procedure Log(const Msg: string);
+  end;
+
+  TCountingLogger = class(TInterfacedObject, ILogger)
+  private
+    FInner: ILogger;
+    FCount: Integer;
+  public
+    constructor Create(const AInner: ILogger);
+    procedure Log(const Msg: string);
+  end;
+
+constructor TPrefixLogger.Create(const APrefix: string);
+begin
+  FPrefix := APrefix;
+end;
+
+procedure TPrefixLogger.Log(const Msg: string);
+begin
+  WriteLn(FPrefix, Msg);
+end;
+
+constructor TCountingLogger.Create(const AInner: ILogger);
+begin
+  FInner := AInner;
+end;
+
+procedure TCountingLogger.Log(const Msg: string);
+begin
+  Inc(FCount);
+  FInner.Log(IntToStr(FCount) + ': ' + Msg);
+end;
+
+var
+  L: ILogger;
+begin
+  L := TCountingLogger.Create(TPrefixLogger.Create('[app] '));
+  L.Log('start');
+  L.Log('work');
+  L.Log('stop');
+end.
+=== fpcdelphi-w16 write
+--- prompt
+Compute 2 to the power of 64 minus 1 as a QWord and print it, then print the factorials of 1 to 20 (as Int64), one per line as "n! = value".
+--- ref
+program BigNumbers;
+{$mode delphi}
+var
+  Q: QWord;
+  F: Int64;
+  I: Integer;
+begin
+  Q := High(QWord);
+  WriteLn(Q);
+  F := 1;
+  for I := 1 to 20 do
+  begin
+    F := F * I;
+    WriteLn(I, '! = ', F);
+  end;
+end.
+=== fpcdelphi-w17 write
+--- prompt
+Print the number of weekdays (Monday to Friday) in each month of 2025, one line per month as "month: N" with the month's English name. Use DateUtils.
+--- ref
+program Weekdays;
+{$mode delphi}
+uses
+  SysUtils, DateUtils;
+const
+  Months: array[1..12] of string = ('January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December');
+var
+  M, D, N: Integer;
+  T: TDateTime;
+begin
+  for M := 1 to 12 do
+  begin
+    N := 0;
+    for D := 1 to DaysInAMonth(2025, M) do
+    begin
+      T := EncodeDate(2025, M, D);
+      if DayOfTheWeek(T) <= 5 then
+        Inc(N);
+    end;
+    WriteLn(Months[M], ': ', N);
+  end;
+end.
+=== fpcdelphi-w18 write
+--- prompt
+Implement the knapsack problem with dynamic programming: capacity 10, items (weight, value) (5, 10), (4, 40), (6, 30), (3, 50). Print the best value as "best 90" and the chosen item numbers (1-based, ascending) on the next line separated by spaces.
+--- ref
+program Knapsack;
+{$mode delphi}
+const
+  W: array[1..4] of Integer = (5, 4, 6, 3);
+  V: array[1..4] of Integer = (10, 40, 30, 50);
+  Cap = 10;
+var
+  Best: array[0..4, 0..Cap] of Integer;
+  I, C: Integer;
+  Chosen: array of Integer;
+begin
+  for C := 0 to Cap do
+    Best[0, C] := 0;
+  for I := 1 to 4 do
+    for C := 0 to Cap do
+    begin
+      Best[I, C] := Best[I - 1, C];
+      if (W[I] <= C) and (Best[I - 1, C - W[I]] + V[I] > Best[I, C]) then
+        Best[I, C] := Best[I - 1, C - W[I]] + V[I];
+    end;
+  WriteLn('best ', Best[4, Cap]);
+  C := Cap;
+  Chosen := nil;
+  for I := 4 downto 1 do
+    if Best[I, C] <> Best[I - 1, C] then
+    begin
+      Insert(I, Chosen, 0);
+      Dec(C, W[I]);
+    end;
+  for I := 0 to High(Chosen) do
+  begin
+    if I > 0 then
+      Write(' ');
+    Write(Chosen[I]);
+  end;
+  WriteLn;
+end.
+=== fpcdelphi-w19 write
+--- prompt
+Write a class TMatrix2 for 2x2 integer matrices with a constructor taking four values, a function Mul and a function Power(N) using repeated squaring. Use it to compute the 30th Fibonacci number from [[1,1],[1,0]]^30 and print "fib(30) = 832040".
+--- ref
+program MatrixFib;
+{$mode delphi}
+type
+  TMatrix2 = record
+    A, B, C, D: Int64;
+    class function Make(AA, AB, AC, AD: Int64): TMatrix2; static;
+    function Mul(const M: TMatrix2): TMatrix2;
+    function Power(N: Integer): TMatrix2;
+  end;
+
+class function TMatrix2.Make(AA, AB, AC, AD: Int64): TMatrix2;
+begin
+  Result.A := AA;
+  Result.B := AB;
+  Result.C := AC;
+  Result.D := AD;
+end;
+
+function TMatrix2.Mul(const M: TMatrix2): TMatrix2;
+begin
+  Result := Make(A * M.A + B * M.C, A * M.B + B * M.D, C * M.A + D * M.C, C * M.B + D * M.D);
+end;
+
+function TMatrix2.Power(N: Integer): TMatrix2;
+var
+  Base: TMatrix2;
+begin
+  Result := Make(1, 0, 0, 1);
+  Base := Self;
+  while N > 0 do
+  begin
+    if Odd(N) then
+      Result := Result.Mul(Base);
+    Base := Base.Mul(Base);
+    N := N div 2;
+  end;
+end;
+
+begin
+  WriteLn('fib(30) = ', TMatrix2.Make(1, 1, 1, 0).Power(30).B);
+end.
+=== fpcdelphi-w20 write
+--- prompt
+Define an exception hierarchy EParseError (base) with EEmptyInput and EBadNumber. A function ParseAge raises EEmptyInput for '', EBadNumber for text that is not a number, and EParseError for numbers outside 0..150. Parse '', 'abc', '200' and '42' and print for each either "ok N" or the exception's class name and message as "EBadNumber: ...".
+--- ref
+program ParseAges;
+{$mode delphi}
+uses
+  SysUtils;
+type
+  EParseError = class(Exception);
+  EEmptyInput = class(EParseError);
+  EBadNumber = class(EParseError);
+
+function ParseAge(const S: string): Integer;
+begin
+  if S = '' then
+    raise EEmptyInput.Create('no input');
+  if not TryStrToInt(S, Result) then
+    raise EBadNumber.CreateFmt('"%s" is not a number', [S]);
+  if (Result < 0) or (Result > 150) then
+    raise EParseError.CreateFmt('%d is out of range', [Result]);
+end;
+
+procedure Try1(const S: string);
+var
+  N: Integer;
+begin
+  try
+    N := ParseAge(S);
+    WriteLn('ok ', N);
+  except
+    on E: EParseError do
+      WriteLn(E.ClassName, ': ', E.Message);
+  end;
+end;
+
+begin
+  Try1('');
+  Try1('abc');
+  Try1('200');
+  Try1('42');
+end.
+=== fpcdelphi-w21 write
+--- prompt
+Rotate the 3x3 matrix with rows 1 2 3 / 4 5 6 / 7 8 9 by 90 degrees clockwise and print the result, one row per line with the numbers separated by spaces. Then print its transpose the same way after a line "transpose".
+--- ref
+program Rotate;
+{$mode delphi}
+type
+  TM = array[0..2, 0..2] of Integer;
+
+procedure Print(const M: TM);
+var
+  R, C: Integer;
+begin
+  for R := 0 to 2 do
+  begin
+    for C := 0 to 2 do
+    begin
+      if C > 0 then
+        Write(' ');
+      Write(M[R, C]);
+    end;
+    WriteLn;
+  end;
+end;
+
+var
+  M, Rot, Tr: TM;
+  R, C: Integer;
+begin
+  for R := 0 to 2 do
+    for C := 0 to 2 do
+      M[R, C] := R * 3 + C + 1;
+  for R := 0 to 2 do
+    for C := 0 to 2 do
+    begin
+      Rot[C, 2 - R] := M[R, C];
+      Tr[C, R] := M[R, C];
+    end;
+  Print(Rot);
+  WriteLn('transpose');
+  Print(Tr);
+end.
+=== fpcdelphi-w22 write
+--- prompt
+Write a TInventory class that keeps item quantities in a TDictionary<string, Integer>. Add 5 apples, 3 pears, 2 more apples, remove 1 pear and try to remove 10 apples (refused with "not enough apples"). Print the inventory sorted by name as "name: qty" at the end.
+--- ref
+program Inventory;
+{$mode delphi}
+uses
+  SysUtils, Generics.Collections;
+type
+  TInventory = class
+  private
+    FItems: TDictionary<string, Integer>;
+  public
+    constructor Create;
+    destructor Destroy; override;
+    procedure Add(const AName: string; AQty: Integer);
+    procedure Remove(const AName: string; AQty: Integer);
+    procedure Print;
+  end;
+
+constructor TInventory.Create;
+begin
+  FItems := TDictionary<string, Integer>.Create;
+end;
+
+destructor TInventory.Destroy;
+begin
+  FItems.Free;
+  inherited;
+end;
+
+procedure TInventory.Add(const AName: string; AQty: Integer);
+var
+  N: Integer;
+begin
+  if FItems.TryGetValue(AName, N) then
+    FItems[AName] := N + AQty
+  else
+    FItems.Add(AName, AQty);
+end;
+
+procedure TInventory.Remove(const AName: string; AQty: Integer);
+var
+  N: Integer;
+begin
+  if (not FItems.TryGetValue(AName, N)) or (N < AQty) then
+    WriteLn('not enough ', AName)
+  else
+    FItems[AName] := N - AQty;
+end;
+
+procedure TInventory.Print;
+var
+  Names: TList<string>;
+  S: string;
+begin
+  Names := TList<string>.Create;
+  try
+    for S in FItems.Keys do
+      Names.Add(S);
+    Names.Sort;
+    for S in Names do
+      WriteLn(S, ': ', FItems[S]);
+  finally
+    Names.Free;
+  end;
+end;
+
+var
+  Inv: TInventory;
+begin
+  Inv := TInventory.Create;
+  try
+    Inv.Add('apples', 5);
+    Inv.Add('pears', 3);
+    Inv.Add('apples', 2);
+    Inv.Remove('pears', 1);
+    Inv.Remove('apples', 10);
+    Inv.Print;
+  finally
+    Inv.Free;
+  end;
+end.
+=== fpcdelphi-w23 write
+--- prompt
+Compute the square root of 2, 10 and 144 with Newton's method (start at the number itself, stop when two iterations differ by less than 1e-12) and print each as "sqrt(n) = value" with 6 decimals and the number of iterations in brackets, e.g. "sqrt(2) = 1.414214 [6]".
+--- ref
+program Newton;
+{$mode delphi}
+uses
+  SysUtils;
+
+procedure Show(N: Double);
+var
+  X, Prev: Double;
+  It: Integer;
+  FS: TFormatSettings;
+begin
+  FS := DefaultFormatSettings;
+  FS.DecimalSeparator := '.';
+  X := N;
+  It := 0;
+  repeat
+    Prev := X;
+    X := (X + N / X) / 2;
+    Inc(It);
+  until Abs(X - Prev) < 1e-12;
+  WriteLn('sqrt(', FormatFloat('0', N, FS), ') = ', FormatFloat('0.000000', X, FS), ' [', It, ']');
+end;
+
+begin
+  Show(2);
+  Show(10);
+  Show(144);
+end.
+=== fpcdelphi-w24 write
+--- prompt
+Play the game of Nim with 15 sticks between two fixed strategies: player A always takes (sticks mod 4) sticks if that is not zero, otherwise 1; player B always takes 2 (or 1 if only one is left). A starts; whoever takes the last stick wins. Print every move as "A takes 3, 12 left" and finally "winner: X".
+--- ref
+program Nim;
+{$mode delphi}
+var
+  Sticks, Take: Integer;
+  Player: Char;
+begin
+  Sticks := 15;
+  Player := 'A';
+  while True do
+  begin
+    if Player = 'A' then
+    begin
+      Take := Sticks mod 4;
+      if Take = 0 then
+        Take := 1;
+    end
+    else if Sticks >= 2 then
+      Take := 2
+    else
+      Take := 1;
+    Dec(Sticks, Take);
+    WriteLn(Player, ' takes ', Take, ', ', Sticks, ' left');
+    if Sticks = 0 then
+      Break;
+    if Player = 'A' then
+      Player := 'B'
+    else
+      Player := 'A';
+  end;
+  WriteLn('winner: ', Player);
+end.
+=== fpcdelphi-w25 write
+--- prompt
+Write a procedure type TTransform = function(const S: string): string and an array of three transforms: upper case, reverse, and adding brackets around the text. Apply them in order to "pascal" and print the intermediate result after each step, one per line.
+--- ref
+program Transforms;
+{$mode delphi}
+uses
+  SysUtils;
+type
+  TTransform = function(const S: string): string;
+
+function Upper(const S: string): string;
+begin
+  Result := UpperCase(S);
+end;
+
+function Reverse(const S: string): string;
+var
+  I: Integer;
+begin
+  Result := '';
+  for I := Length(S) downto 1 do
+    Result := Result + S[I];
+end;
+
+function Bracket(const S: string): string;
+begin
+  Result := '[' + S + ']';
+end;
+
+const
+  Steps: array[0..2] of TTransform = (Upper, Reverse, Bracket);
+var
+  S: string;
+  I: Integer;
+begin
+  S := 'pascal';
+  for I := 0 to High(Steps) do
+  begin
+    S := Steps[I](S);
+    WriteLn(S);
+  end;
+end.
+=== fpcdelphi-w26 write
+--- prompt
+Count the vowels, consonants, digits and spaces in "Pascal 3.2 was released in 2021" and print the four counts as "vowels 8", "consonants ...", "digits ..." and "spaces ...".
+--- ref
+program CountChars;
+{$mode delphi}
+var
+  S: string;
+  C: Char;
+  V, K, D, Sp: Integer;
+begin
+  S := 'Pascal 3.2 was released in 2021';
+  V := 0;
+  K := 0;
+  D := 0;
+  Sp := 0;
+  for C in LowerCase(S) do
+    if C in ['a', 'e', 'i', 'o', 'u'] then
+      Inc(V)
+    else if C in ['a'..'z'] then
+      Inc(K)
+    else if C in ['0'..'9'] then
+      Inc(D)
+    else if C = ' ' then
+      Inc(Sp);
+  WriteLn('vowels ', V);
+  WriteLn('consonants ', K);
+  WriteLn('digits ', D);
+  WriteLn('spaces ', Sp);
+end.
+=== fpcdelphi-w27 write
+--- prompt
+Implement a singly linked list of integers with records and pointers (New/Dispose): append 3, 1, 4, 1, 5, print the list as "3 -> 1 -> 4 -> 1 -> 5", reverse it in place, print it again, and free all nodes.
+--- ref
+program LinkedList;
+{$mode delphi}
+type
+  PNode = ^TNode;
+  TNode = record
+    Value: Integer;
+    Next: PNode;
+  end;
+
+procedure Append(var Head: PNode; AValue: Integer);
+var
+  N, P: PNode;
+begin
+  New(N);
+  N^.Value := AValue;
+  N^.Next := nil;
+  if Head = nil then
+    Head := N
+  else
+  begin
+    P := Head;
+    while P^.Next <> nil do
+      P := P^.Next;
+    P^.Next := N;
+  end;
+end;
+
+procedure Print(Head: PNode);
+begin
+  while Head <> nil do
+  begin
+    Write(Head^.Value);
+    if Head^.Next <> nil then
+      Write(' -> ');
+    Head := Head^.Next;
+  end;
+  WriteLn;
+end;
+
+function Reverse(Head: PNode): PNode;
+var
+  Next: PNode;
+begin
+  Result := nil;
+  while Head <> nil do
+  begin
+    Next := Head^.Next;
+    Head^.Next := Result;
+    Result := Head;
+    Head := Next;
+  end;
+end;
+
+var
+  Head, N: PNode;
+begin
+  Head := nil;
+  Append(Head, 3);
+  Append(Head, 1);
+  Append(Head, 4);
+  Append(Head, 1);
+  Append(Head, 5);
+  Print(Head);
+  Head := Reverse(Head);
+  Print(Head);
+  while Head <> nil do
+  begin
+    N := Head^.Next;
+    Dispose(Head);
+    Head := N;
+  end;
+end.
+=== fpcdelphi-w28 write
+--- prompt
+Check the ISBN-13 numbers 9780306406157, 9780306406158 and 9781861972712 with the standard checksum (weights alternating 1 and 3) and print each followed by " valid" or " invalid".
+--- ref
+program Isbn;
+{$mode delphi}
+
+function Valid(const S: string): Boolean;
+var
+  I, Sum: Integer;
+begin
+  Sum := 0;
+  for I := 1 to 13 do
+    if Odd(I) then
+      Inc(Sum, Ord(S[I]) - Ord('0'))
+    else
+      Inc(Sum, 3 * (Ord(S[I]) - Ord('0')));
+  Result := Sum mod 10 = 0;
+end;
+
+procedure Check(const S: string);
+begin
+  if Valid(S) then
+    WriteLn(S, ' valid')
+  else
+    WriteLn(S, ' invalid');
+end;
+
+begin
+  Check('9780306406157');
+  Check('9780306406158');
+  Check('9781861972712');
+end.
+=== fpcdelphi-w29 write
+--- prompt
+Write a class TRange that can be iterated with for-in (implement GetEnumerator with an enumerator class having MoveNext and Current) over the even numbers from a lower to an upper bound. Print the even numbers from 3 to 15 on one line separated by spaces.
+--- ref
+program Ranges;
+{$mode delphi}
+type
+  TRangeEnumerator = class
+  private
+    FCurrent, FHigh: Integer;
+  public
+    constructor Create(ALow, AHigh: Integer);
+    function MoveNext: Boolean;
+    property Current: Integer read FCurrent;
+  end;
+
+  TRange = class
+  private
+    FLow, FHigh: Integer;
+  public
+    constructor Create(ALow, AHigh: Integer);
+    function GetEnumerator: TRangeEnumerator;
+  end;
+
+constructor TRangeEnumerator.Create(ALow, AHigh: Integer);
+begin
+  if Odd(ALow) then
+    Inc(ALow);
+  FCurrent := ALow - 2;
+  FHigh := AHigh;
+end;
+
+function TRangeEnumerator.MoveNext: Boolean;
+begin
+  Inc(FCurrent, 2);
+  Result := FCurrent <= FHigh;
+end;
+
+constructor TRange.Create(ALow, AHigh: Integer);
+begin
+  FLow := ALow;
+  FHigh := AHigh;
+end;
+
+function TRange.GetEnumerator: TRangeEnumerator;
+begin
+  Result := TRangeEnumerator.Create(FLow, FHigh);
+end;
+
+var
+  R: TRange;
+  I: Integer;
+  First: Boolean;
+begin
+  R := TRange.Create(3, 15);
+  try
+    First := True;
+    for I in R do
+    begin
+      if not First then
+        Write(' ');
+      Write(I);
+      First := False;
+    end;
+    WriteLn;
+  finally
+    R.Free;
+  end;
+end.
+=== fpcdelphi-w30 write
+--- prompt
+Print a calendar for February 2024 with a header "Mo Tu We Th Fr Sa Su" and the days right-aligned in 2 characters, separated by single spaces, weeks starting on Monday (leading positions blank).
+--- ref
+program Calendar;
+{$mode delphi}
+uses
+  SysUtils, DateUtils;
+var
+  First, D, Col: Integer;
+begin
+  WriteLn('Mo Tu We Th Fr Sa Su');
+  First := DayOfTheWeek(EncodeDate(2024, 2, 1));
+  Col := 1;
+  while Col < First do
+  begin
+    Write('   ');
+    Inc(Col);
+  end;
+  for D := 1 to DaysInAMonth(2024, 2) do
+  begin
+    Write(Format('%2d', [D]));
+    if Col = 7 then
+    begin
+      WriteLn;
+      Col := 1;
+    end
+    else
+    begin
+      if D < DaysInAMonth(2024, 2) then
+        Write(' ');
+      Inc(Col);
+    end;
+  end;
+  if Col <> 1 then
+    WriteLn;
+end.
+=== fpcdelphi-f01 fix
+--- prompt
+This program does not compile in {$mode delphi}. Fix it; it should print 15.
+--- given
+program SumList;
+{$mode delphi}
+uses
+  Generics.Collections;
+type
+  TIntList = specialize TList<Integer>;
+var
+  L: TIntList;
+  I, S: Integer;
+begin
+  L := TIntList.Create;
+  for I := 1 to 5 do
+    L.Add(I);
+  S := 0;
+  for I in L do
+    S := S + I;
+  WriteLn(S);
+  L.Free;
+end.
+--- ref
+program SumList;
+{$mode delphi}
+uses
+  Generics.Collections;
+type
+  TIntList = TList<Integer>;
+var
+  L: TIntList;
+  I, S: Integer;
+begin
+  L := TIntList.Create;
+  for I := 1 to 5 do
+    L.Add(I);
+  S := 0;
+  for I in L do
+    S := S + I;
+  WriteLn(S);
+  L.Free;
+end.
+=== fpcdelphi-f02 fix
+--- prompt
+Fix this program so it compiles; it should print "done 3".
+--- given
+program Callbacks;
+{$mode delphi}
+type
+  TCallback = procedure(N: Integer) of object;
+
+  TWorker = class
+    Count: Integer;
+    procedure Step(N: Integer);
+  end;
+
+procedure TWorker.Step(N: Integer);
+begin
+  Count := Count + N;
+end;
+
+var
+  W: TWorker;
+  CB: TCallback;
+begin
+  W := TWorker.Create;
+  CB := @W.Step;
+  CB(1);
+  CB(2);
+  WriteLn('done ', W.Count);
+  W.Free;
+end.
+--- ref
+program Callbacks;
+{$mode delphi}
+type
+  TCallback = procedure(N: Integer) of object;
+
+  TWorker = class
+    Count: Integer;
+    procedure Step(N: Integer);
+  end;
+
+procedure TWorker.Step(N: Integer);
+begin
+  Count := Count + N;
+end;
+
+var
+  W: TWorker;
+  CB: TCallback;
+begin
+  W := TWorker.Create;
+  CB := W.Step;
+  CB(1);
+  CB(2);
+  WriteLn('done ', W.Count);
+  W.Free;
+end.
+=== fpcdelphi-f03 fix
+--- prompt
+The following program has a compile error. Correct it; it prints the maximum of the array.
+--- given
+program MaxOf;
+{$mode delphi}
+const
+  A: array[0..4] of Integer = (3, 9, 2, 7, 5);
+var
+  I, M: Integer;
+begin
+  M := A[0];
+  for I := 1 to High(A) do
+    if A[I] > M then
+      M := A[I];
+  WriteLn(M)
+  WriteLn('end');
+end.
+--- ref
+program MaxOf;
+{$mode delphi}
+const
+  A: array[0..4] of Integer = (3, 9, 2, 7, 5);
+var
+  I, M: Integer;
+begin
+  M := A[0];
+  for I := 1 to High(A) do
+    if A[I] > M then
+      M := A[I];
+  WriteLn(M);
+  WriteLn('end');
+end.
+=== fpcdelphi-f04 fix
+--- prompt
+Fix the compile error; the program should print "Total: 6".
+--- given
+program Totals;
+{$mode delphi}
+uses
+  SysUtils;
+function Total(const A: array of Integer): Integer;
+var
+  X: Integer;
+begin
+  Result := 0;
+  for X in A do
+    Result := Result + X;
+end;
+begin
+  WriteLn('Total: ' + Total([1, 2, 3]));
+end.
+--- ref
+program Totals;
+{$mode delphi}
+uses
+  SysUtils;
+function Total(const A: array of Integer): Integer;
+var
+  X: Integer;
+begin
+  Result := 0;
+  for X in A do
+    Result := Result + X;
+end;
+begin
+  WriteLn('Total: ' + IntToStr(Total([1, 2, 3])));
+end.
+=== fpcdelphi-f05 fix
+--- prompt
+This class does not compile. Fix it; the program prints "Area: 12".
+--- given
+program Rect;
+{$mode delphi}
+type
+  TRectangle = class
+  private
+    FW, FH: Integer;
+  public
+    constructor Create(AW, AH: Integer);
+    function Area: Integer;
+  end;
+
+constructor TRectangle.Create(AW, AH: Integer);
+begin
+  FW := AW;
+  FH := AH;
+end;
+
+var
+  R: TRectangle;
+begin
+  R := TRectangle.Create(3, 4);
+  WriteLn('Area: ', R.Area);
+  R.Free;
+end.
+--- ref
+program Rect;
+{$mode delphi}
+type
+  TRectangle = class
+  private
+    FW, FH: Integer;
+  public
+    constructor Create(AW, AH: Integer);
+    function Area: Integer;
+  end;
+
+constructor TRectangle.Create(AW, AH: Integer);
+begin
+  FW := AW;
+  FH := AH;
+end;
+
+function TRectangle.Area: Integer;
+begin
+  Result := FW * FH;
+end;
+
+var
+  R: TRectangle;
+begin
+  R := TRectangle.Create(3, 4);
+  WriteLn('Area: ', R.Area);
+  R.Free;
+end.
+=== fpcdelphi-c01 convert
+--- prompt
+Convert this {$mode objfpc} program to Free Pascal's {$mode delphi}; the output stays the same.
+--- given
+program Stack;
+{$mode objfpc}{$H+}
+uses
+  Generics.Collections;
+type
+  TStrStack = specialize TStack<string>;
+var
+  S: TStrStack;
+begin
+  S := TStrStack.Create;
+  try
+    S.Push('first');
+    S.Push('second');
+    WriteLn(S.Pop);
+    WriteLn(S.Pop);
+  finally
+    S.Free;
+  end;
+end.
+--- ref
+program Stack;
+{$mode delphi}
+uses
+  Generics.Collections;
+type
+  TStrStack = TStack<string>;
+var
+  S: TStrStack;
+begin
+  S := TStrStack.Create;
+  try
+    S.Push('first');
+    S.Push('second');
+    WriteLn(S.Pop);
+    WriteLn(S.Pop);
+  finally
+    S.Free;
+  end;
+end.
+=== fpcdelphi-c02 convert
+--- prompt
+Port this objfpc program with a method pointer to {$mode delphi}, keeping the output.
+--- given
+program Alarm;
+{$mode objfpc}{$H+}
+type
+  TAlarmEvent = procedure(const Msg: string) of object;
+
+  TSiren = class
+    procedure Sound(const Msg: string);
+  end;
+
+  TSensor = class
+    OnAlarm: TAlarmEvent;
+    procedure Detect(Level: Integer);
+  end;
+
+procedure TSiren.Sound(const Msg: string);
+begin
+  WriteLn('ALARM: ', Msg);
+end;
+
+procedure TSensor.Detect(Level: Integer);
+begin
+  if (Level > 5) and Assigned(OnAlarm) then
+    OnAlarm('level ' + Chr(Ord('0') + Level));
+end;
+
+var
+  Siren: TSiren;
+  Sensor: TSensor;
+  I: Integer;
+begin
+  Siren := TSiren.Create;
+  Sensor := TSensor.Create;
+  Sensor.OnAlarm := @Siren.Sound;
+  for I := 4 to 7 do
+    Sensor.Detect(I);
+  Sensor.Free;
+  Siren.Free;
+end.
+--- ref
+program Alarm;
+{$mode delphi}
+type
+  TAlarmEvent = procedure(const Msg: string) of object;
+
+  TSiren = class
+    procedure Sound(const Msg: string);
+  end;
+
+  TSensor = class
+    OnAlarm: TAlarmEvent;
+    procedure Detect(Level: Integer);
+  end;
+
+procedure TSiren.Sound(const Msg: string);
+begin
+  WriteLn('ALARM: ', Msg);
+end;
+
+procedure TSensor.Detect(Level: Integer);
+begin
+  if (Level > 5) and Assigned(OnAlarm) then
+    OnAlarm('level ' + Chr(Ord('0') + Level));
+end;
+
+var
+  Siren: TSiren;
+  Sensor: TSensor;
+  I: Integer;
+begin
+  Siren := TSiren.Create;
+  Sensor := TSensor.Create;
+  Sensor.OnAlarm := Siren.Sound;
+  for I := 4 to 7 do
+    Sensor.Detect(I);
+  Sensor.Free;
+  Siren.Free;
+end.
+=== fpcdelphi-c03 convert
+--- prompt
+Rewrite this Delphi program for Free Pascal with {$mode delphi} (no inline variables there). The output must be identical.
+--- given
+program Squares;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils;
+begin
+  var Total := 0;
+  for var I := 1 to 4 do
+  begin
+    var Sq := I * I;
+    WriteLn(I, '^2 = ', Sq);
+    Total := Total + Sq;
+  end;
+  WriteLn('total ', Total);
+end.
+--- ref
+program Squares;
+{$mode delphi}
+uses
+  SysUtils;
+var
+  Total, I, Sq: Integer;
+begin
+  Total := 0;
+  for I := 1 to 4 do
+  begin
+    Sq := I * I;
+    WriteLn(I, '^2 = ', Sq);
+    Total := Total + Sq;
+  end;
+  WriteLn('total ', Total);
+end.
+=== fpcdelphi-c04 convert
+--- prompt
+Convert this Unleashed Pascal program to Free Pascal {$mode delphi}; it must print the same.
+--- given
+program Shapes2;
+{$mode unleashed}
+type
+  TKind = (Square, Circle, Triangle);
+var
+  K: TKind;
+begin
+  for K := Low(TKind) to High(TKind) do
+    WriteLn(match K of
+      Square: 'four corners';
+      Circle: 'no corners';
+      _: 'three corners'
+    end);
+end.
+--- ref
+program Shapes2;
+{$mode delphi}
+type
+  TKind = (Square, Circle, Triangle);
+var
+  K: TKind;
+begin
+  for K := Low(TKind) to High(TKind) do
+    case K of
+      Square: WriteLn('four corners');
+      Circle: WriteLn('no corners');
+    else
+      WriteLn('three corners');
+    end;
+end.
+=== fpcdelphi-c05 convert
+--- prompt
+Translate this Oxygene program into Free Pascal {$mode delphi} with the same output.
+--- given
+namespace Greeting;
+
+type
+  Person = class
+  public
+    property Name: String;
+    constructor(aName: String);
+    begin
+      Name := aName;
+    end;
+    method Greet: String;
+    begin
+      result := 'Hello, ' + Name;
+    end;
+  end;
+
+  Program = class
+  public
+    class method Main(args: array of String): Int32;
+    begin
+      var p := new Person('Grace');
+      writeLn(p.Greet);
+    end;
+  end;
+
+end.
+--- ref
+program Greeting;
+{$mode delphi}
+type
+  TPerson = class
+  private
+    FName: string;
+  public
+    constructor Create(const AName: string);
+    function Greet: string;
+    property Name: string read FName;
+  end;
+
+constructor TPerson.Create(const AName: string);
+begin
+  FName := AName;
+end;
+
+function TPerson.Greet: string;
+begin
+  Result := 'Hello, ' + FName;
+end;
+
+var
+  P: TPerson;
+begin
+  P := TPerson.Create('Grace');
+  try
+    WriteLn(P.Greet);
+  finally
+    P.Free;
+  end;
+end.

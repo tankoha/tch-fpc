@@ -1,0 +1,10 @@
+coin -> HasCoin
+dispense
+push -> Idle
+coin -> HasCoin
+refund extra coin
+coin -> HasCoin
+dispense
+push -> Idle
+insert coin first
+push -> Idle

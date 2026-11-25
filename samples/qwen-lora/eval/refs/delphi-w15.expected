@@ -1,0 +1,4 @@
+invalid: -5 is negative
+ok 50
+range: 150 is above 100
+checked 3

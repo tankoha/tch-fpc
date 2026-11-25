@@ -1,0 +1,1674 @@
+=== objfpc-w01 write
+--- prompt
+Write a program that prints the first 15 Fibonacci numbers (starting 0, 1) on one line, separated by single spaces.
+--- ref
+program Fib15;
+{$mode objfpc}{$H+}
+var
+  A, B, T: Int64;
+  I: Integer;
+begin
+  A := 0;
+  B := 1;
+  for I := 1 to 15 do
+  begin
+    if I > 1 then
+      Write(' ');
+    Write(A);
+    T := A + B;
+    A := B;
+    B := T;
+  end;
+  WriteLn;
+end.
+=== objfpc-w02 write
+--- prompt
+Print all prime numbers below 60, one per line, using the sieve of Eratosthenes. After the list print a line "count: N" with the number of primes.
+--- ref
+program Sieve;
+{$mode objfpc}{$H+}
+const
+  Limit = 59;
+var
+  Composite: array[2..Limit] of Boolean;
+  I, J, N: Integer;
+begin
+  for I := 2 to Limit do
+    Composite[I] := False;
+  for I := 2 to Limit do
+    if not Composite[I] then
+    begin
+      J := I * I;
+      while J <= Limit do
+      begin
+        Composite[J] := True;
+        Inc(J, I);
+      end;
+    end;
+  N := 0;
+  for I := 2 to Limit do
+    if not Composite[I] then
+    begin
+      WriteLn(I);
+      Inc(N);
+    end;
+  WriteLn('count: ', N);
+end.
+=== objfpc-w03 write
+--- prompt
+Sort the array 42, 7, 19, 3, 25, 11, 8 with insertion sort written by hand (no library sort) and print the sorted numbers on one line separated by commas.
+--- ref
+program InsertSort;
+{$mode objfpc}{$H+}
+var
+  A: array of Integer;
+  I, J, Key: Integer;
+begin
+  A := [42, 7, 19, 3, 25, 11, 8];
+  for I := 1 to High(A) do
+  begin
+    Key := A[I];
+    J := I - 1;
+    while (J >= 0) and (A[J] > Key) do
+    begin
+      A[J + 1] := A[J];
+      Dec(J);
+    end;
+    A[J + 1] := Key;
+  end;
+  for I := 0 to High(A) do
+  begin
+    if I > 0 then
+      Write(',');
+    Write(A[I]);
+  end;
+  WriteLn;
+end.
+=== objfpc-w04 write
+--- prompt
+Implement a stack of integers as a class with Push, Pop and IsEmpty (backed by a dynamic array). Push 1 to 5, then pop until empty and print each popped value on its own line.
+--- ref
+program IntStack;
+{$mode objfpc}{$H+}
+type
+  TIntStack = class
+  private
+    FItems: array of Integer;
+    FCount: Integer;
+  public
+    procedure Push(AValue: Integer);
+    function Pop: Integer;
+    function IsEmpty: Boolean;
+  end;
+
+procedure TIntStack.Push(AValue: Integer);
+begin
+  if FCount = Length(FItems) then
+    SetLength(FItems, FCount * 2 + 4);
+  FItems[FCount] := AValue;
+  Inc(FCount);
+end;
+
+function TIntStack.Pop: Integer;
+begin
+  Dec(FCount);
+  Result := FItems[FCount];
+end;
+
+function TIntStack.IsEmpty: Boolean;
+begin
+  Result := FCount = 0;
+end;
+
+var
+  S: TIntStack;
+  I: Integer;
+begin
+  S := TIntStack.Create;
+  try
+    for I := 1 to 5 do
+      S.Push(I);
+    while not S.IsEmpty do
+      WriteLn(S.Pop);
+  finally
+    S.Free;
+  end;
+end.
+=== objfpc-w05 write
+--- prompt
+Count how often each word occurs in the sentence "the cat and the dog and the bird" and print the words in alphabetical order as "word: count", one per line. Use a TStringList.
+--- ref
+program WordCount;
+{$mode objfpc}{$H+}
+uses
+  Classes, SysUtils;
+var
+  Words, Counts: TStringList;
+  I, K: Integer;
+begin
+  Words := TStringList.Create;
+  Counts := TStringList.Create;
+  try
+    Words.Delimiter := ' ';
+    Words.StrictDelimiter := True;
+    Words.DelimitedText := 'the cat and the dog and the bird';
+    Counts.Sorted := True;
+    for I := 0 to Words.Count - 1 do
+    begin
+      K := Counts.IndexOf(Words[I]);
+      if K < 0 then
+        Counts.AddObject(Words[I], TObject(PtrInt(1)))
+      else
+        Counts.Objects[K] := TObject(PtrInt(Counts.Objects[K]) + 1);
+    end;
+    for I := 0 to Counts.Count - 1 do
+      WriteLn(Counts[I], ': ', PtrInt(Counts.Objects[I]));
+  finally
+    Words.Free;
+    Counts.Free;
+  end;
+end.
+=== objfpc-w06 write
+--- prompt
+Write a function that reverses a string and another that tells whether a string is a palindrome (ignoring case and spaces). Print the reverse of "Free Pascal" and then, for "Never odd or even", "Lazarus" and "Step on no pets", the text followed by " -> yes" or " -> no".
+--- ref
+program Palindromes;
+{$mode objfpc}{$H+}
+uses
+  SysUtils;
+
+function Reverse(const S: string): string;
+var
+  I: Integer;
+begin
+  Result := '';
+  for I := Length(S) downto 1 do
+    Result := Result + S[I];
+end;
+
+function IsPalindrome(const S: string): Boolean;
+var
+  T: string;
+begin
+  T := LowerCase(StringReplace(S, ' ', '', [rfReplaceAll]));
+  Result := T = Reverse(T);
+end;
+
+procedure Show(const S: string);
+begin
+  if IsPalindrome(S) then
+    WriteLn(S, ' -> yes')
+  else
+    WriteLn(S, ' -> no');
+end;
+
+begin
+  WriteLn(Reverse('Free Pascal'));
+  Show('Never odd or even');
+  Show('Lazarus');
+  Show('Step on no pets');
+end.
+=== objfpc-w07 write
+--- prompt
+Define a generic class TBox<T> with a property Value and a method Describe that returns 'Box(' plus the value's text plus ')'. Use it with an Integer (42) and a string ('pascal') and print both descriptions. The text conversion may be passed in as a function.
+--- ref
+program GenericBox;
+{$mode objfpc}{$H+}
+uses
+  SysUtils;
+type
+  generic TBox<T> = class
+  public
+    type
+      TToText = function(const AValue: T): string;
+  private
+    FValue: T;
+    FToText: TToText;
+  public
+    constructor Create(const AValue: T; AToText: TToText);
+    function Describe: string;
+    property Value: T read FValue write FValue;
+  end;
+
+constructor TBox.Create(const AValue: T; AToText: TToText);
+begin
+  FValue := AValue;
+  FToText := AToText;
+end;
+
+function TBox.Describe: string;
+begin
+  Result := 'Box(' + FToText(FValue) + ')';
+end;
+
+type
+  TIntBox = specialize TBox<Integer>;
+  TStrBox = specialize TBox<string>;
+
+function IntText(const AValue: Integer): string;
+begin
+  Result := IntToStr(AValue);
+end;
+
+function StrText(const AValue: string): string;
+begin
+  Result := AValue;
+end;
+
+var
+  B1: TIntBox;
+  B2: TStrBox;
+begin
+  B1 := TIntBox.Create(42, @IntText);
+  B2 := TStrBox.Create('pascal', @StrText);
+  try
+    WriteLn(B1.Describe);
+    WriteLn(B2.Describe);
+  finally
+    B1.Free;
+    B2.Free;
+  end;
+end.
+=== objfpc-w08 write
+--- prompt
+Model shapes with an abstract base class TShape (virtual abstract function Area and a Name). Add TRect (width, height) and TCircle (radius). Put a 3x4 rectangle, a circle of radius 2 and a 5x5 rectangle in an array and print each as "Name: area" with the area formatted to two decimals, then the total area the same way as "Total: ...".
+--- ref
+program ShapeAreas;
+{$mode objfpc}{$H+}
+uses
+  SysUtils;
+type
+  TShape = class
+  public
+    function Area: Double; virtual; abstract;
+    function Name: string; virtual; abstract;
+  end;
+
+  TRect = class(TShape)
+  private
+    FW, FH: Double;
+  public
+    constructor Create(AW, AH: Double);
+    function Area: Double; override;
+    function Name: string; override;
+  end;
+
+  TCircle = class(TShape)
+  private
+    FR: Double;
+  public
+    constructor Create(AR: Double);
+    function Area: Double; override;
+    function Name: string; override;
+  end;
+
+constructor TRect.Create(AW, AH: Double);
+begin
+  FW := AW;
+  FH := AH;
+end;
+
+function TRect.Area: Double;
+begin
+  Result := FW * FH;
+end;
+
+function TRect.Name: string;
+begin
+  Result := 'Rect';
+end;
+
+constructor TCircle.Create(AR: Double);
+begin
+  FR := AR;
+end;
+
+function TCircle.Area: Double;
+begin
+  Result := Pi * FR * FR;
+end;
+
+function TCircle.Name: string;
+begin
+  Result := 'Circle';
+end;
+
+var
+  Shapes: array[0..2] of TShape;
+  I: Integer;
+  Total: Double;
+begin
+  Shapes[0] := TRect.Create(3, 4);
+  Shapes[1] := TCircle.Create(2);
+  Shapes[2] := TRect.Create(5, 5);
+  Total := 0;
+  try
+    for I := 0 to 2 do
+    begin
+      WriteLn(Shapes[I].Name, ': ', FormatFloat('0.00', Shapes[I].Area));
+      Total := Total + Shapes[I].Area;
+    end;
+    WriteLn('Total: ', FormatFloat('0.00', Total));
+  finally
+    for I := 0 to 2 do
+      Shapes[I].Free;
+  end;
+end.
+=== objfpc-w09 write
+--- prompt
+Write a function that converts a non-negative integer to its binary representation as a string, and one that converts back. Print the binary form of 0, 5, 255 and 1024, each on its own line as "N = bits", and finally the value of the string '101101'.
+--- ref
+program Binary;
+{$mode objfpc}{$H+}
+uses
+  SysUtils;
+
+function ToBinary(N: Integer): string;
+begin
+  if N = 0 then
+    Exit('0');
+  Result := '';
+  while N > 0 do
+  begin
+    Result := Chr(Ord('0') + N mod 2) + Result;
+    N := N div 2;
+  end;
+end;
+
+function FromBinary(const S: string): Integer;
+var
+  I: Integer;
+begin
+  Result := 0;
+  for I := 1 to Length(S) do
+    Result := Result * 2 + Ord(S[I]) - Ord('0');
+end;
+
+const
+  Values: array[0..3] of Integer = (0, 5, 255, 1024);
+var
+  I: Integer;
+begin
+  for I := 0 to High(Values) do
+    WriteLn(Values[I], ' = ', ToBinary(Values[I]));
+  WriteLn(FromBinary('101101'));
+end.
+=== objfpc-w10 write
+--- prompt
+Define your own exception class EInsufficientFunds. A TAccount class has a balance and a Withdraw method that raises it (with a message showing the requested amount and the balance) when the balance is too small. Start with 100, withdraw 30, then try to withdraw 90, catch the exception and print its message, and finally print the balance as "Balance: N".
+--- ref
+program Account;
+{$mode objfpc}{$H+}
+uses
+  SysUtils;
+type
+  EInsufficientFunds = class(Exception);
+
+  TAccount = class
+  private
+    FBalance: Integer;
+  public
+    constructor Create(ABalance: Integer);
+    procedure Withdraw(AAmount: Integer);
+    property Balance: Integer read FBalance;
+  end;
+
+constructor TAccount.Create(ABalance: Integer);
+begin
+  FBalance := ABalance;
+end;
+
+procedure TAccount.Withdraw(AAmount: Integer);
+begin
+  if AAmount > FBalance then
+    raise EInsufficientFunds.CreateFmt('cannot withdraw %d, balance is %d', [AAmount, FBalance]);
+  Dec(FBalance, AAmount);
+end;
+
+var
+  A: TAccount;
+begin
+  A := TAccount.Create(100);
+  try
+    A.Withdraw(30);
+    try
+      A.Withdraw(90);
+    except
+      on E: EInsufficientFunds do
+        WriteLn(E.Message);
+    end;
+    WriteLn('Balance: ', A.Balance);
+  finally
+    A.Free;
+  end;
+end.
+=== objfpc-w11 write
+--- prompt
+Compute the greatest common divisor (Euclid, recursive) and the least common multiple of the pairs (12, 18), (17, 5) and (100, 75). Print each pair as "a b gcd lcm" on its own line.
+--- ref
+program GcdLcm;
+{$mode objfpc}{$H+}
+
+function Gcd(A, B: Integer): Integer;
+begin
+  if B = 0 then
+    Result := A
+  else
+    Result := Gcd(B, A mod B);
+end;
+
+procedure Show(A, B: Integer);
+begin
+  WriteLn(A, ' ', B, ' ', Gcd(A, B), ' ', A div Gcd(A, B) * B);
+end;
+
+begin
+  Show(12, 18);
+  Show(17, 5);
+  Show(100, 75);
+end.
+=== objfpc-w12 write
+--- prompt
+Use an enumeration of the days of the week and a set of days. Build the set of working days (Monday to Friday) and the set of days with a meeting (Tuesday, Thursday, Saturday). Print the days that are working days with a meeting, then the meeting days that are not working days, each list on one line with day names separated by spaces.
+--- ref
+program DaySets;
+{$mode objfpc}{$H+}
+type
+  TDay = (Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday);
+  TDays = set of TDay;
+const
+  Names: array[TDay] of string = ('Monday', 'Tuesday', 'Wednesday', 'Thursday',
+    'Friday', 'Saturday', 'Sunday');
+
+procedure PrintDays(const ADays: TDays);
+var
+  D: TDay;
+  First: Boolean;
+begin
+  First := True;
+  for D in ADays do
+  begin
+    if not First then
+      Write(' ');
+    Write(Names[D]);
+    First := False;
+  end;
+  WriteLn;
+end;
+
+var
+  Work, Meetings: TDays;
+begin
+  Work := [Monday..Friday];
+  Meetings := [Tuesday, Thursday, Saturday];
+  PrintDays(Work * Meetings);
+  PrintDays(Meetings - Work);
+end.
+=== objfpc-w13 write
+--- prompt
+Multiply the 2x3 matrix [[1,2,3],[4,5,6]] by the 3x2 matrix [[7,8],[9,10],[11,12]] and print the 2x2 result, one row per line, numbers separated by a space.
+--- ref
+program MatMul;
+{$mode objfpc}{$H+}
+type
+  TMatrix = array of array of Integer;
+
+function Multiply(const A, B: TMatrix): TMatrix;
+var
+  I, J, K: Integer;
+begin
+  Result := nil;
+  SetLength(Result, Length(A), Length(B[0]));
+  for I := 0 to High(A) do
+    for J := 0 to High(B[0]) do
+    begin
+      Result[I][J] := 0;
+      for K := 0 to High(B) do
+        Result[I][J] := Result[I][J] + A[I][K] * B[K][J];
+    end;
+end;
+
+var
+  A, B, C: TMatrix;
+  I, J: Integer;
+begin
+  A := nil;
+  B := nil;
+  SetLength(A, 2, 3);
+  SetLength(B, 3, 2);
+  A[0][0] := 1; A[0][1] := 2; A[0][2] := 3;
+  A[1][0] := 4; A[1][1] := 5; A[1][2] := 6;
+  B[0][0] := 7; B[0][1] := 8;
+  B[1][0] := 9; B[1][1] := 10;
+  B[2][0] := 11; B[2][1] := 12;
+  C := Multiply(A, B);
+  for I := 0 to High(C) do
+  begin
+    for J := 0 to High(C[I]) do
+    begin
+      if J > 0 then
+        Write(' ');
+      Write(C[I][J]);
+    end;
+    WriteLn;
+  end;
+end.
+=== objfpc-w14 write
+--- prompt
+Write an advanced record TPoint with X and Y (integers), a constructor-like class function Make, a method ManhattanTo and an overloaded + operator. Add (1,2) and (4,6), print the sum as "(x, y)", then print the Manhattan distance between (1,2) and (4,6).
+--- ref
+program Points;
+{$mode objfpc}{$H+}
+{$modeswitch advancedrecords}
+type
+  TPoint = record
+    X, Y: Integer;
+    class function Make(AX, AY: Integer): TPoint; static;
+    function ManhattanTo(const P: TPoint): Integer;
+    class operator +(const A, B: TPoint): TPoint;
+  end;
+
+class function TPoint.Make(AX, AY: Integer): TPoint;
+begin
+  Result.X := AX;
+  Result.Y := AY;
+end;
+
+function TPoint.ManhattanTo(const P: TPoint): Integer;
+begin
+  Result := Abs(X - P.X) + Abs(Y - P.Y);
+end;
+
+class operator TPoint.+(const A, B: TPoint): TPoint;
+begin
+  Result.X := A.X + B.X;
+  Result.Y := A.Y + B.Y;
+end;
+
+var
+  A, B, C: TPoint;
+begin
+  A := TPoint.Make(1, 2);
+  B := TPoint.Make(4, 6);
+  C := A + B;
+  WriteLn('(', C.X, ', ', C.Y, ')');
+  WriteLn(A.ManhattanTo(B));
+end.
+=== objfpc-w15 write
+--- prompt
+Use the fgl unit's TFPGMap to store the population (in thousands) of five invented cities: Alpha 120, Beta 45, Gamma 300, Delta 75, Epsilon 210. Print the cities with more than 100 in key order as "name population", then the sum of all populations as "sum N".
+--- ref
+program Cities;
+{$mode objfpc}{$H+}
+uses
+  fgl;
+type
+  TPopMap = specialize TFPGMap<string, Integer>;
+var
+  M: TPopMap;
+  I, Sum: Integer;
+begin
+  M := TPopMap.Create;
+  try
+    M.Sorted := True;
+    M.Add('Alpha', 120);
+    M.Add('Beta', 45);
+    M.Add('Gamma', 300);
+    M.Add('Delta', 75);
+    M.Add('Epsilon', 210);
+    Sum := 0;
+    for I := 0 to M.Count - 1 do
+    begin
+      if M.Data[I] > 100 then
+        WriteLn(M.Keys[I], ' ', M.Data[I]);
+      Inc(Sum, M.Data[I]);
+    end;
+    WriteLn('sum ', Sum);
+  finally
+    M.Free;
+  end;
+end.
+=== objfpc-w16 write
+--- prompt
+Implement binary search on the sorted array 2, 5, 8, 12, 16, 23, 38, 56, 72, 91. Search for 23, 2, 91 and 50 and print "value: index" for each, with index -1 when the value is missing.
+--- ref
+program BinSearch;
+{$mode objfpc}{$H+}
+const
+  Data: array[0..9] of Integer = (2, 5, 8, 12, 16, 23, 38, 56, 72, 91);
+
+function Find(AValue: Integer): Integer;
+var
+  Lo, Hi, Mid: Integer;
+begin
+  Lo := 0;
+  Hi := High(Data);
+  while Lo <= Hi do
+  begin
+    Mid := (Lo + Hi) div 2;
+    if Data[Mid] = AValue then
+      Exit(Mid)
+    else if Data[Mid] < AValue then
+      Lo := Mid + 1
+    else
+      Hi := Mid - 1;
+  end;
+  Result := -1;
+end;
+
+const
+  Wanted: array[0..3] of Integer = (23, 2, 91, 50);
+var
+  I: Integer;
+begin
+  for I := 0 to High(Wanted) do
+    WriteLn(Wanted[I], ': ', Find(Wanted[I]));
+end.
+=== objfpc-w17 write
+--- prompt
+Write a class TCounter with an event OnChange of type "procedure(Sender: TObject; NewValue: Integer) of object". A second class TLogger has a method that prints "changed to N". Connect them, increment the counter three times and print "final N" at the end.
+--- ref
+program CounterEvent;
+{$mode objfpc}{$H+}
+type
+  TChangeEvent = procedure(Sender: TObject; NewValue: Integer) of object;
+
+  TCounter = class
+  private
+    FValue: Integer;
+    FOnChange: TChangeEvent;
+  public
+    procedure Increment;
+    property Value: Integer read FValue;
+    property OnChange: TChangeEvent read FOnChange write FOnChange;
+  end;
+
+  TLogger = class
+  public
+    procedure Changed(Sender: TObject; NewValue: Integer);
+  end;
+
+procedure TCounter.Increment;
+begin
+  Inc(FValue);
+  if Assigned(FOnChange) then
+    FOnChange(Self, FValue);
+end;
+
+procedure TLogger.Changed(Sender: TObject; NewValue: Integer);
+begin
+  WriteLn('changed to ', NewValue);
+end;
+
+var
+  C: TCounter;
+  L: TLogger;
+  I: Integer;
+begin
+  C := TCounter.Create;
+  L := TLogger.Create;
+  try
+    C.OnChange := @L.Changed;
+    for I := 1 to 3 do
+      C.Increment;
+    WriteLn('final ', C.Value);
+  finally
+    C.Free;
+    L.Free;
+  end;
+end.
+=== objfpc-w18 write
+--- prompt
+Determine whether the years 1900, 2000, 2024 and 2023 are leap years and print "year: leap" or "year: common". Then print the number of days from 1 January 2024 to 1 March 2024 using DateUtils.
+--- ref
+program LeapYears;
+{$mode objfpc}{$H+}
+uses
+  SysUtils, DateUtils;
+const
+  Years: array[0..3] of Word = (1900, 2000, 2024, 2023);
+var
+  I: Integer;
+begin
+  for I := 0 to High(Years) do
+    if IsLeapYear(Years[I]) then
+      WriteLn(Years[I], ': leap')
+    else
+      WriteLn(Years[I], ': common');
+  WriteLn(DaysBetween(EncodeDate(2024, 1, 1), EncodeDate(2024, 3, 1)));
+end.
+=== objfpc-w19 write
+--- prompt
+Parse the line "name=Widget;price=12.50;qty=4" into key/value pairs, print each pair as "key -> value" in the given order, and then print "total 50.00" computed as price times quantity with two decimals.
+--- ref
+program KeyValues;
+{$mode objfpc}{$H+}
+uses
+  Classes, SysUtils;
+var
+  L: TStringList;
+  I: Integer;
+  FS: TFormatSettings;
+  Price: Double;
+  Qty: Integer;
+begin
+  FS := DefaultFormatSettings;
+  FS.DecimalSeparator := '.';
+  L := TStringList.Create;
+  try
+    L.Delimiter := ';';
+    L.StrictDelimiter := True;
+    L.DelimitedText := 'name=Widget;price=12.50;qty=4';
+    for I := 0 to L.Count - 1 do
+      WriteLn(L.Names[I], ' -> ', L.ValueFromIndex[I]);
+    Price := StrToFloat(L.Values['price'], FS);
+    Qty := StrToInt(L.Values['qty']);
+    WriteLn('total ', FormatFloat('0.00', Price * Qty, FS));
+  finally
+    L.Free;
+  end;
+end.
+=== objfpc-w20 write
+--- prompt
+Solve the Towers of Hanoi for 3 disks from peg A to peg C (using B) recursively. Print every move as "move disk N from X to Y" and finally "moves: M".
+--- ref
+program Hanoi;
+{$mode objfpc}{$H+}
+var
+  Moves: Integer = 0;
+
+procedure Solve(N: Integer; AFrom, ATo, AVia: Char);
+begin
+  if N = 0 then
+    Exit;
+  Solve(N - 1, AFrom, AVia, ATo);
+  WriteLn('move disk ', N, ' from ', AFrom, ' to ', ATo);
+  Inc(Moves);
+  Solve(N - 1, AVia, ATo, AFrom);
+end;
+
+begin
+  Solve(3, 'A', 'C', 'B');
+  WriteLn('moves: ', Moves);
+end.
+=== objfpc-w21 write
+--- prompt
+Define an interface IGreeter with a function Greet(const Name: string): string, implemented by TEnglishGreeter ("Hello, Name!") and TGermanGreeter ("Hallo, Name!"). Store both in an array of IGreeter (reference counted, no Free) and print the greeting of each for the name "Ada".
+--- ref
+program Greeters;
+{$mode objfpc}{$H+}
+type
+  IGreeter = interface
+    ['{5B0C6C0E-6E3B-4C8A-9A4E-2E0F4B9A7C11}']
+    function Greet(const AName: string): string;
+  end;
+
+  TEnglishGreeter = class(TInterfacedObject, IGreeter)
+    function Greet(const AName: string): string;
+  end;
+
+  TGermanGreeter = class(TInterfacedObject, IGreeter)
+    function Greet(const AName: string): string;
+  end;
+
+function TEnglishGreeter.Greet(const AName: string): string;
+begin
+  Result := 'Hello, ' + AName + '!';
+end;
+
+function TGermanGreeter.Greet(const AName: string): string;
+begin
+  Result := 'Hallo, ' + AName + '!';
+end;
+
+var
+  G: array[0..1] of IGreeter;
+  I: Integer;
+begin
+  G[0] := TEnglishGreeter.Create;
+  G[1] := TGermanGreeter.Create;
+  for I := 0 to 1 do
+    WriteLn(G[I].Greet('Ada'));
+end.
+=== objfpc-w22 write
+--- prompt
+Run Conway's Game of Life on a 6x6 grid (no wrap-around) starting with a glider at (row, column) (0,1), (1,2), (2,0), (2,1), (2,2). After 4 generations print the grid with '#' for live and '.' for dead cells, one row per line.
+--- ref
+program Life;
+{$mode objfpc}{$H+}
+const
+  N = 6;
+type
+  TGrid = array[0..N - 1, 0..N - 1] of Boolean;
+
+function Neighbours(const G: TGrid; R, C: Integer): Integer;
+var
+  DR, DC: Integer;
+begin
+  Result := 0;
+  for DR := -1 to 1 do
+    for DC := -1 to 1 do
+      if ((DR <> 0) or (DC <> 0)) and (R + DR >= 0) and (R + DR < N) and
+         (C + DC >= 0) and (C + DC < N) and G[R + DR, C + DC] then
+        Inc(Result);
+end;
+
+procedure Step(var G: TGrid);
+var
+  Next: TGrid;
+  R, C, K: Integer;
+begin
+  for R := 0 to N - 1 do
+    for C := 0 to N - 1 do
+    begin
+      K := Neighbours(G, R, C);
+      Next[R, C] := (K = 3) or (G[R, C] and (K = 2));
+    end;
+  G := Next;
+end;
+
+var
+  G: TGrid;
+  R, C, I: Integer;
+begin
+  for R := 0 to N - 1 do
+    for C := 0 to N - 1 do
+      G[R, C] := False;
+  G[0, 1] := True;
+  G[1, 2] := True;
+  G[2, 0] := True;
+  G[2, 1] := True;
+  G[2, 2] := True;
+  for I := 1 to 4 do
+    Step(G);
+  for R := 0 to N - 1 do
+  begin
+    for C := 0 to N - 1 do
+      if G[R, C] then
+        Write('#')
+      else
+        Write('.');
+    WriteLn;
+  end;
+end.
+=== objfpc-w23 write
+--- prompt
+Evaluate the postfix expressions "3 4 + 2 *", "5 1 2 + 4 * + 3 -" and "2 3 4 * + 5 -" with a stack and print each expression followed by " = " and its integer value.
+--- ref
+program Postfix;
+{$mode objfpc}{$H+}
+uses
+  Classes, SysUtils;
+
+function Eval(const AExpr: string): Integer;
+var
+  Parts: TStringList;
+  Stack: array of Integer;
+  N, I, A, B: Integer;
+  T: string;
+begin
+  Parts := TStringList.Create;
+  try
+    Parts.Delimiter := ' ';
+    Parts.StrictDelimiter := True;
+    Parts.DelimitedText := AExpr;
+    Stack := nil;
+    SetLength(Stack, Parts.Count);
+    N := 0;
+    for I := 0 to Parts.Count - 1 do
+    begin
+      T := Parts[I];
+      if (T = '+') or (T = '-') or (T = '*') then
+      begin
+        B := Stack[N - 1];
+        A := Stack[N - 2];
+        Dec(N, 2);
+        case T[1] of
+          '+': Stack[N] := A + B;
+          '-': Stack[N] := A - B;
+          '*': Stack[N] := A * B;
+        end;
+      end
+      else
+        Stack[N] := StrToInt(T);
+      Inc(N);
+    end;
+    Result := Stack[0];
+  finally
+    Parts.Free;
+  end;
+end;
+
+procedure Show(const AExpr: string);
+begin
+  WriteLn(AExpr, ' = ', Eval(AExpr));
+end;
+
+begin
+  Show('3 4 + 2 *');
+  Show('5 1 2 + 4 * + 3 -');
+  Show('2 3 4 * + 5 -');
+end.
+=== objfpc-w24 write
+--- prompt
+Print a small report table for the items (Pen, 3, 1.20), (Notebook, 2, 3.50) and (Ruler, 1, 0.99): a header line "Item       Qty   Total", then one line per item with the name left-aligned in 10 characters, the quantity right-aligned in 4 characters and the total (qty * price) right-aligned in 8 characters with two decimals, and finally a line "Sum" aligned the same way with the overall total. Use Format.
+--- ref
+program Report;
+{$mode objfpc}{$H+}
+uses
+  SysUtils;
+type
+  TItem = record
+    Name: string;
+    Qty: Integer;
+    Price: Double;
+  end;
+const
+  Items: array[0..2] of TItem = (
+    (Name: 'Pen'; Qty: 3; Price: 1.20),
+    (Name: 'Notebook'; Qty: 2; Price: 3.50),
+    (Name: 'Ruler'; Qty: 1; Price: 0.99));
+var
+  I: Integer;
+  Sum, T: Double;
+  FS: TFormatSettings;
+begin
+  FS := DefaultFormatSettings;
+  FS.DecimalSeparator := '.';
+  WriteLn('Item       Qty   Total');
+  Sum := 0;
+  for I := 0 to High(Items) do
+  begin
+    T := Items[I].Qty * Items[I].Price;
+    Sum := Sum + T;
+    WriteLn(Format('%-10s%4d%8.2f', [Items[I].Name, Items[I].Qty, T], FS));
+  end;
+  WriteLn(Format('%-10s%4s%8.2f', ['Sum', '', Sum], FS));
+end.
+=== objfpc-w25 write
+--- prompt
+Implement a simple queue of strings with a ring buffer of capacity 4 inside a class (Enqueue raises an exception when full, Dequeue when empty). Enqueue a, b, c, dequeue twice (printing each), enqueue d, e, f, then try to enqueue g, print the exception message, and dequeue everything that is left, printing each item.
+--- ref
+program RingQueue;
+{$mode objfpc}{$H+}
+uses
+  SysUtils;
+type
+  TRingQueue = class
+  private
+    FItems: array[0..3] of string;
+    FHead, FCount: Integer;
+  public
+    procedure Enqueue(const S: string);
+    function Dequeue: string;
+    property Count: Integer read FCount;
+  end;
+
+procedure TRingQueue.Enqueue(const S: string);
+begin
+  if FCount = Length(FItems) then
+    raise Exception.Create('queue full, cannot add ' + S);
+  FItems[(FHead + FCount) mod Length(FItems)] := S;
+  Inc(FCount);
+end;
+
+function TRingQueue.Dequeue: string;
+begin
+  if FCount = 0 then
+    raise Exception.Create('queue empty');
+  Result := FItems[FHead];
+  FHead := (FHead + 1) mod Length(FItems);
+  Dec(FCount);
+end;
+
+var
+  Q: TRingQueue;
+begin
+  Q := TRingQueue.Create;
+  try
+    Q.Enqueue('a');
+    Q.Enqueue('b');
+    Q.Enqueue('c');
+    WriteLn(Q.Dequeue);
+    WriteLn(Q.Dequeue);
+    Q.Enqueue('d');
+    Q.Enqueue('e');
+    Q.Enqueue('f');
+    try
+      Q.Enqueue('g');
+    except
+      on E: Exception do
+        WriteLn(E.Message);
+    end;
+    while Q.Count > 0 do
+      WriteLn(Q.Dequeue);
+  finally
+    Q.Free;
+  end;
+end.
+=== objfpc-w26 write
+--- prompt
+Compute the mean, the population standard deviation and the median of the values 4, 8, 15, 16, 23, 42 and print them as "mean 18.00", "stddev ..." and "median ..." with two decimals each.
+--- ref
+program Stats;
+{$mode objfpc}{$H+}
+uses
+  SysUtils, Math;
+const
+  Values: array[0..5] of Double = (4, 8, 15, 16, 23, 42);
+var
+  Mean, SD, Med: Double;
+  I: Integer;
+  FS: TFormatSettings;
+begin
+  FS := DefaultFormatSettings;
+  FS.DecimalSeparator := '.';
+  Mean := Math.Mean(Values);
+  SD := 0;
+  for I := 0 to High(Values) do
+    SD := SD + Sqr(Values[I] - Mean);
+  SD := Sqrt(SD / Length(Values));
+  Med := (Values[2] + Values[3]) / 2;
+  WriteLn('mean ', FormatFloat('0.00', Mean, FS));
+  WriteLn('stddev ', FormatFloat('0.00', SD, FS));
+  WriteLn('median ', FormatFloat('0.00', Med, FS));
+end.
+=== objfpc-w27 write
+--- prompt
+Write a Caesar cipher: encode "Hello, World" with a shift of 3 (letters only, case kept, other characters unchanged), print the result, then decode it again and print that.
+--- ref
+program Caesar;
+{$mode objfpc}{$H+}
+
+function Shift(const S: string; K: Integer): string;
+var
+  I: Integer;
+  C: Char;
+begin
+  Result := S;
+  for I := 1 to Length(S) do
+  begin
+    C := S[I];
+    if C in ['a'..'z'] then
+      Result[I] := Chr(Ord('a') + (Ord(C) - Ord('a') + K + 26) mod 26)
+    else if C in ['A'..'Z'] then
+      Result[I] := Chr(Ord('A') + (Ord(C) - Ord('A') + K + 26) mod 26);
+  end;
+end;
+
+var
+  E: string;
+begin
+  E := Shift('Hello, World', 3);
+  WriteLn(E);
+  WriteLn(Shift(E, -3));
+end.
+=== objfpc-w28 write
+--- prompt
+Use Generics.Collections: put the words banana, apple, cherry, date, fig into a TList<string> (with specialize), sort it, print it as one comma-separated line, then build a TDictionary<string, Integer> from each word to its length and print the length of "cherry" and whether "grape" is present ("grape: no").
+--- ref
+program GenColl;
+{$mode objfpc}{$H+}
+uses
+  Generics.Collections, SysUtils;
+type
+  TStrList = specialize TList<string>;
+  TLenMap = specialize TDictionary<string, Integer>;
+var
+  L: TStrList;
+  D: TLenMap;
+  S: string;
+  I: Integer;
+begin
+  L := TStrList.Create;
+  D := TLenMap.Create;
+  try
+    L.AddRange(['banana', 'apple', 'cherry', 'date', 'fig']);
+    L.Sort;
+    for I := 0 to L.Count - 1 do
+    begin
+      if I > 0 then
+        Write(',');
+      Write(L[I]);
+    end;
+    WriteLn;
+    for S in L do
+      D.Add(S, Length(S));
+    WriteLn('cherry: ', D['cherry']);
+    if D.ContainsKey('grape') then
+      WriteLn('grape: yes')
+    else
+      WriteLn('grape: no');
+  finally
+    L.Free;
+    D.Free;
+  end;
+end.
+=== objfpc-w29 write
+--- prompt
+Simulate a traffic light as a state machine with the states Red, RedYellow, Green and Yellow (in that cycle) and durations 3, 1, 4 and 2 ticks. Starting in Red at tick 0, print the state at ticks 0 to 11, one line per tick as "tick: State".
+--- ref
+program TrafficLight;
+{$mode objfpc}{$H+}
+type
+  TLight = (Red, RedYellow, Green, Yellow);
+const
+  Duration: array[TLight] of Integer = (3, 1, 4, 2);
+  Names: array[TLight] of string = ('Red', 'RedYellow', 'Green', 'Yellow');
+var
+  State: TLight;
+  Left, Tick: Integer;
+begin
+  State := Red;
+  Left := Duration[State];
+  for Tick := 0 to 11 do
+  begin
+    WriteLn(Tick, ': ', Names[State]);
+    Dec(Left);
+    if Left = 0 then
+    begin
+      if State = High(TLight) then
+        State := Low(TLight)
+      else
+        State := Succ(State);
+      Left := Duration[State];
+    end;
+  end;
+end.
+=== objfpc-w30 write
+--- prompt
+Print Pascal's triangle with 7 rows, each row's numbers separated by single spaces and the rows centred with leading spaces so that row i (counting from 0) starts with (6 - i) spaces.
+--- ref
+program PascalTriangle;
+{$mode objfpc}{$H+}
+var
+  Row: array of Int64;
+  I, J: Integer;
+begin
+  Row := nil;
+  for I := 0 to 6 do
+  begin
+    SetLength(Row, I + 1);
+    Row[I] := 1;
+    for J := I - 1 downto 1 do
+      Row[J] := Row[J] + Row[J - 1];
+    Row[0] := 1;
+    Write(StringOfChar(' ', 6 - I));
+    for J := 0 to I do
+    begin
+      if J > 0 then
+        Write(' ');
+      Write(Row[J]);
+    end;
+    WriteLn;
+  end;
+end.
+=== objfpc-f01 fix
+--- prompt
+This program does not compile. Fix it so that it prints the squares of 1 to 5 on one line separated by spaces.
+--- given
+program Squares;
+{$mode objfpc}{$H+}
+var
+  I: Integer;
+begin
+  for I := 1 to 5 do
+  begin
+    if I > 1 then
+      Write(' ')
+    Write(I * I);
+  end;
+  WriteLn;
+end.
+--- ref
+program Squares;
+{$mode objfpc}{$H+}
+var
+  I: Integer;
+begin
+  for I := 1 to 5 do
+  begin
+    if I > 1 then
+      Write(' ');
+    Write(I * I);
+  end;
+  WriteLn;
+end.
+=== objfpc-f02 fix
+--- prompt
+The compiler rejects this program. Make it compile without changing what it does: it should print the numbers in the list and then their count.
+--- given
+program ListCount;
+{$mode objfpc}{$H+}
+uses
+  Generics.Collections;
+var
+  L: TList<Integer>;
+  I: Integer;
+begin
+  L := TList<Integer>.Create;
+  try
+    L.Add(10);
+    L.Add(20);
+    L.Add(30);
+    for I in L do
+      WriteLn(I);
+    WriteLn('count ', L.Count);
+  finally
+    L.Free;
+  end;
+end.
+--- ref
+program ListCount;
+{$mode objfpc}{$H+}
+uses
+  Generics.Collections;
+type
+  TIntList = specialize TList<Integer>;
+var
+  L: TIntList;
+  I: Integer;
+begin
+  L := TIntList.Create;
+  try
+    L.Add(10);
+    L.Add(20);
+    L.Add(30);
+    for I in L do
+      WriteLn(I);
+    WriteLn('count ', L.Count);
+  finally
+    L.Free;
+  end;
+end.
+=== objfpc-f03 fix
+--- prompt
+Fix the compile error in this program. It should print "tick 1" to "tick 3" through the event handler.
+--- given
+program Ticker;
+{$mode objfpc}{$H+}
+type
+  TTickEvent = procedure(N: Integer) of object;
+
+  TClock = class
+    OnTick: TTickEvent;
+    procedure Run;
+  end;
+
+  TPrinter = class
+    procedure Print(N: Integer);
+  end;
+
+procedure TClock.Run;
+var
+  I: Integer;
+begin
+  for I := 1 to 3 do
+    OnTick(I);
+end;
+
+procedure TPrinter.Print(N: Integer);
+begin
+  WriteLn('tick ', N);
+end;
+
+var
+  C: TClock;
+  P: TPrinter;
+begin
+  C := TClock.Create;
+  P := TPrinter.Create;
+  C.OnTick := P.Print;
+  C.Run;
+  C.Free;
+  P.Free;
+end.
+--- ref
+program Ticker;
+{$mode objfpc}{$H+}
+type
+  TTickEvent = procedure(N: Integer) of object;
+
+  TClock = class
+    OnTick: TTickEvent;
+    procedure Run;
+  end;
+
+  TPrinter = class
+    procedure Print(N: Integer);
+  end;
+
+procedure TClock.Run;
+var
+  I: Integer;
+begin
+  for I := 1 to 3 do
+    OnTick(I);
+end;
+
+procedure TPrinter.Print(N: Integer);
+begin
+  WriteLn('tick ', N);
+end;
+
+var
+  C: TClock;
+  P: TPrinter;
+begin
+  C := TClock.Create;
+  P := TPrinter.Create;
+  C.OnTick := @P.Print;
+  C.Run;
+  C.Free;
+  P.Free;
+end.
+=== objfpc-f04 fix
+--- prompt
+This program fails to compile. Fix it; it should print the total of the prices with two decimals as "total 7.45".
+--- given
+program PriceTotal;
+{$mode objfpc}{$H+}
+uses
+  SysUtils;
+const
+  Prices: array[0..2] of Double = (1.50, 2.75, 3.20);
+begin
+  var Total := 0.0;
+  for var I := 0 to High(Prices) do
+    Total := Total + Prices[I];
+  WriteLn('total ', FormatFloat('0.00', Total));
+end.
+--- ref
+program PriceTotal;
+{$mode objfpc}{$H+}
+uses
+  SysUtils;
+const
+  Prices: array[0..2] of Double = (1.50, 2.75, 3.20);
+var
+  Total: Double;
+  I: Integer;
+  FS: TFormatSettings;
+begin
+  FS := DefaultFormatSettings;
+  FS.DecimalSeparator := '.';
+  Total := 0.0;
+  for I := 0 to High(Prices) do
+    Total := Total + Prices[I];
+  WriteLn('total ', FormatFloat('0.00', Total, FS));
+end.
+=== objfpc-f05 fix
+--- prompt
+Make this program compile. It should print the length of the longest word in the sentence.
+--- given
+program Longest;
+{$mode objfpc}{$H+}
+uses
+  SysUtils;
+var
+  Words: TStringArray;
+  W: string;
+  Best: Integer;
+begin
+  Words := 'a quick brown fox jumped'.Split(' ');
+  Best := 0;
+  for W in Words do
+    if Length(W) > Best then
+      Best := Length(W)
+  WriteLn(Best);
+end.
+--- ref
+program Longest;
+{$mode objfpc}{$H+}
+uses
+  SysUtils;
+var
+  Words: TStringArray;
+  W: string;
+  Best: Integer;
+begin
+  Words := 'a quick brown fox jumped'.Split(' ');
+  Best := 0;
+  for W in Words do
+    if Length(W) > Best then
+      Best := Length(W);
+  WriteLn(Best);
+end.
+=== objfpc-c01 convert
+--- prompt
+Convert this Free Pascal {$mode delphi} program to {$mode objfpc}. Keep its output the same.
+--- given
+program Boxes;
+{$mode delphi}
+type
+  TBox<T> = record
+    Value: T;
+  end;
+var
+  A: TBox<Integer>;
+  B: TBox<string>;
+begin
+  A.Value := 7;
+  B.Value := 'seven';
+  WriteLn(A.Value, ' ', B.Value);
+end.
+--- ref
+program Boxes;
+{$mode objfpc}{$H+}
+type
+  generic TBox<T> = record
+    Value: T;
+  end;
+  TIntBox = specialize TBox<Integer>;
+  TStrBox = specialize TBox<string>;
+var
+  A: TIntBox;
+  B: TStrBox;
+begin
+  A.Value := 7;
+  B.Value := 'seven';
+  WriteLn(A.Value, ' ', B.Value);
+end.
+=== objfpc-c02 convert
+--- prompt
+Rewrite this Delphi console program for Free Pascal in {$mode objfpc} with the same output.
+--- given
+program Doubler;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils;
+type
+  TIntFunc = reference to function(X: Integer): Integer;
+var
+  F: TIntFunc;
+begin
+  F := function(X: Integer): Integer
+    begin
+      Result := X * 2;
+    end;
+  for var I := 1 to 3 do
+    WriteLn(F(I));
+end.
+--- ref
+program Doubler;
+{$mode objfpc}{$H+}
+type
+  TIntFunc = function(X: Integer): Integer;
+
+function Twice(X: Integer): Integer;
+begin
+  Result := X * 2;
+end;
+
+var
+  F: TIntFunc;
+  I: Integer;
+begin
+  F := @Twice;
+  for I := 1 to 3 do
+    WriteLn(F(I));
+end.
+=== objfpc-c03 convert
+--- prompt
+Convert this Unleashed Pascal program to Free Pascal {$mode objfpc}; the output must not change.
+--- given
+program Grades;
+{$mode unleashed}
+var
+  Scores: array of Integer = (55, 72, 91);
+begin
+  for var S in Scores do
+    WriteLn($'{S} -> {if S >= 60 then 'pass' else 'fail'}');
+end.
+--- ref
+program Grades;
+{$mode objfpc}{$H+}
+uses
+  SysUtils;
+const
+  Scores: array[0..2] of Integer = (55, 72, 91);
+var
+  S: Integer;
+  R: string;
+begin
+  for S in Scores do
+  begin
+    if S >= 60 then
+      R := 'pass'
+    else
+      R := 'fail';
+    WriteLn(IntToStr(S) + ' -> ' + R);
+  end;
+end.
+=== objfpc-c04 convert
+--- prompt
+Port this Free Pascal {$mode delphi} program with a method pointer to {$mode objfpc} without changing its output.
+--- given
+program Notify;
+{$mode delphi}
+type
+  TNotify = procedure(const Msg: string) of object;
+
+  TSender = class
+    OnSend: TNotify;
+    procedure Send(const Msg: string);
+  end;
+
+  TReceiver = class
+    procedure Receive(const Msg: string);
+  end;
+
+procedure TSender.Send(const Msg: string);
+begin
+  if Assigned(OnSend) then
+    OnSend(Msg);
+end;
+
+procedure TReceiver.Receive(const Msg: string);
+begin
+  WriteLn('received: ', Msg);
+end;
+
+var
+  S: TSender;
+  R: TReceiver;
+begin
+  S := TSender.Create;
+  R := TReceiver.Create;
+  try
+    S.OnSend := R.Receive;
+    S.Send('ping');
+    S.Send('pong');
+  finally
+    S.Free;
+    R.Free;
+  end;
+end.
+--- ref
+program Notify;
+{$mode objfpc}{$H+}
+type
+  TNotify = procedure(const Msg: string) of object;
+
+  TSender = class
+    OnSend: TNotify;
+    procedure Send(const Msg: string);
+  end;
+
+  TReceiver = class
+    procedure Receive(const Msg: string);
+  end;
+
+procedure TSender.Send(const Msg: string);
+begin
+  if Assigned(OnSend) then
+    OnSend(Msg);
+end;
+
+procedure TReceiver.Receive(const Msg: string);
+begin
+  WriteLn('received: ', Msg);
+end;
+
+var
+  S: TSender;
+  R: TReceiver;
+begin
+  S := TSender.Create;
+  R := TReceiver.Create;
+  try
+    S.OnSend := @R.Receive;
+    S.Send('ping');
+    S.Send('pong');
+  finally
+    S.Free;
+    R.Free;
+  end;
+end.
+=== objfpc-c05 convert
+--- prompt
+Translate this Oxygene program into a Free Pascal {$mode objfpc} console program that prints the same lines.
+--- given
+namespace Totals;
+
+type
+  Program = class
+  public
+    class method Main(args: array of String): Int32;
+    begin
+      var list := new List<Integer>;
+      for i: Integer := 1 to 4 do
+        list.Add(i * 10);
+      var sum := 0;
+      for each v in list do
+        sum := sum + v;
+      writeLn($'items {list.Count}');
+      writeLn($'sum {sum}');
+    end;
+  end;
+
+end.
+--- ref
+program Totals;
+{$mode objfpc}{$H+}
+uses
+  Generics.Collections;
+type
+  TIntList = specialize TList<Integer>;
+var
+  L: TIntList;
+  I, Sum, V: Integer;
+begin
+  L := TIntList.Create;
+  try
+    for I := 1 to 4 do
+      L.Add(I * 10);
+    Sum := 0;
+    for V in L do
+      Sum := Sum + V;
+    WriteLn('items ', L.Count);
+    WriteLn('sum ', Sum);
+  finally
+    L.Free;
+  end;
+end.

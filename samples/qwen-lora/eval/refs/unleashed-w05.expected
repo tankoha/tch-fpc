@@ -1,0 +1,8 @@
+open A
+open B
+open C
+working
+close C
+close B
+close A
+done

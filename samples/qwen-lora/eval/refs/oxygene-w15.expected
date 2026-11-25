@@ -1,0 +1,4 @@
+moved 1 -> 5
+error: same square 3
+error: square out of board: 0 -> 4
+error: square out of board: 9 -> 10

@@ -1,0 +1,30 @@
+reg-01	contains	Tokyo	What is the capital of Japan? Answer in one word.
+reg-02	contains	391	What is 17 * 23? Reply with the number only.
+reg-03	contains	wc -l	Write a bash one-liner that prints the number of lines in the file notes.txt.
+reg-04	contains	git log	Which git command shows the commit history of the current branch? Give the command only.
+reg-05	contains	404	Which HTTP status code means "Not Found"? Reply with the number.
+reg-06	contains	SELECT	Write an SQL query that selects every column of the table users. Use upper-case SQL keywords.
+reg-07	contains	[::-1]	Write a Python expression that reverses the string s using slicing. Give the expression only.
+reg-08	contains	JavaScript Object Notation	What does the acronym JSON stand for?
+reg-09	contains	ありがとう	Translate "thank you" into Japanese, written in hiragana only.
+reg-10	contains	富士山	日本で一番高い山の名前を答えてください。
+reg-11	contains	chmod	Which Linux command changes the permissions of a file? Give the command name.
+reg-12	contains	FF	Convert the decimal number 255 to hexadecimal. Write the digits in upper case without a prefix.
+reg-13	contains	O(log n)	What is the time complexity of binary search on a sorted array, in big-O notation?
+reg-14	contains	const	In JavaScript, which keyword declares a block-scoped constant? Give the keyword only.
+reg-15	contains	1024	How many bytes are in a kibibyte? Reply with the number.
+reg-16	contains	stdio.h	Which C standard header declares printf? Give the header name.
+reg-17	contains	Au	What is the chemical symbol of gold?
+reg-18	contains	365	閏年でない 1 年は何日ですか。数字だけで答えてください。
+reg-19	contains	443	Which TCP port does HTTPS use by default? Reply with the number.
+reg-20	contains	\d	In regular expressions (PCRE), which escape sequence matches any decimal digit? Give the escape only.
+tool-01	tool-call	get_weather	What is the weather like in Osaka right now?
+tool-02	tool-call	convert_currency	How many euros are 250 US dollars today?
+tool-03	tool-call	get_time	What time is it in New York at the moment?
+tool-04	tool-call	get_weather	札幌の今の天気を教えてください。
+tool-05	tool-call	search_web	Find recent news about the Free Pascal compiler on the web.
+tool-06	tool-call	convert_currency	Convert 10000 Japanese yen to US dollars at the current rate.
+tool-07	tool-call	get_weather	Is it raining in London right now?
+tool-08	tool-call	get_time	What is the current local time in Tokyo?
+tool-09	tool-call	search_web	Look up the current population of Iceland on the web.
+tool-10	tool-call	convert_currency	100 ユーロは今いくらの日本円ですか？

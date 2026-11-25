@@ -1,0 +1,1630 @@
+=== delphi-w01 write
+--- prompt
+Write a Delphi console program that prints the numbers from 1 to 20, but "Fizz" for multiples of 3, "Buzz" for multiples of 5 and "FizzBuzz" for multiples of both, one per line. Use an inline loop variable.
+--- ref
+program FizzBuzz;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils;
+begin
+  for var I := 1 to 20 do
+    if I mod 15 = 0 then
+      Writeln('FizzBuzz')
+    else if I mod 3 = 0 then
+      Writeln('Fizz')
+    else if I mod 5 = 0 then
+      Writeln('Buzz')
+    else
+      Writeln(I);
+end.
+=== delphi-w02 write
+--- prompt
+Write a function MakeMultiplier(N) that returns an anonymous function (a "reference to function(X: Integer): Integer" type) multiplying by N. Create a doubler and a tripler and print doubler(7), tripler(7) and doubler(tripler(2)) on separate lines.
+--- ref
+program Multipliers;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils;
+type
+  TIntFunc = reference to function(X: Integer): Integer;
+
+function MakeMultiplier(N: Integer): TIntFunc;
+begin
+  Result :=
+    function(X: Integer): Integer
+    begin
+      Result := X * N;
+    end;
+end;
+
+var
+  Doubler, Tripler: TIntFunc;
+begin
+  Doubler := MakeMultiplier(2);
+  Tripler := MakeMultiplier(3);
+  Writeln(Doubler(7));
+  Writeln(Tripler(7));
+  Writeln(Doubler(Tripler(2)));
+end.
+=== delphi-w03 write
+--- prompt
+Use string helpers on the text "  Delphi Programming Language  ": print it trimmed, in upper case (trimmed), its trimmed length, whether the trimmed text starts with "Delphi", and the words of the trimmed text one per line (Split on spaces).
+--- ref
+program Helpers;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils;
+var
+  S, T: string;
+  W: string;
+begin
+  S := '  Delphi Programming Language  ';
+  T := S.Trim;
+  Writeln(T);
+  Writeln(T.ToUpper);
+  Writeln(T.Length);
+  Writeln(BoolToStr(T.StartsWith('Delphi'), True));
+  for W in T.Split([' ']) do
+    Writeln(W);
+end.
+=== delphi-w04 write
+--- prompt
+Write a generic class TStack<T> of your own (dynamic array inside, Push, Pop, Count) — call it TSimpleStack<T> to avoid the library's name. Push the strings 'one', 'two', 'three', pop and print them, then push 1.5 and 2.5 into a TSimpleStack<Double> and print their sum as 4.0 (one decimal).
+--- ref
+program SimpleStack;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils;
+type
+  TSimpleStack<T> = class
+  private
+    FItems: TArray<T>;
+  public
+    procedure Push(const V: T);
+    function Pop: T;
+    function Count: Integer;
+  end;
+
+procedure TSimpleStack<T>.Push(const V: T);
+begin
+  SetLength(FItems, Length(FItems) + 1);
+  FItems[High(FItems)] := V;
+end;
+
+function TSimpleStack<T>.Pop: T;
+begin
+  Result := FItems[High(FItems)];
+  SetLength(FItems, Length(FItems) - 1);
+end;
+
+function TSimpleStack<T>.Count: Integer;
+begin
+  Result := Length(FItems);
+end;
+
+var
+  S: TSimpleStack<string>;
+  D: TSimpleStack<Double>;
+  FS: TFormatSettings;
+begin
+  FS := TFormatSettings.Create;
+  FS.DecimalSeparator := '.';
+  S := TSimpleStack<string>.Create;
+  D := TSimpleStack<Double>.Create;
+  try
+    S.Push('one');
+    S.Push('two');
+    S.Push('three');
+    while S.Count > 0 do
+      Writeln(S.Pop);
+    D.Push(1.5);
+    D.Push(2.5);
+    Writeln(FormatFloat('0.0', D.Pop + D.Pop, FS));
+  finally
+    S.Free;
+    D.Free;
+  end;
+end.
+=== delphi-w05 write
+--- prompt
+Use TDictionary<string, TList<string>> to group the words apple, avocado, banana, blueberry, cherry, apricot by their first letter. Print each group in letter order as "a: apple, avocado, apricot" (words in insertion order). Free the inner lists too.
+--- ref
+program Groups;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils, System.Generics.Collections;
+var
+  D: TObjectDictionary<Char, TList<string>>;
+  Keys: TList<Char>;
+  W: string;
+  C: Char;
+  L: TList<string>;
+begin
+  D := TObjectDictionary<Char, TList<string>>.Create([doOwnsValues]);
+  Keys := TList<Char>.Create;
+  try
+    for W in ['apple', 'avocado', 'banana', 'blueberry', 'cherry', 'apricot'] do
+    begin
+      if not D.TryGetValue(W[1], L) then
+      begin
+        L := TList<string>.Create;
+        D.Add(W[1], L);
+      end;
+      L.Add(W);
+    end;
+    for C in D.Keys do
+      Keys.Add(C);
+    Keys.Sort;
+    for C in Keys do
+      Writeln(C, ': ', string.Join(', ', D[C].ToArray));
+  finally
+    Keys.Free;
+    D.Free;
+  end;
+end.
+=== delphi-w06 write
+--- prompt
+Write a class hierarchy for employees: TEmployee (Name, abstract MonthlyPay), TSalaried (annual salary / 12) and THourly (hours * rate). Create Ann (salaried, 60000), Bo (hourly, 160 hours at 25) and Cy (salaried, 48000), print "Name: pay" with two decimals, and the total payroll.
+--- ref
+program Payroll;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils, System.Generics.Collections;
+type
+  TEmployee = class
+  private
+    FName: string;
+  public
+    constructor Create(const AName: string);
+    function MonthlyPay: Double; virtual; abstract;
+    property Name: string read FName;
+  end;
+
+  TSalaried = class(TEmployee)
+  private
+    FAnnual: Double;
+  public
+    constructor Create(const AName: string; AAnnual: Double);
+    function MonthlyPay: Double; override;
+  end;
+
+  THourly = class(TEmployee)
+  private
+    FHours, FRate: Double;
+  public
+    constructor Create(const AName: string; AHours, ARate: Double);
+    function MonthlyPay: Double; override;
+  end;
+
+constructor TEmployee.Create(const AName: string);
+begin
+  inherited Create;
+  FName := AName;
+end;
+
+constructor TSalaried.Create(const AName: string; AAnnual: Double);
+begin
+  inherited Create(AName);
+  FAnnual := AAnnual;
+end;
+
+function TSalaried.MonthlyPay: Double;
+begin
+  Result := FAnnual / 12;
+end;
+
+constructor THourly.Create(const AName: string; AHours, ARate: Double);
+begin
+  inherited Create(AName);
+  FHours := AHours;
+  FRate := ARate;
+end;
+
+function THourly.MonthlyPay: Double;
+begin
+  Result := FHours * FRate;
+end;
+
+var
+  Staff: TObjectList<TEmployee>;
+  E: TEmployee;
+  Total: Double;
+  FS: TFormatSettings;
+begin
+  FS := TFormatSettings.Create;
+  FS.DecimalSeparator := '.';
+  Staff := TObjectList<TEmployee>.Create;
+  try
+    Staff.Add(TSalaried.Create('Ann', 60000));
+    Staff.Add(THourly.Create('Bo', 160, 25));
+    Staff.Add(TSalaried.Create('Cy', 48000));
+    Total := 0;
+    for E in Staff do
+    begin
+      Writeln(E.Name, ': ', FormatFloat('0.00', E.MonthlyPay, FS));
+      Total := Total + E.MonthlyPay;
+    end;
+    Writeln('total: ', FormatFloat('0.00', Total, FS));
+  finally
+    Staff.Free;
+  end;
+end.
+=== delphi-w07 write
+--- prompt
+Write a generic class TFactory<T: class, constructor> with a method Make that creates a T, and two simple classes TApple and TPear whose constructor prints "apple made" / "pear made". Make one of each, print their class names and free them.
+--- ref
+program Factory;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils;
+type
+  TFactory<T: class, constructor> = class
+  public
+    function Make: T;
+  end;
+
+  TApple = class
+  public
+    constructor Create;
+  end;
+
+  TPear = class
+  public
+    constructor Create;
+  end;
+
+function TFactory<T>.Make: T;
+begin
+  Result := T.Create;
+end;
+
+constructor TApple.Create;
+begin
+  inherited Create;
+  Writeln('apple made');
+end;
+
+constructor TPear.Create;
+begin
+  inherited Create;
+  Writeln('pear made');
+end;
+
+var
+  FA: TFactory<TApple>;
+  FP: TFactory<TPear>;
+  A: TApple;
+  P: TPear;
+begin
+  FA := TFactory<TApple>.Create;
+  FP := TFactory<TPear>.Create;
+  try
+    A := FA.Make;
+    P := FP.Make;
+    Writeln(A.ClassName);
+    Writeln(P.ClassName);
+    A.Free;
+    P.Free;
+  finally
+    FA.Free;
+    FP.Free;
+  end;
+end.
+=== delphi-w08 write
+--- prompt
+Write a class function TArrayUtils.Filter<T> that returns the elements of an array for which a predicate (a "reference to function(const X: T): Boolean") holds. Filter the even numbers out of 1..10 and the words longer than 4 letters out of 'tree', 'forest', 'leaf', 'branch'; print each result on one line separated by spaces.
+--- ref
+program Filters;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils;
+type
+  TPredicate<T> = reference to function(const X: T): Boolean;
+
+  TArrayUtils = class
+  public
+    class function Filter<T>(const A: array of T; const P: TPredicate<T>): TArray<T>; static;
+  end;
+
+class function TArrayUtils.Filter<T>(const A: array of T; const P: TPredicate<T>): TArray<T>;
+var
+  X: T;
+  N: Integer;
+begin
+  SetLength(Result, Length(A));
+  N := 0;
+  for X in A do
+    if P(X) then
+    begin
+      Result[N] := X;
+      Inc(N);
+    end;
+  SetLength(Result, N);
+end;
+
+var
+  Evens: TArray<Integer>;
+  Long: TArray<string>;
+  I: Integer;
+begin
+  Evens := TArrayUtils.Filter<Integer>([1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+    function(const X: Integer): Boolean
+    begin
+      Result := X mod 2 = 0;
+    end);
+  for I := 0 to High(Evens) do
+  begin
+    if I > 0 then
+      Write(' ');
+    Write(Evens[I]);
+  end;
+  Writeln;
+  Long := TArrayUtils.Filter<string>(['tree', 'forest', 'leaf', 'branch'],
+    function(const X: string): Boolean
+    begin
+      Result := X.Length > 4;
+    end);
+  Writeln(string.Join(' ', Long));
+end.
+=== delphi-w09 write
+--- prompt
+Compute the number of days between 2024-01-15 and 2024-12-25 and the weekday name of both dates (English names from your own array, Monday first) using System.DateUtils. Print "from Monday", "to Wednesday" and "days 345".
+--- ref
+program Dates;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils, System.DateUtils;
+const
+  Names: array[1..7] of string = ('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday',
+    'Saturday', 'Sunday');
+var
+  A, B: TDateTime;
+begin
+  A := EncodeDate(2024, 1, 15);
+  B := EncodeDate(2024, 12, 25);
+  Writeln('from ', Names[DayOfTheWeek(A)]);
+  Writeln('to ', Names[DayOfTheWeek(B)]);
+  Writeln('days ', DaysBetween(A, B));
+end.
+=== delphi-w10 write
+--- prompt
+Write a record TMoney storing cents as Int64 with class operators Add, Subtract and Multiply (by an Integer) and a ToString function giving "12.34". Compute 19.99 * 3 - 5.00 + 0.03 and print "55.00".
+--- ref
+program Money;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils;
+type
+  TMoney = record
+    Cents: Int64;
+    class function Make(ACents: Int64): TMoney; static;
+    class operator Add(const A, B: TMoney): TMoney;
+    class operator Subtract(const A, B: TMoney): TMoney;
+    class operator Multiply(const A: TMoney; N: Integer): TMoney;
+    function ToString: string;
+  end;
+
+class function TMoney.Make(ACents: Int64): TMoney;
+begin
+  Result.Cents := ACents;
+end;
+
+class operator TMoney.Add(const A, B: TMoney): TMoney;
+begin
+  Result.Cents := A.Cents + B.Cents;
+end;
+
+class operator TMoney.Subtract(const A, B: TMoney): TMoney;
+begin
+  Result.Cents := A.Cents - B.Cents;
+end;
+
+class operator TMoney.Multiply(const A: TMoney; N: Integer): TMoney;
+begin
+  Result.Cents := A.Cents * N;
+end;
+
+function TMoney.ToString: string;
+begin
+  Result := Format('%d.%.2d', [Cents div 100, Cents mod 100]);
+end;
+
+begin
+  Writeln((TMoney.Make(1999) * 3 - TMoney.Make(500) + TMoney.Make(3)).ToString);
+end.
+=== delphi-w11 write
+--- prompt
+Read the key/value text "host=example.com;port=8080;debug=true;retries=3" into a TDictionary<string, string>, then print the port as an integer plus 1 ("port+1 = 8081"), the debug flag as a Boolean ("debug = True"), and the keys in sorted order on one line separated by commas.
+--- ref
+program Config;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils, System.Generics.Collections, System.Generics.Defaults;
+var
+  D: TDictionary<string, string>;
+  Keys: TList<string>;
+  Part: string;
+  KV: TArray<string>;
+begin
+  D := TDictionary<string, string>.Create;
+  Keys := TList<string>.Create(TComparer<string>.Construct(
+    function(const A, B: string): Integer
+    begin
+      Result := CompareStr(A, B);
+    end));
+  try
+    for Part in 'host=example.com;port=8080;debug=true;retries=3'.Split([';']) do
+    begin
+      KV := Part.Split(['=']);
+      D.Add(KV[0], KV[1]);
+    end;
+    Writeln('port+1 = ', StrToInt(D['port']) + 1);
+    Writeln('debug = ', BoolToStr(StrToBool(D['debug']), True));
+    for Part in D.Keys do
+      Keys.Add(Part);
+    Keys.Sort;
+    Writeln(string.Join(',', Keys.ToArray));
+  finally
+    Keys.Free;
+    D.Free;
+  end;
+end.
+=== delphi-w12 write
+--- prompt
+Write an interface ICounter (Increment, Value) implemented by TCounter, and a procedure that takes an ICounter and increments it N times. Increment one counter 5 times through the procedure and 2 more times directly, and print "value 7". No Free: the interface reference frees the object.
+--- ref
+program Counters;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils;
+type
+  ICounter = interface
+    ['{9E4A2B71-5C3D-4E8F-A1B2-C3D4E5F60718}']
+    procedure Increment;
+    function Value: Integer;
+  end;
+
+  TCounter = class(TInterfacedObject, ICounter)
+  private
+    FValue: Integer;
+  public
+    procedure Increment;
+    function Value: Integer;
+  end;
+
+procedure TCounter.Increment;
+begin
+  Inc(FValue);
+end;
+
+function TCounter.Value: Integer;
+begin
+  Result := FValue;
+end;
+
+procedure Bump(const C: ICounter; N: Integer);
+begin
+  for var I := 1 to N do
+    C.Increment;
+end;
+
+var
+  C: ICounter;
+begin
+  C := TCounter.Create;
+  Bump(C, 5);
+  C.Increment;
+  C.Increment;
+  Writeln('value ', C.Value);
+end.
+=== delphi-w13 write
+--- prompt
+Write a procedure ForEachIndexed that takes an array of strings and a "reference to procedure(Index: Integer; const S: string)" and calls it for each element. Use it with an anonymous method that captures a local counter of characters, printing "0: red", "1: green", "2: blue" and finally "chars 12".
+--- ref
+program Indexed;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils;
+type
+  TIndexedProc = reference to procedure(Index: Integer; const S: string);
+
+procedure ForEachIndexed(const A: array of string; const P: TIndexedProc);
+var
+  I: Integer;
+begin
+  for I := 0 to High(A) do
+    P(I, A[I]);
+end;
+
+var
+  Chars: Integer;
+begin
+  Chars := 0;
+  ForEachIndexed(['red', 'green', 'blue'],
+    procedure(Index: Integer; const S: string)
+    begin
+      Writeln(Index, ': ', S);
+      Chars := Chars + S.Length;
+    end);
+  Writeln('chars ', Chars);
+end.
+=== delphi-w14 write
+--- prompt
+Implement quicksort on a TArray<Integer> as a class procedure of a class TSort (Lomuto partition). Sort 29, 3, 72, 15, 8, 41, 3, 56 and print the sorted array on one line separated by spaces.
+--- ref
+program QuickSort;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils;
+type
+  TSort = class
+  public
+    class procedure Sort(var A: TArray<Integer>; Lo, Hi: Integer); static;
+  end;
+
+class procedure TSort.Sort(var A: TArray<Integer>; Lo, Hi: Integer);
+var
+  I, J, Pivot, T: Integer;
+begin
+  if Lo >= Hi then
+    Exit;
+  Pivot := A[Hi];
+  I := Lo;
+  for J := Lo to Hi - 1 do
+    if A[J] <= Pivot then
+    begin
+      T := A[I];
+      A[I] := A[J];
+      A[J] := T;
+      Inc(I);
+    end;
+  T := A[I];
+  A[I] := A[Hi];
+  A[Hi] := T;
+  Sort(A, Lo, I - 1);
+  Sort(A, I + 1, Hi);
+end;
+
+var
+  A: TArray<Integer>;
+  I: Integer;
+begin
+  A := [29, 3, 72, 15, 8, 41, 3, 56];
+  TSort.Sort(A, 0, High(A));
+  for I := 0 to High(A) do
+  begin
+    if I > 0 then
+      Write(' ');
+    Write(A[I]);
+  end;
+  Writeln;
+end.
+=== delphi-w15 write
+--- prompt
+Define the exception classes EValidationError and its descendant ERangeError2 (to avoid the library's ERangeError). A procedure ValidateScore raises EValidationError for a negative score and ERangeError2 for one above 100. Validate -5, 50 and 150 inside try...except, distinguishing the two classes (the more specific first) and printing "range: ...", "invalid: ..." or "ok 50"; finally print "checked 3" in a finally block.
+--- ref
+program Validate;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils;
+type
+  EValidationError = class(Exception);
+  ERangeError2 = class(EValidationError);
+
+procedure ValidateScore(S: Integer);
+begin
+  if S < 0 then
+    raise EValidationError.CreateFmt('%d is negative', [S]);
+  if S > 100 then
+    raise ERangeError2.CreateFmt('%d is above 100', [S]);
+end;
+
+const
+  Scores: array[0..2] of Integer = (-5, 50, 150);
+var
+  Count: Integer;
+begin
+  Count := 0;
+  try
+    for var S in Scores do
+    begin
+      Inc(Count);
+      try
+        ValidateScore(S);
+        Writeln('ok ', S);
+      except
+        on E: ERangeError2 do
+          Writeln('range: ', E.Message);
+        on E: EValidationError do
+          Writeln('invalid: ', E.Message);
+      end;
+    end;
+  finally
+    Writeln('checked ', Count);
+  end;
+end.
+=== delphi-w16 write
+--- prompt
+Print the prime factorisation of 360, 97, 1001 and 1024 in the form "360 = 2^3 * 3^2 * 5".
+--- ref
+program Factors;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils;
+
+function Factorise(N: Integer): string;
+var
+  P, E: Integer;
+begin
+  Result := '';
+  P := 2;
+  while N > 1 do
+  begin
+    E := 0;
+    while N mod P = 0 do
+    begin
+      N := N div P;
+      Inc(E);
+    end;
+    if E > 0 then
+    begin
+      if Result <> '' then
+        Result := Result + ' * ';
+      Result := Result + IntToStr(P);
+      if E > 1 then
+        Result := Result + '^' + IntToStr(E);
+    end;
+    Inc(P);
+  end;
+end;
+
+const
+  Numbers: array[0..3] of Integer = (360, 97, 1001, 1024);
+begin
+  for var N in Numbers do
+    Writeln(N, ' = ', Factorise(N));
+end.
+=== delphi-w17 write
+--- prompt
+Build a small linked "playlist" with a TList<TSong> of records (Title, Seconds). Add three songs (Intro 95, Main Theme 241, Outro 130), print each as "Title m:ss", then the total as "total 7:46".
+--- ref
+program Playlist;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils, System.Generics.Collections;
+type
+  TSong = record
+    Title: string;
+    Seconds: Integer;
+  end;
+
+function Song(const ATitle: string; ASeconds: Integer): TSong;
+begin
+  Result.Title := ATitle;
+  Result.Seconds := ASeconds;
+end;
+
+function MinSec(S: Integer): string;
+begin
+  Result := Format('%d:%.2d', [S div 60, S mod 60]);
+end;
+
+var
+  L: TList<TSong>;
+  S: TSong;
+  Total: Integer;
+begin
+  L := TList<TSong>.Create;
+  try
+    L.Add(Song('Intro', 95));
+    L.Add(Song('Main Theme', 241));
+    L.Add(Song('Outro', 130));
+    Total := 0;
+    for S in L do
+    begin
+      Writeln(S.Title, ' ', MinSec(S.Seconds));
+      Inc(Total, S.Seconds);
+    end;
+    Writeln('total ', MinSec(Total));
+  finally
+    L.Free;
+  end;
+end.
+=== delphi-w18 write
+--- prompt
+Count the words of "the quick brown fox jumps over the lazy dog the end" with a TDictionary<string, Integer> and print the three most frequent words with their counts (ties by alphabetical order), one per line as "word count".
+--- ref
+program TopWords;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils, System.Generics.Collections, System.Generics.Defaults;
+type
+  TWordCount = TPair<string, Integer>;
+  TWordList = TList<TWordCount>;
+var
+  D: TDictionary<string, Integer>;
+  L: TWordList;
+  W: string;
+  N, I: Integer;
+begin
+  D := TDictionary<string, Integer>.Create;
+  L := TWordList.Create(TComparer<TWordCount>.Construct(
+    function(const A, B: TWordCount): Integer
+    begin
+      Result := B.Value - A.Value;
+      if Result = 0 then
+        Result := CompareStr(A.Key, B.Key);
+    end));
+  try
+    for W in 'the quick brown fox jumps over the lazy dog the end'.Split([' ']) do
+      if D.TryGetValue(W, N) then
+        D[W] := N + 1
+      else
+        D.Add(W, 1);
+    for var P in D do
+      L.Add(P);
+    L.Sort;
+    for I := 0 to 2 do
+      Writeln(L[I].Key, ' ', L[I].Value);
+  finally
+    L.Free;
+    D.Free;
+  end;
+end.
+=== delphi-w19 write
+--- prompt
+Write a class TThermostat with a property Target (setter clamps to 5..30) and an OnChange event (a method pointer "procedure(Sender: TObject; NewTarget: Integer) of object", assigned without @). A TDisplay object prints "target now N". Set the target to 21, 40 and 2 and print the final target as "final 5".
+--- ref
+program Thermostat;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils;
+type
+  TTargetEvent = procedure(Sender: TObject; NewTarget: Integer) of object;
+
+  TThermostat = class
+  private
+    FTarget: Integer;
+    FOnChange: TTargetEvent;
+    procedure SetTarget(AValue: Integer);
+  public
+    property Target: Integer read FTarget write SetTarget;
+    property OnChange: TTargetEvent read FOnChange write FOnChange;
+  end;
+
+  TDisplay = class
+  public
+    procedure Show(Sender: TObject; NewTarget: Integer);
+  end;
+
+procedure TThermostat.SetTarget(AValue: Integer);
+begin
+  if AValue < 5 then
+    AValue := 5;
+  if AValue > 30 then
+    AValue := 30;
+  FTarget := AValue;
+  if Assigned(FOnChange) then
+    FOnChange(Self, FTarget);
+end;
+
+procedure TDisplay.Show(Sender: TObject; NewTarget: Integer);
+begin
+  Writeln('target now ', NewTarget);
+end;
+
+var
+  T: TThermostat;
+  D: TDisplay;
+begin
+  T := TThermostat.Create;
+  D := TDisplay.Create;
+  try
+    T.OnChange := D.Show;
+    T.Target := 21;
+    T.Target := 40;
+    T.Target := 2;
+    Writeln('final ', T.Target);
+  finally
+    T.Free;
+    D.Free;
+  end;
+end.
+=== delphi-w20 write
+--- prompt
+Convert the integers 1994, 2024, 3999 and 4 to Roman numerals and print "n = roman" for each.
+--- ref
+program Roman;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils;
+const
+  Vals: array[0..12] of Integer = (1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1);
+  Syms: array[0..12] of string = ('M', 'CM', 'D', 'CD', 'C', 'XC', 'L', 'XL', 'X', 'IX', 'V', 'IV', 'I');
+
+function ToRoman(N: Integer): string;
+begin
+  Result := '';
+  for var I := 0 to High(Vals) do
+    while N >= Vals[I] do
+    begin
+      Result := Result + Syms[I];
+      Dec(N, Vals[I]);
+    end;
+end;
+
+const
+  Numbers: array[0..3] of Integer = (1994, 2024, 3999, 4);
+begin
+  for var N in Numbers do
+    Writeln(N, ' = ', ToRoman(N));
+end.
+=== delphi-w21 write
+--- prompt
+Write a function Compose that takes two "reference to function(X: Integer): Integer" values and returns their composition (first f, then g). Compose "add 1" and "square", and print compose(add1, square)(3) = 16 and compose(square, add1)(3) = 10 on two lines.
+--- ref
+program Compose;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils;
+type
+  TIntFunc = reference to function(X: Integer): Integer;
+
+function ComposeF(const F, G: TIntFunc): TIntFunc;
+begin
+  Result :=
+    function(X: Integer): Integer
+    begin
+      Result := G(F(X));
+    end;
+end;
+
+var
+  Add1, Square: TIntFunc;
+begin
+  Add1 :=
+    function(X: Integer): Integer
+    begin
+      Result := X + 1;
+    end;
+  Square :=
+    function(X: Integer): Integer
+    begin
+      Result := X * X;
+    end;
+  Writeln(ComposeF(Add1, Square)(3));
+  Writeln(ComposeF(Square, Add1)(3));
+end.
+=== delphi-w22 write
+--- prompt
+Simulate a queue at a counter: customers arrive at minutes 0, 1, 2, 6, 7 and each needs 3 minutes of service; one clerk serves in arrival order. Use a TQueue<Integer> of arrival times and print for each customer "customer n waits w" and finally the average wait with two decimals.
+--- ref
+program Counter;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils, System.Generics.Collections;
+const
+  Arrivals: array[0..4] of Integer = (0, 1, 2, 6, 7);
+var
+  Q: TQueue<Integer>;
+  Free, Arrive, Wait, N, Total: Integer;
+  FS: TFormatSettings;
+begin
+  FS := TFormatSettings.Create;
+  FS.DecimalSeparator := '.';
+  Q := TQueue<Integer>.Create;
+  try
+    for var T in Arrivals do
+      Q.Enqueue(T);
+    Free := 0;
+    N := 0;
+    Total := 0;
+    while Q.Count > 0 do
+    begin
+      Arrive := Q.Dequeue;
+      Inc(N);
+      if Free < Arrive then
+        Free := Arrive;
+      Wait := Free - Arrive;
+      Inc(Total, Wait);
+      Writeln('customer ', N, ' waits ', Wait);
+      Free := Free + 3;
+    end;
+    Writeln('average ', FormatFloat('0.00', Total / N, FS));
+  finally
+    Q.Free;
+  end;
+end.
+=== delphi-w23 write
+--- prompt
+Write a TBits-free bit set of your own as a record TSmallSet holding a Cardinal, with Include, Contains and Count methods. Include 1, 3, 5, 7 and 3 again; print "contains 3: True", "contains 4: False" and "count 4".
+--- ref
+program SmallSet;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils;
+type
+  TSmallSet = record
+    Bits: Cardinal;
+    procedure Include(N: Integer);
+    function Contains(N: Integer): Boolean;
+    function Count: Integer;
+  end;
+
+procedure TSmallSet.Include(N: Integer);
+begin
+  Bits := Bits or (Cardinal(1) shl N);
+end;
+
+function TSmallSet.Contains(N: Integer): Boolean;
+begin
+  Result := (Bits and (Cardinal(1) shl N)) <> 0;
+end;
+
+function TSmallSet.Count: Integer;
+begin
+  Result := 0;
+  for var I := 0 to 31 do
+    if Contains(I) then
+      Inc(Result);
+end;
+
+const
+  Added: array[0..4] of Integer = (1, 3, 5, 7, 3);
+var
+  S: TSmallSet;
+begin
+  S.Bits := 0;
+  for var N in Added do
+    S.Include(N);
+  Writeln('contains 3: ', BoolToStr(S.Contains(3), True));
+  Writeln('contains 4: ', BoolToStr(S.Contains(4), True));
+  Writeln('count ', S.Count);
+end.
+=== delphi-w24 write
+--- prompt
+Print a right-aligned table of the powers of two from 2^0 to 2^12: each line "2^n" left-aligned in 6 characters followed by the value right-aligned in 6 characters.
+--- ref
+program PowersOfTwo;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils;
+begin
+  for var N := 0 to 12 do
+    Writeln(Format('%-6s%6d', ['2^' + IntToStr(N), 1 shl N]));
+end.
+=== delphi-w25 write
+--- prompt
+Write a TObjectList<TTask> to-do manager where TTask has Title and Done, a procedure MarkDone(Title) and a function Pending: Integer. Add "plan", "build", "test", "release", mark "build" and "test" done, then print every task as "[x] build" or "[ ] plan" and "pending 2".
+--- ref
+program Tasks;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils, System.Generics.Collections;
+type
+  TTask = class
+  public
+    Title: string;
+    Done: Boolean;
+    constructor Create(const ATitle: string);
+  end;
+
+constructor TTask.Create(const ATitle: string);
+begin
+  inherited Create;
+  Title := ATitle;
+end;
+
+var
+  L: TObjectList<TTask>;
+
+procedure MarkDone(const ATitle: string);
+begin
+  for var T in L do
+    if T.Title = ATitle then
+      T.Done := True;
+end;
+
+function Pending: Integer;
+begin
+  Result := 0;
+  for var T in L do
+    if not T.Done then
+      Inc(Result);
+end;
+
+begin
+  L := TObjectList<TTask>.Create;
+  try
+    for var S in ['plan', 'build', 'test', 'release'] do
+      L.Add(TTask.Create(S));
+    MarkDone('build');
+    MarkDone('test');
+    for var T in L do
+      if T.Done then
+        Writeln('[x] ', T.Title)
+      else
+        Writeln('[ ] ', T.Title);
+    Writeln('pending ', Pending);
+  finally
+    L.Free;
+  end;
+end.
+=== delphi-w26 write
+--- prompt
+Compute the area of the polygon with vertices (0,0), (4,0), (4,3), (2,5), (0,3) with the shoelace formula and print "area 16.0" with one decimal; also print the perimeter with two decimals.
+--- ref
+program Polygon;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils;
+const
+  X: array[0..4] of Double = (0, 4, 4, 2, 0);
+  Y: array[0..4] of Double = (0, 0, 3, 5, 3);
+var
+  Area, Perim: Double;
+  J: Integer;
+  FS: TFormatSettings;
+begin
+  FS := TFormatSettings.Create;
+  FS.DecimalSeparator := '.';
+  Area := 0;
+  Perim := 0;
+  for var I := 0 to 4 do
+  begin
+    J := (I + 1) mod 5;
+    Area := Area + X[I] * Y[J] - X[J] * Y[I];
+    Perim := Perim + Sqrt(Sqr(X[J] - X[I]) + Sqr(Y[J] - Y[I]));
+  end;
+  Writeln('area ', FormatFloat('0.0', Abs(Area) / 2, FS));
+  Writeln('perimeter ', FormatFloat('0.00', Perim, FS));
+end.
+=== delphi-w27 write
+--- prompt
+Write a class TMemo with a TStringList history supporting Write(text), Undo and Text (the lines joined by " | "). Write "a", "b", "c", undo once, write "d", undo twice, and print the text after each step as "step: text".
+--- ref
+program UndoMemo;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils, System.Classes;
+type
+  TMemo = class
+  private
+    FLines: TStringList;
+  public
+    constructor Create;
+    destructor Destroy; override;
+    procedure WriteLine(const S: string);
+    procedure Undo;
+    function Text: string;
+  end;
+
+constructor TMemo.Create;
+begin
+  inherited Create;
+  FLines := TStringList.Create;
+end;
+
+destructor TMemo.Destroy;
+begin
+  FLines.Free;
+  inherited;
+end;
+
+procedure TMemo.WriteLine(const S: string);
+begin
+  FLines.Add(S);
+end;
+
+procedure TMemo.Undo;
+begin
+  if FLines.Count > 0 then
+    FLines.Delete(FLines.Count - 1);
+end;
+
+function TMemo.Text: string;
+begin
+  Result := '';
+  for var I := 0 to FLines.Count - 1 do
+  begin
+    if I > 0 then
+      Result := Result + ' | ';
+    Result := Result + FLines[I];
+  end;
+end;
+
+var
+  M: TMemo;
+begin
+  M := TMemo.Create;
+  try
+    M.WriteLine('a');
+    M.WriteLine('b');
+    M.WriteLine('c');
+    Writeln('write: ', M.Text);
+    M.Undo;
+    Writeln('undo: ', M.Text);
+    M.WriteLine('d');
+    Writeln('write: ', M.Text);
+    M.Undo;
+    M.Undo;
+    Writeln('undo2: ', M.Text);
+  finally
+    M.Free;
+  end;
+end.
+=== delphi-w28 write
+--- prompt
+Print the longest common prefix of the words "interstellar", "internet", "interval", "internal" and then of "dog", "racecar", "car" (print "(none)" when empty).
+--- ref
+program Prefix;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils;
+
+function CommonPrefix(const A: array of string): string;
+begin
+  Result := A[0];
+  for var I := 1 to High(A) do
+    while not A[I].StartsWith(Result) do
+      Result := Result.Substring(0, Result.Length - 1);
+end;
+
+procedure Show(const A: array of string);
+var
+  P: string;
+begin
+  P := CommonPrefix(A);
+  if P = '' then
+    Writeln('(none)')
+  else
+    Writeln(P);
+end;
+
+begin
+  Show(['interstellar', 'internet', 'interval', 'internal']);
+  Show(['dog', 'racecar', 'car']);
+end.
+=== delphi-w29 write
+--- prompt
+Implement a minimal matrix-free "spreadsheet": cells A1=5, A2=7, A3=A1+A2, A4=A3*2 stored as formulas in a TDictionary<string, string>, evaluated recursively (a formula is a number, or two cell names joined by + or *). Print each cell as "A3 = 12" in order A1 to A4.
+--- ref
+program Sheet;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils, System.Generics.Collections;
+var
+  Cells: TDictionary<string, string>;
+
+function Eval(const Name: string): Integer;
+var
+  F: string;
+  P: Integer;
+begin
+  F := Cells[Name];
+  P := F.IndexOf('+');
+  if P >= 0 then
+    Exit(Eval(F.Substring(0, P)) + Eval(F.Substring(P + 1)));
+  P := F.IndexOf('*');
+  if P >= 0 then
+  begin
+    if Cells.ContainsKey(F.Substring(P + 1)) then
+      Exit(Eval(F.Substring(0, P)) * Eval(F.Substring(P + 1)))
+    else
+      Exit(Eval(F.Substring(0, P)) * StrToInt(F.Substring(P + 1)));
+  end;
+  Result := StrToInt(F);
+end;
+
+begin
+  Cells := TDictionary<string, string>.Create;
+  try
+    Cells.Add('A1', '5');
+    Cells.Add('A2', '7');
+    Cells.Add('A3', 'A1+A2');
+    Cells.Add('A4', 'A3*2');
+    for var N in ['A1', 'A2', 'A3', 'A4'] do
+      Writeln(N, ' = ', Eval(N));
+  finally
+    Cells.Free;
+  end;
+end.
+=== delphi-w30 write
+--- prompt
+Print the first 10 rows of a "look-and-say" sequence starting with "1" (1, 11, 21, 1211, ...), one per line.
+--- ref
+program LookAndSay;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils;
+
+function NextTerm(const S: string): string;
+var
+  I, N: Integer;
+begin
+  Result := '';
+  I := 1;
+  while I <= S.Length do
+  begin
+    N := 1;
+    while (I + N <= S.Length) and (S[I + N] = S[I]) do
+      Inc(N);
+    Result := Result + IntToStr(N) + S[I];
+    Inc(I, N);
+  end;
+end;
+
+var
+  S: string;
+begin
+  S := '1';
+  for var I := 1 to 10 do
+  begin
+    Writeln(S);
+    S := NextTerm(S);
+  end;
+end.
+=== delphi-f01 fix
+--- prompt
+This Delphi program does not compile. Fix it; it prints "total 10".
+--- given
+program Totals;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils;
+var
+  Total: Integer;
+begin
+  Total := 0;
+  for var I := 1 to 4 do
+    Total := Total + I
+  Writeln('total ', Total);
+end.
+--- ref
+program Totals;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils;
+var
+  Total: Integer;
+begin
+  Total := 0;
+  for var I := 1 to 4 do
+    Total := Total + I;
+  Writeln('total ', Total);
+end.
+=== delphi-f02 fix
+--- prompt
+Fix this Delphi program so it compiles; it prints 25.
+--- given
+program Squarer;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils;
+type
+  TIntFunc = reference to function(X: Integer): Integer;
+var
+  Sq: TIntFunc;
+begin
+  Sq := function(X: Integer): Integer
+    begin
+      Result := X * X
+    end
+  Writeln(Sq(5));
+end.
+--- ref
+program Squarer;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils;
+type
+  TIntFunc = reference to function(X: Integer): Integer;
+var
+  Sq: TIntFunc;
+begin
+  Sq := function(X: Integer): Integer
+    begin
+      Result := X * X
+    end;
+  Writeln(Sq(5));
+end.
+=== delphi-f03 fix
+--- prompt
+The compiler rejects this Delphi code. Make it compile; it should print "max 8".
+--- given
+program MaxGeneric;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils, System.Generics.Collections;
+type
+  TIntList = specialize TList<Integer>;
+var
+  L: TIntList;
+  M: Integer;
+begin
+  L := TIntList.Create;
+  try
+    L.AddRange([8, 3, 5]);
+    M := L[0];
+    for var X in L do
+      if X > M then
+        M := X;
+    Writeln('max ', M);
+  finally
+    L.Free;
+  end;
+end.
+--- ref
+program MaxGeneric;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils, System.Generics.Collections;
+type
+  TIntList = TList<Integer>;
+var
+  L: TIntList;
+  M: Integer;
+begin
+  L := TIntList.Create;
+  try
+    L.AddRange([8, 3, 5]);
+    M := L[0];
+    for var X in L do
+      if X > M then
+        M := X;
+    Writeln('max ', M);
+  finally
+    L.Free;
+  end;
+end.
+=== delphi-f04 fix
+--- prompt
+This program fails to compile. Correct it; it prints "Hello, Delphi".
+--- given
+program Hello;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils;
+var
+  Name: string;
+begin
+  Name := 'Delphi';
+  Writeln('Hello, ' + Name;
+end.
+--- ref
+program Hello;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils;
+var
+  Name: string;
+begin
+  Name := 'Delphi';
+  Writeln('Hello, ' + Name);
+end.
+=== delphi-f05 fix
+--- prompt
+Fix the compile error in this Delphi program; it prints the three names, one per line.
+--- given
+program Names;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils, System.Generics.Collections;
+var
+  L: TList<string>;
+begin
+  L := TList<string>.Create;
+  try
+    L.Add('Ann');
+    L.Add('Bea');
+    L.Add('Cal');
+    for var S: Integer in L do
+      Writeln(S);
+  finally
+    L.Free;
+  end;
+end.
+--- ref
+program Names;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils, System.Generics.Collections;
+var
+  L: TList<string>;
+begin
+  L := TList<string>.Create;
+  try
+    L.Add('Ann');
+    L.Add('Bea');
+    L.Add('Cal');
+    for var S in L do
+      Writeln(S);
+  finally
+    L.Free;
+  end;
+end.
+=== delphi-c01 convert
+--- prompt
+Convert this Free Pascal {$mode objfpc} program to Delphi (console, System.* units). Keep the output.
+--- given
+program Pairs;
+{$mode objfpc}{$H+}
+uses
+  Generics.Collections;
+type
+  TIntMap = specialize TDictionary<string, Integer>;
+var
+  M: TIntMap;
+begin
+  M := TIntMap.Create;
+  try
+    M.Add('a', 1);
+    M.Add('b', 2);
+    WriteLn(M['a'] + M['b']);
+  finally
+    M.Free;
+  end;
+end.
+--- ref
+program Pairs;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils, System.Generics.Collections;
+var
+  M: TDictionary<string, Integer>;
+begin
+  M := TDictionary<string, Integer>.Create;
+  try
+    M.Add('a', 1);
+    M.Add('b', 2);
+    Writeln(M['a'] + M['b']);
+  finally
+    M.Free;
+  end;
+end.
+=== delphi-c02 convert
+--- prompt
+Port this Free Pascal {$mode delphi} program to Delphi proper; use an inline variable for the loop. Same output.
+--- given
+program Countdown;
+{$mode delphi}
+uses
+  SysUtils;
+var
+  I: Integer;
+begin
+  for I := 3 downto 1 do
+    WriteLn(I, '...');
+  WriteLn('liftoff');
+end.
+--- ref
+program Countdown;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils;
+begin
+  for var I := 3 downto 1 do
+    Writeln(I, '...');
+  Writeln('liftoff');
+end.
+=== delphi-c03 convert
+--- prompt
+Rewrite this Unleashed Pascal program in Delphi with the same output (Delphi has no match expression or string interpolation).
+--- given
+program Sizes;
+{$mode unleashed}
+begin
+  for var N in [3, 30, 300] do
+    WriteLn($'{N}: {match
+      N >= 100: 'large';
+      N >= 10: 'medium';
+      _: 'small';
+    end}');
+end.
+--- ref
+program Sizes;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils;
+const
+  Numbers: array[0..2] of Integer = (3, 30, 300);
+var
+  S: string;
+begin
+  for var N in Numbers do
+  begin
+    if N >= 100 then
+      S := 'large'
+    else if N >= 10 then
+      S := 'medium'
+    else
+      S := 'small';
+    Writeln(N, ': ', S);
+  end;
+end.
+=== delphi-c04 convert
+--- prompt
+Convert this objfpc program with a generic class to Delphi; the output must match.
+--- given
+program Holder;
+{$mode objfpc}{$H+}
+type
+  generic THolder<T> = class
+    Value: T;
+    constructor Create(AValue: T);
+  end;
+
+constructor THolder.Create(AValue: T);
+begin
+  Value := AValue;
+end;
+
+type
+  TStrHolder = specialize THolder<string>;
+var
+  H: TStrHolder;
+begin
+  H := TStrHolder.Create('kept');
+  WriteLn(H.Value);
+  H.Free;
+end.
+--- ref
+program Holder;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils;
+type
+  THolder<T> = class
+    Value: T;
+    constructor Create(AValue: T);
+  end;
+
+constructor THolder<T>.Create(AValue: T);
+begin
+  inherited Create;
+  Value := AValue;
+end;
+
+var
+  H: THolder<string>;
+begin
+  H := THolder<string>.Create('kept');
+  Writeln(H.Value);
+  H.Free;
+end.
+=== delphi-c05 convert
+--- prompt
+Translate this Oxygene program into a Delphi console program with the same output.
+--- given
+namespace Lambdas;
+
+type
+  Program = class
+  public
+    class method Main(args: array of String): Int32;
+    begin
+      var add := (a, b: Integer) -> a + b;
+      writeLn(add(2, 3));
+      writeLn(add(10, -4));
+    end;
+  end;
+
+end.
+--- ref
+program Lambdas;
+{$APPTYPE CONSOLE}
+uses
+  System.SysUtils;
+type
+  TAdd = reference to function(A, B: Integer): Integer;
+var
+  Add: TAdd;
+begin
+  Add :=
+    function(A, B: Integer): Integer
+    begin
+      Result := A + B;
+    end;
+  Writeln(Add(2, 3));
+  Writeln(Add(10, -4));
+end.

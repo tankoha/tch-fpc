@@ -146,3 +146,8 @@ When a case is run again, do not edit its row; append a new row below (the last 
 | ITa-T19-004 | OK | - | 2026-11-25 | manifest: one line per accepted record with the MD5 of its output line, its split and class (count of mismatches): value 0.0E+000, limit 0.0E+000 |
 | ITa-T19-005 | OK | - | 2026-11-25 | card: totals and reject reasons against rejects.jsonl (count of mismatches): value 0.0E+000, limit 0.0E+000 |
 | ITa-T19-006 | OK | - | 2026-11-25 | a second run from another directory: the five output files byte-identical (count of files that differ): value 0.0E+000, limit 0.0E+000 |
+| ITa-T20-001 | OK | - | 2026-11-25 | 112 replies: one result line each, in order (model, task, seed, think, dialect) (count of mismatches): value 0, limit 0 |
+| ITa-T20-002 | OK | - | 2026-11-25 | every reply's outcome, compiled and passed against qlora_verify on the first block and the recomputed checks; 14 passed (count of mismatches): value 0, limit 0 |
+| ITa-T20-003 | OK | - | 2026-11-25 | 14 table rows of the report recomputed from the judgements (count missing): value 0, limit 0 |
+| ITa-T20-004 | OK | - | 2026-11-25 | 12 adoption lines recomputed, the sign test included (count missing): value 0, limit 0 |
+| ITa-T20-005 | OK | - | 2026-11-25 | a second run from another directory: results.tsv and report.md byte-identical (count of files that differ): value 0, limit 0 |

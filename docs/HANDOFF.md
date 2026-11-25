@@ -6,7 +6,71 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 Status at a glance of the knowledge-package and fine-tuning work:
 [progress.md](progress.md).
 
-## Local session 15 (2026-11-24/25): T17–T21 done, M2 and M2g exit conditions hold — resume here
+## End of local session 15 (2026-11-25): M3 resume checklist — resume here
+
+The session was closed for a fresh one in the middle of M3. Everything
+below is committed; nothing since `0d27f50` is pushed (eight commits,
+`65f39a6` … `2b735f7`, plus this one). Push only when the user asks.
+
+**Waiting for the user (first thing to ask):** before the full generation
+run, either (a) improve the specification and rerun a 100-job pilot
+(recommended; about $1.4), or (b) start the full run as it is (about
+11 000 jobs, about $150, about 90 hours sequential). **No Bedrock call
+without the user's approval of the cost** (the pilot's approval is used
+up).
+
+**Pilot details** (`samples/qwen-lora/work/gen/pilot/`, git-ignored:
+`jobs.edn`, `raw.jsonl`, `log.jsonl`, `run.txt`):
+- Outcomes of the 100 final records: accepted 43, compile-error 38,
+  wrong-output 15, timeout 3, run-error 1; plus 20 fix records.
+- Requests per job: 1 for 12 jobs, 2 for 12, 3 for 15, 4 (all repairs
+  used) for 61. 325 requests, 1.93 M input, 0.26 M output tokens.
+- `bb gen/gen.bb stats work/gen/pilot` prints these again.
+
+**Improvements proposed for (a)** (harness owner's work, no agents):
+1. `data-spec/dialects.md`: a "common mistakes" list per dialect, taken
+   from the pilot's compile errors (read `raw.jsonl` / the repair
+   messages in `log.jsonl` and group them), especially objfpc (30 %) and
+   Oxygene (15 %).
+2. `gen/gen.bb` `repair-text`: for `wrong-output`, send the program's
+   actual output (the verifier only reports the outcome; run the built
+   program again or have `verify` keep the output) next to
+   `expected_stdout`.
+3. `gen/gen.bb`: parallel workers (several jobs at a time; separate
+   `tmp` per worker; one writer for `raw.jsonl` / `log.jsonl`), so the
+   full run takes hours, not days.
+4. Rerun: `bb gen/gen.bb plan 20 work/gen/pilot2 2` then
+   `bb gen/gen.bb run work/gen/pilot2 $PWD/work/proto/T22/bin/qlora_verify`
+   (from `samples/qwen-lora`; the verifier is the T22 prototype build,
+   which equals `src/`; Oxygene needs the Elements flatpak). Report the
+   yields per dialect and the cost, then ask about the full run.
+
+**After the generation run (rest of M3):**
+- `qlora_dataset` on the raw file → `data/dataset-v1` with its manifest
+  and card (H48 yield), the leak check against `eval/tasks.jsonl`, a
+  privacy scan, the tokenizer reference (`--ref-tokens`, made from
+  llama-server's `/tokenize` on the 27B GGUF).
+- Baseline evaluation: `bb eval/ask.bb qwen3.8-27b-128k eval/tasks.jsonl
+  work/eval/before.jsonl` (Ollama, both GPUs, nothing else on them;
+  about 920 generations), then `qlora_eval eval/tasks.jsonl
+  work/eval/before.jsonl work/eval/before`.
+- Capture one Ollama-rendered prompt of the 27B for the record.
+
+**Rules carried over:** AWS session expired (exit 4 of `run-task.sh`,
+`converse failed` from `gen.bb`) → stop and ask the user to `aws login`;
+never `hermes gateway stop`, never `pkill -f`, never delete Ollama
+models; a disagreement with the facts → do not commit, report.
+
+**Notes for writing data-spec rules** (found while writing the
+evaluation tasks; already in `data-spec/dialects.md`): Delphi is checked
+with FPC's delphi mode, so no `TProc` / `TFunc`, `for X in [numbers]` is
+a byte set, no default string sort (runtime error 217), nested generics
+only through aliases. Oxygene: `old` is a keyword; in interpolated
+strings compute values into variables first; no `var` section inside a
+method body. The `pascal-delphi` skill still says `TProc` / `TFunc` may
+be used (disagrees with the check; open).
+
+## Local session 15 (2026-11-24/25): T17–T21 done, M2 and M2g exit conditions hold
 
 **T17 (`qlora_train`) done** (T17a, T17a2, T17b1–T17b3, T17c through
 `tasks/run-task.sh`). Each step checked: rebuilt with `-Cr`; the

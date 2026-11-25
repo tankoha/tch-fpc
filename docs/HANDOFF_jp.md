@@ -5,7 +5,56 @@
 再開するときは最初にこれを読んでください。決定事項と理由は [DESIGN_jp.md](DESIGN_jp.md) にあります。
 知識パッケージとファインチューニングの作業の状況は [progress_jp.md](progress_jp.md) で一目で見られます。
 
-## ローカルセッション15（2026-11-24〜25）：T17〜T21 完了、M2 と M2g の終了条件が成立 — ここから再開
+## ローカルセッション15 の終わり（2026-11-25）：M3 再開のチェックリスト — ここから再開
+
+M3 の途中で新しいセッションに切り替えるために閉じた。以下はすべてコミット済み。`0d27f50` 以降は
+push していない（`65f39a6` 〜 `2b735f7` の 8 コミットとこのコミット）。push はユーザーが頼んだときだけ。
+
+**ユーザーの判断待ち（最初に聞くこと）：** 本番生成の前に、(a) 仕様を改善して 100 ジョブの試験生成を
+やり直す（推奨。約 $1.4）か、(b) このまま本番を始める（約 1 万 1 千ジョブ、約 $150、逐次なら約 90 時間）か。
+**費用をユーザーが承認するまで Bedrock を呼ばない**（試験生成の承認は使い切った）。
+
+**試験生成の詳細**（`samples/qwen-lora/work/gen/pilot/`、git の対象外：`jobs.edn`、`raw.jsonl`、
+`log.jsonl`、`run.txt`）：
+- 最終レコード 100 件の結果：受け入れ 43、compile-error 38、wrong-output 15、timeout 3、run-error 1。
+  ほかに fix レコード 20。
+- ジョブあたりの要求数：1 回 12 ジョブ、2 回 12、3 回 15、4 回（修正を使い切り）61。
+  要求 325、入力 193 万、出力 26 万トークン。
+- `bb gen/gen.bb stats work/gen/pilot` で再表示できる。
+
+**(a) の改善案**（ハーネス担当の作業、エージェントは使わない）：
+1. `data-spec/dialects.md`：方言ごとの「よくある誤り」の一覧。試験生成のコンパイルエラー
+   （`raw.jsonl` と `log.jsonl` の修正依頼を読んでまとめる）から作る。特に objfpc（30%）と Oxygene（15%）。
+2. `gen/gen.bb` の `repair-text`：`wrong-output` のとき、プログラムの実際の出力を `expected_stdout` と
+   並べて送る（検査器は結果しか返さないので、ビルドしたプログラムをもう一度走らせるか、`verify` に
+   出力を残させる）。
+3. `gen/gen.bb`：並列のワーカー（同時に複数ジョブ。ワーカーごとに別の `tmp`。`raw.jsonl` / `log.jsonl`
+   の書き手は 1 つ）。本番を数日でなく数時間にする。
+4. やり直し：`samples/qwen-lora` で `bb gen/gen.bb plan 20 work/gen/pilot2 2`、続いて
+   `bb gen/gen.bb run work/gen/pilot2 $PWD/work/proto/T22/bin/qlora_verify`（検査器は T22 の試作の
+   ビルドで `src/` と同じ。Oxygene には Elements の flatpak が要る）。方言ごとの歩留まりと費用を
+   報告してから本番について聞く。
+
+**生成の後（M3 の残り）：**
+- raw ファイルに `qlora_dataset` → `data/dataset-v1` とマニフェスト・カード（H48 の歩留まり）、
+  `eval/tasks.jsonl` とのリーク検査、個人情報の走査、トークナイザの参照（`--ref-tokens`。27B の GGUF
+  で llama-server の `/tokenize` から作る）。
+- 基準の評価：`bb eval/ask.bb qwen3.8-27b-128k eval/tasks.jsonl work/eval/before.jsonl`
+  （Ollama、GPU 2 枚、ほかは何も載せない。約 920 生成）、続いて
+  `qlora_eval eval/tasks.jsonl work/eval/before.jsonl work/eval/before`。
+- 27B について Ollama が組み立てたプロンプトを 1 つ記録に取る。
+
+**引き継ぐ規則：** AWS のセッション切れ（`run-task.sh` の exit 4、`gen.bb` の `converse failed`）→ 止めて
+ユーザーに `aws login` を頼む。`hermes gateway stop` しない、`pkill -f` を使わない、Ollama のモデルを
+消さない。facts との食い違い → コミットせず報告。
+
+**data-spec の規則を書くときの注意**（評価の課題を書く途中で見つけ、`data-spec/dialects.md` に入れ済み）：
+Delphi は FPC の delphi モードで検査するので `TProc` / `TFunc` はない、`for X in [数]` は byte の集合、
+文字列の既定の並べ替えは使えない（runtime error 217）、入れ子のジェネリクスは別名経由だけ。Oxygene：
+`old` はキーワード、補間文字列では値を先に変数に入れる、メソッド本体の中に `var` 節は書けない。
+`pascal-delphi` スキルは今も `TProc` / `TFunc` を使ってよいと書いている（検査と食い違う。未決）。
+
+## ローカルセッション15（2026-11-24〜25）：T17〜T21 完了、M2 と M2g の終了条件が成立
 
 **T17（`qlora_train`）完了**（T17a、T17a2、T17b1〜T17b3、T17c を `tasks/run-task.sh` で）。
 各段階を確認した：`-Cr` で再ビルド。`src/TrainStep.pas` と `src/TrainCli.pas` の実装は

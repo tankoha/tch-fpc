@@ -4927,6 +4927,28 @@ the design's original choice. Basis, pilots on the same 100 jobs
   run 1 from 2026-11-27 14:31; the log marks hinted repairs (`hint`) and
   each record counts them (`generator.repair_hints`), so the card can
   split the counts.
+- **Mistral and topic examples, tested and not used (decided by the
+  user 2026-11-27).** The same 20 failed jobs, all with hints:
+
+  | Generator | Accepted | games | matrices | Layout errors (attempts) |
+  |---|---|---|---|---|
+  | Qwen | 5 / 20 | 3 | 2 | 10 / 72 |
+  | Qwen, two topic examples (Mistral's accepted games and matrices replies) | 6 / 20 | 4 | 2 | 16 / 72 |
+  | Mistral Large 3 (Bedrock, $0.50) | 7 / 20 | 3 | 4 | 16 / 74 |
+
+  The differences are within chance on 20 jobs; Mistral repeats the same
+  Oxygene mistakes, so the ceiling of about 30 % is the topics' difficulty
+  in Oxygene, not the generator's. With topic examples three answers
+  shared 10–15 four-line windows with an example (4–5 without, the
+  `Program` boilerplate). Run 1 goes on with Qwen and hints only; the
+  remaining games/matrices jobs (about 380) are expected to bring each
+  topic towards 40–50. A shortfall at the end is either filled by
+  Mistral (about $7 for 95 records, needs the user's approval) or
+  reported in the card. `gen.bb` keeps topic examples
+  (`fewshot OUT:ID@T1+T2`, shown only with `GEN_TOPIC_FEWSHOT=1`); the
+  committed `fewshot.jsonl` has none. The test outputs
+  (`work/gen/oxyhint`, `oxymistral`, `oxytopic`) reuse run 1's job ids
+  and are not data.
 
 **Publication (decided by the user 2026-11-17).** The accepted data set is
 published in this repository: `qlora_dataset` writes

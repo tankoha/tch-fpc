@@ -34,6 +34,9 @@
 ;; Few-shot: before each job the driver puts the example exchanges of the
 ;; job's dialect from data-spec/fewshot.jsonl (a job line and the accepted
 ;; reply), all of them generator output, never Claude's (GEN_FEWSHOT=0: none).
+;; Examples with "topics" (fewshot OUT:ID@T1+T2) are shown, with
+;; GEN_TOPIC_FEWSHOT=1 only, before the jobs of those topics (none in the
+;; committed file; tested and not used in run 1, DESIGN 8.16).
 ;; Repair hints: for compile errors the generator repeated (repair-hints,
 ;; Oxygene only) the repair request adds one explaining sentence; the log
 ;; marks such repairs "hint", the record counts them in
@@ -60,7 +63,7 @@
            "bedrock")))
 (def temperature 0.7)
 (def max-repairs 3)
-(declare fewshots)
+(declare fewshots fewshot-entries)
 (def dialects ["objfpc" "fpc-delphi" "unleashed" "delphi" "oxygene"])
 (def feature-prefix {"objfpc" "objfpc." "fpc-delphi" "fpcdelphi." "unleashed" "unleashed."
                      "delphi" "delphi." "oxygene" "oxygene."})
@@ -188,7 +191,7 @@
        :expected_stdout (if (= exp "") "" (str exp "\n"))
        :generator {:model model :version @model-version :date (str (java.time.LocalDate/now))
                    :prompt_id (:id job) :temperature temperature :repair_attempts attempt
-                   :fewshot (mapv :source (get @fewshots (:dialect job)))}})))
+                   :fewshot (mapv :source (fewshot-entries job))}})))
 
 (defn blocks [answer]
   (vec (map second (re-seq #"(?s)```[a-zA-Z]*\n(.*?)```" (or answer "")))))
@@ -367,18 +370,22 @@
   ;; writes data-spec/fewshot.jsonl from accepted generator records, each
   ;; SRC as OUT:ID (e.g. work/gen/pilot3:objfpc-00012); the example's job
   ;; line asks only for the job's features the record really lists, and its
-  ;; id is example-N (not a real job's id)
+  ;; id is example-N (not a real job's id). OUT:ID@T1+T2 makes a topic
+  ;; example: shown only for jobs of those topics (fewshot-entries)
   (with-open [w (io/writer fewshot-file)]
-    (doseq [[i src] (map-indexed vector srcs)]
-      (let [[out id] (str/split src #":")
+    (doseq [[i src0] (map-indexed vector srcs)]
+      (let [[src tps] (str/split src0 #"@")
+            [out id] (str/split src #":")
             rec (first (for [l (str/split-lines (slurp (str out "/raw.jsonl")))
                              :let [r (json/parse-string l true)] :when (= id (:id r))] r))
             _ (when-not (= "accepted" (:verify rec)) (throw (ex-info (str src ": not an accepted record") {})))
             fs (filter (set (:features rec)) (get-in rec [:job :features]))
             job (assoc (:job rec) :id (format "example-%02d" (inc i))
                        :features (vec (if (seq fs) fs (take 3 (:features rec)))))]
-        (.write w (str (json/generate-string {:source src :generator (:generator rec)
-                                              :job job :reply (reply-text rec)}) "\n"))))))
+        (.write w (str (json/generate-string (cond-> {:source src :generator (:generator rec)
+                                                      :job job :reply (reply-text rec)}
+                                               tps (assoc :topics (str/split tps #"\+"))))
+                       "\n"))))))
 
 (def fewshots
   ;; dialect -> the example exchanges put before the job (empty without the file
@@ -389,10 +396,23 @@
                      (for [l (str/split-lines (slurp fewshot-file)) :when (not (str/blank? l))]
                        (json/parse-string l true))))))
 
-(defn fewshot-messages [dialect]
+(def topic-fewshot (= "1" (System/getenv "GEN_TOPIC_FEWSHOT")))
+
+(defn fewshot-entries [job]
+  ;; the dialect's examples without :topics; with GEN_TOPIC_FEWSHOT=1 a job
+  ;; whose topic has topic examples gets those first, filled up to three
+  ;; with the dialect's examples (DESIGN 8.16)
+  (let [es (get @fewshots (:dialect job))
+        general (vec (remove :topics es))
+        scoped (when topic-fewshot (filter #(some #{(:topic job)} (:topics %)) es))]
+    (if (seq scoped)
+      (vec (concat scoped (take (max 0 (- 3 (count scoped))) general)))
+      general)))
+
+(defn fewshot-messages [job]
   (vec (mapcat (fn [e] [{:role "user" :content [{:text (job-text (:job e))}]}
                         {:role "assistant" :content [{:text (:reply e)}]}])
-               (get @fewshots dialect))))
+               (fewshot-entries job))))
 
 (declare quotas wanted? tt-share accepted-cells)
 
@@ -449,7 +469,7 @@
                  (str/join ", " (map (fn [[t c]] (str t " " c)) (take-last 2 tc))))))))
 
 (defn run-job [tmp verify-bin system job logw raww]
-  (loop [messages (conj (fewshot-messages (:dialect job)) {:role "user" :content [{:text (job-text job)}]})
+  (loop [messages (conj (fewshot-messages job) {:role "user" :content [{:text (job-text job)}]})
          attempt 0 first-fail nil prev nil hints 0]
     (let [r (converse tmp system messages)
           rec (parse-record (:text r) job attempt)

@@ -28,6 +28,9 @@ Done:
   Test on 20 failed games/matrices jobs in `work/gen/oxyhint`: the hinted
   error came back 2 of 18 times (31 % without hints), 5 of 20 accepted,
   4 of them without a hint.
+- Mistral Large 3 (user approved, $0.50) and Qwen with two topic examples
+  on the same 20 jobs: 7 and 6 of 20, within chance; not used (DESIGN
+  8.16). `gen.bb` keeps topic examples behind `GEN_TOPIC_FEWSHOT=1`.
 
 **Running now:** run 1 with the quotas since 2026-11-27 12:34 and the
 hints since 14:31 (`work/gen/v1/run.sh`, the bb PID in `pid.txt`). Expected end around
@@ -41,7 +44,8 @@ Next:
    (`hint` in `log.jsonl`); if games and matrices stay near zero, the
    options are more hints (seen in the test: `block` in variable
    declarations, `get`/`set`, C#-style parameters) or five repairs for
-   Oxygene.
+   Oxygene. A shortfall at the end: fill with Mistral (about $7, ask the
+   user first) or report it in the card.
 2. Then as below: `qlora_dataset --spec-version spec-v4` (fix cut to
    15 %), leak, privacy and near-duplicate checks (H48), the card (topic
    counts per dialect included), the baseline evaluation.

@@ -6,7 +6,35 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 Status at a glance of the knowledge-package and fine-tuning work:
 [progress.md](progress.md).
 
-## Local session 16, continued (2026-11-26): Qwen with few-shot generates run 1 — resume here
+## Local session 16, continued (2026-11-27): run 1 with quotas per task type and topic — resume here
+
+Run 1 was paused twice (Hermes update with a reboot; a count). At 1 218
+jobs: 1 154 accepted (800 non-fix, 354 fix), skewed (fix 31 %, unit 6 %,
+convert 7 %; Oxygene's games 0 of 13 jobs). The user asked for 900 per
+dialect without the skew (DESIGN 8.16, "Quotas"). Nothing pushed.
+
+Done:
+- `gen.bb`: `run` with TARGET hands out a job only while its dialect's
+  task-type quota (532/158/105/105 for write/extend/convert/unit) and
+  topic cap (60, `GEN_TOPIC_SLACK` 1.2) are open, and prints the quotas
+  left open at the end; `gen.bb quota OUT TARGET` (quotas, yields,
+  expected shortfalls); `gen.bb plan-more COUNTS OUT SEED [TYPES]`.
+- 1 220 jobs appended to `work/gen/v1/jobs.edn` (objfpc 120 unit/extend
+  and 300 mixed, Oxygene 800 mixed; old list `jobs.edn.bak-20261127`).
+
+**Running now:** run 1 restarted 2026-11-27 12:34 with the quotas
+(`work/gen/v1/run.sh`, the bb PID in `pid.txt`). Expected end around
+2026-12-02/03; a 30-minute check runs from the local session.
+
+Next:
+1. Check progress: `bb gen/gen.bb quota work/gen/v1 900` (and `stats`).
+   If the run ends with `open:` lines in `run.txt`, append jobs for those
+   dialects with `plan-more` (another seed) and run `run.sh` again.
+2. Then as below: `qlora_dataset --spec-version spec-v4` (fix cut to
+   15 %), leak, privacy and near-duplicate checks (H48), the card (topic
+   counts per dialect included), the baseline evaluation.
+
+## Local session 16, continued (2026-11-26): Qwen with few-shot generates run 1
 
 The user asked why Mistral writes the samples (DESIGN 8.7 chose it); they
 had expected the local Qwen3.8 27B. Pilots on the pilot3 jobs, then the

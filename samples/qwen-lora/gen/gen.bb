@@ -15,11 +15,17 @@
 ;;   bb gen/gen.bb plan COUNTS OUT [SEED]
 ;;                                     write OUT/jobs.edn: COUNTS is N (jobs
 ;;                                     per dialect) or objfpc=N,oxygene=M,...
+;;   bb gen/gen.bb plan-more COUNTS OUT SEED [TYPES]
+;;                                     append jobs to OUT/jobs.edn (TYPES:
+;;                                     e.g. unit,convert; default the mix)
 ;;   bb gen/gen.bb run OUT VERIFY [MAX [WORKERS [TARGET]]]
 ;;                                     run the jobs not yet in raw.jsonl (at
-;;                                     most MAX of them, WORKERS at a time,
-;;                                     none for a dialect with TARGET
-;;                                     accepted records)
+;;                                     most MAX of them, WORKERS at a time;
+;;                                     with TARGET only jobs whose task-type
+;;                                     quota and topic cap are open, so each
+;;                                     dialect ends at TARGET accepted
+;;                                     non-fix records in spec 3's mix)
+;;   bb gen/gen.bb quota OUT TARGET     quotas, yields, expected shortfalls
 ;;   bb gen/gen.bb reverify OUT VERIFY verify the rejected records again
 ;;                                     (no Bedrock): errors, actual output
 ;;   bb gen/gen.bb stats OUT            counts, yield, tokens
@@ -350,6 +356,60 @@
                         {:role "assistant" :content [{:text (:reply e)}]}])
                (get @fewshots dialect))))
 
+(declare quotas wanted? tt-share accepted-cells)
+
+(defn plan-more [spec out seed types]
+  ;; append jobs to an existing OUT/jobs.edn (a running `run` does not see
+  ;; them until it is started again): COUNTS as in plan, numbered on from
+  ;; the dialect's last job; TYPES (e.g. "unit,convert") makes them only of
+  ;; those task types, in turn; topics, features and language as in plan
+  (let [ts (topics)
+        r (java.util.Random. seed)
+        old (edn/read-string (slurp (str out "/jobs.edn")))
+        last-n (fn [d] (reduce max 0 (for [j old :when (= d (:dialect j))] (parse-long (re-find #"\d+$" (:id j))))))
+        tys (when types (str/split types #","))
+        _ (doseq [t tys] (when-not (tt-share t) (throw (ex-info (str "unknown task type " t) {}))))
+        cs (counts spec)
+        new (vec (for [d dialects
+                       :let [fs (mapv second (features-of d)) n0 (last-n d)]
+                       i (range (get cs d 0))
+                       :let [k (+ n0 i)]]
+                   {:id (format "%s-%05d" (str/replace d "-" "") (inc k))
+                    :dialect d :task_type (if tys (tys (mod i (count tys))) (task-type k))
+                    :topic (ts (mod (+ k (.nextInt r (count ts))) (count ts)))
+                    :features (vec (distinct [(fs (mod k (count fs))) (fs (mod (+ k 5) (count fs)))]))
+                    :language (if (< (.nextDouble r) 0.1) "ja" "en")}))
+        new (sort-by (juxt #(parse-long (re-find #"\d+$" (:id %))) #(.indexOf dialects (:dialect %))) new)]
+    (spit (str out "/jobs.edn") (pr-str (into (vec old) new)))
+    (println (count new) "jobs appended," (+ (count old) (count new)) "in" (str out "/jobs.edn"))))
+
+
+(defn quota-report [out target]
+  ;; per dialect and task type: accepted / quota, the yield so far, the
+  ;; queued jobs that may still run, and the expected end (have + queued x
+  ;; yield; topic caps not counted, so it is an upper estimate); per dialect
+  ;; the topics, fewest and most accepted
+  (let [q (quotas target)
+        ls (for [l (str/split-lines (slurp (str out "/raw.jsonl"))) :when (not (str/blank? l))] (json/parse-string l true))
+        main (remove #(str/ends-with? (str (:id %)) "-fix") ls)
+        done (set (map #(get-in % [:job :id]) ls))
+        cells (accepted-cells out)
+        queue (remove #(done (:id %)) (edn/read-string (slurp (str out "/jobs.edn"))))]
+    (println "quotas" (:tt q) "topic cap" (:topic q))
+    (doseq [d dialects]
+      (println d)
+      (doseq [[t n] (sort (:tt q))
+              :let [rs (filter #(and (= d (get-in % [:job :dialect])) (= t (get-in % [:job :task_type]))) main)
+                    have (get cells [:tt d t] 0)
+                    y (if (seq rs) (/ (double (count (filter #(= "accepted" (:verify %)) rs))) (count rs)) 0.5)
+                    qd (count (filter #(and (= d (:dialect %)) (= t (:task_type %)) (wanted? q cells %)) queue))
+                    exp (+ have (* qd y))]]
+        (println (format "  %-8s %4d/%-4d yield %3.0f %%  queued %4d  expected %5.0f%s" t have n (* 100 y) qd exp
+                         (if (< exp n) (format "  SHORT ~%d jobs" (long (Math/ceil (/ (- n exp) (max y 0.05))))) ""))))
+      (let [tc (sort-by second (for [t (topics)] [t (get cells [:topic d t] 0)]))]
+        (println "  topics" (str/join ", " (map (fn [[t c]] (str t " " c)) (take 3 tc))) "..."
+                 (str/join ", " (map (fn [[t c]] (str t " " c)) (take-last 2 tc))))))))
+
 (defn run-job [tmp verify-bin system job logw raww]
   (loop [messages (conj (fewshot-messages (:dialect job)) {:role "user" :content [{:text (job-text job)}]})
          attempt 0 first-fail nil prev nil]
@@ -385,38 +445,72 @@
              (get-in o [:job :id])))
       #{})))
 
-(defn accepted-by-dialect [out]
-  ;; accepted records per dialect in OUT/raw.jsonl, fix records not counted
+;; Quotas under TARGET (spec 3): the accepted non-fix records of a dialect
+;; are split over the task types in proportion 50/15/10/10 (fix records
+;; come on top and are cut to their share when the data set is built), and
+;; no topic gets more than GEN_TOPIC_SLACK (default 1.2) times an even share,
+;; so the strong topics leave room for the weak ones; the slack lets a topic
+;; the generator rarely gets right fall short without blocking the dialect.
+(def tt-share {"write" 50 "extend" 15 "convert" 10 "unit" 10})
+(def topic-slack (parse-double (or (System/getenv "GEN_TOPIC_SLACK") "1.2")))
+
+(defn quotas [target]
+  (let [tot (reduce + (vals tt-share))
+        base (into {} (for [[t s] tt-share] [t (long (Math/floor (/ (* target s) tot)))]))]
+    {:tt (update base "write" + (- target (reduce + (vals base))))
+     :topic (long (Math/ceil (* topic-slack (/ target (count (topics))))))}))
+
+(defn accepted-cells [out]
+  ;; accepted non-fix records counted per [:tt dialect task_type] and
+  ;; [:topic dialect topic]
   (let [f (io/file out "raw.jsonl")]
     (if (.exists f)
       (frequencies (for [l (str/split-lines (slurp f)) :when (not (str/blank? l))
-                         :let [o (json/parse-string l true)]
-                         :when (and (= "accepted" (:verify o)) (not (str/ends-with? (str (:id o)) "-fix")))]
-                     (get-in o [:job :dialect])))
+                         :let [o (json/parse-string l true) j (:job o)]
+                         :when (and (= "accepted" (:verify o)) (not (str/ends-with? (str (:id o)) "-fix")))
+                         k [[:tt (:dialect j) (:task_type j)] [:topic (:dialect j) (:topic j)]]]
+                     k))
       {})))
+
+(defn wanted? [q cells j]
+  ;; nil quotas (no TARGET): every job
+  (or (nil? q)
+      (and (< (get cells [:tt (:dialect j) (:task_type j)] 0) (get-in q [:tt (:task_type j)] 0))
+           (< (get cells [:topic (:dialect j) (:topic j)] 0) (:topic q)))))
+
+(defn shortfall [q cells queue]
+  ;; the task-type quotas still open, per dialect, with the queued jobs that
+  ;; could fill them
+  (for [d dialects [t n] (sort (:tt q))
+        :let [have (get cells [:tt d t] 0)]
+        :when (< have n)]
+    {:dialect d :task_type t :have have :quota n
+     :queued (count (filter #(and (= d (:dialect %)) (= t (:task_type %)) (wanted? q cells %)) queue))}))
 
 (defn run [out verify-bin mx workers target]
   ;; WORKERS jobs at a time, each worker with its own tmp directory; at most
-  ;; MAX jobs in this call; a dialect gets no new job once TARGET of its
-  ;; records (fix records not counted) are accepted, counted over all calls
-  ;; (jobs in progress may add up to WORKERS more). The first failure
-  ;; (Converse: expired session) stops the hand-out of new jobs, the jobs in
-  ;; progress finish, then exit 4. Order of jobs in the files may differ
-  ;; from jobs.edn
+  ;; MAX jobs in this call; with TARGET a job is handed out only while its
+  ;; dialect's task-type quota and topic cap (above) are open, counted over
+  ;; all calls (jobs in progress may add up to WORKERS more); jobs passed
+  ;; over stay unrun. At the end the quotas still open are printed (more
+  ;; jobs: plan-more). The first failure (Converse: expired session) stops
+  ;; the hand-out of new jobs, the jobs in progress finish, then exit 4.
+  ;; Order of jobs in the files may differ from jobs.edn
   (let [jobs (edn/read-string (slurp (str out "/jobs.edn")))
         done (done-jobs out)
         queue (atom (vec (remove #(done (:id %)) jobs)))
-        acc (atom (accepted-by-dialect out))
+        q (when target (quotas target))
+        acc (atom (accepted-cells out))
         issued (atom 0)
         stop (atom nil)
         take-job #(locking queue
                     (when (< @issued (or mx Long/MAX_VALUE))
-                      (let [q @queue
-                            i (first (keep-indexed (fn [i j] (when (< (get @acc (:dialect j) 0) (or target Long/MAX_VALUE)) i)) q))]
+                      (let [qu @queue
+                            i (first (keep-indexed (fn [i j] (when (wanted? q @acc j) i)) qu))]
                         (when i
-                          (reset! queue (into (subvec q 0 i) (subvec q (inc i))))
+                          (reset! queue (into (subvec qu 0 i) (subvec qu (inc i))))
                           (swap! issued inc)
-                          (q i)))))
+                          (qu i)))))
         system (spec-text)]
     (with-open [logw (io/writer (str out "/log.jsonl") :append true)
                 raww (io/writer (str out "/raw.jsonl") :append true)]
@@ -427,12 +521,17 @@
                       (loop []
                         (when-let [job (and (nil? @stop) (take-job))]
                           (try (let [o (run-job tmp verify-bin system job logw raww)]
-                                 (when (= "accepted" o) (swap! acc update (:dialect job) (fnil inc 0)))
+                                 (when (= "accepted" o)
+                                   (swap! acc #(-> % (update [:tt (:dialect job) (:task_type job)] (fnil inc 0))
+                                                   (update [:topic (:dialect job) (:topic job)] (fnil inc 0)))))
                                  (locking write-lock (println (:id job) o)))
                                (catch Exception e
                                  (reset! stop (str (:id job) ": " (ex-message e)))))
                           (recur)))))))]
         (run! deref fs)))
+    (when (and q (nil? @stop) (< @issued (or mx Long/MAX_VALUE)))
+      (doseq [s (shortfall q @acc @queue)]
+        (println (format "open: %s %s %d/%d (no job left that could fill it)" (:dialect s) (:task_type s) (:have s) (:quota s)))))
     (when @stop
       (binding [*out* *err*] (println "stopped:" @stop))
       (System/exit 4))))
@@ -467,6 +566,8 @@
 (let [[cmd a b c d e] *command-line-args*]
   (case cmd
     "plan" (plan a b (parse-long (or c "1")))
+    "plan-more" (plan-more a b (parse-long (or c "1")) d)
+    "quota" (quota-report a (parse-long b))
     "run" (run a b (some-> c parse-long) (parse-long (or d "1")) (some-> e parse-long))
     "reverify" (reverify a b)
     "stats" (stats a)

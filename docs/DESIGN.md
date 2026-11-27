@@ -4888,6 +4888,28 @@ the design's original choice. Basis, pilots on the same 100 jobs
   `run work/gen/v1 VERIFY "" 2 900` (a dialect stops at 900 accepted
   non-fix records; resumable with `work/gen/v1/run.sh`). Started
   2026-11-26 06:56.
+- **Quotas (decided by the user 2026-11-27).** After 1 218 jobs the
+  accepted records were skewed: fix 31 % of the accepted (spec 15 %),
+  unit 6 % and convert 7 % (spec 10 % each), and Oxygene's topics from 0
+  (games, 13 jobs) to 12 (dates). The user asked for 900 per dialect
+  without the skew. Since then `run` with TARGET hands out a job only
+  while two quotas of its dialect are open:
+  - task type: TARGET split 50/15/10/10 over write, extend, convert and
+    unit (532/158/105/105 for 900; fix records come on top and are cut
+    to 15 % by `qlora_dataset`);
+  - topic: at most `GEN_TOPIC_SLACK` (1.2) × TARGET / 18 = 60 accepted
+    per topic. The slack lets a topic the generator rarely gets right
+    fall short without blocking the dialect; the strong topics stop at
+    the cap and leave the jobs to the weak ones.
+
+  Jobs passed over stay unrun. `gen.bb quota OUT TARGET` shows the
+  quotas, yields and expected shortfalls; `gen.bb plan-more COUNTS OUT
+  SEED [TYPES]` appends jobs. 1 220 jobs were appended (objfpc 120 of
+  unit/extend and 300 mixed, Oxygene 800 mixed, seeds 11 and 12; the old
+  list is kept as `jobs.edn.bak-20261127`), after which the forecast
+  under the topic cap is 963 (Oxygene) to 1 080 (delphi). Oxygene's
+  games and matrices are expected to stay under 20; the card reports the
+  topic counts.
 
 **Publication (decided by the user 2026-11-17).** The accepted data set is
 published in this repository: `qlora_dataset` writes

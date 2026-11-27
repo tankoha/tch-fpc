@@ -4425,6 +4425,21 @@ Qwen3.8 27B（128k、Ollama、思考なし）で生成する。上の図と段�
 - **計画。** `plan objfpc=1600,fpc-delphi=1800,unleashed=3000,delphi=2100,oxygene=3000 work/gen/v1 3`、
   `run work/gen/v1 VERIFY "" 2 900`（fix 以外の採用が 900 件に達した方言は止まる。
   `work/gen/v1/run.sh` で再開できる）。2026-11-26 06:56 に開始。
+- **枠（2026-11-27 にユーザーが決定）。** 1,218 ジョブの時点で、採用されたレコードは偏っていた。fix が採用の 31 %
+  （仕様は 15 %）、unit が 6 %、convert が 7 %（仕様はどちらも 10 %）。Oxygene の話題は 0 件（games、13 ジョブ）から
+  12 件（dates）まで開いていた。ユーザーは、偏りをなくした上で各方言 900 件にすることを求めた。それ以降、TARGET を
+  付けた `run` は、ジョブの方言で次の 2 つの枠がどちらも空いているときだけ、そのジョブを渡す。
+  - タスク種別：TARGET を write、extend、convert、unit に 50/15/10/10 で配分する（900 なら 532/158/105/105。
+    fix のレコードはこれとは別に加わり、`qlora_dataset` で 15 % に削る）。
+  - 話題：1 話題あたりの採用は `GEN_TOPIC_SLACK`（1.2）× TARGET / 18 = 60 件まで。余裕を持たせるのは、
+    生成器がめったに正解しない話題が足りなくても、方言全体を止めないため。得意な話題は上限で止まり、
+    残りのジョブは苦手な話題に回る。
+
+  渡さなかったジョブは実行しない。`gen.bb quota OUT TARGET` で、枠、合格率、足りなくなる見込みを表示する。
+  `gen.bb plan-more COUNTS OUT SEED [TYPES]` でジョブを追加する。1,220 ジョブを追加した（objfpc は unit と
+  extend を 120 件と混合を 300 件、Oxygene は混合を 800 件。seed は 11 と 12。元のリストは
+  `jobs.edn.bak-20261127` に残した）。追加後、話題の上限の下での見込みは 963 件（Oxygene）〜 1,080 件（delphi）。
+  Oxygene の games と matrices は 20 件未満にとどまる見込みで、データカードに話題ごとの件数を記す。
 
 **公開（2026-11-17 にユーザーが決定）。** 受け入れたデータセットは、このリポジトリで
 公開する。`qlora_dataset` は `train.jsonl`、`valid.jsonl`、`manifest.jsonl` を `work/` では

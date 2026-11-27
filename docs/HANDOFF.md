@@ -6,12 +6,14 @@ Read this first when resuming. Decisions and rationale: [DESIGN.md](DESIGN.md).
 Status at a glance of the knowledge-package and fine-tuning work:
 [progress.md](progress.md).
 
-## Local session 16, continued (2026-11-27): run 1 with quotas per task type and topic — resume here
+## Local session 16, continued (2026-11-27): run 1 with quotas per task type and topic, Oxygene repair hints — resume here
 
 Run 1 was paused twice (Hermes update with a reboot; a count). At 1 218
 jobs: 1 154 accepted (800 non-fix, 354 fix), skewed (fix 31 %, unit 6 %,
 convert 7 %; Oxygene's games 0 of 13 jobs). The user asked for 900 per
-dialect without the skew (DESIGN 8.16, "Quotas"). Nothing pushed.
+dialect without the skew (DESIGN 8.16, "Quotas"); for Oxygene's games and
+matrices, repair hints (DESIGN 8.16, "Repair hints"). The quotas are
+pushed (`c1ab69a`); the hints are committed, not pushed.
 
 Done:
 - `gen.bb`: `run` with TARGET hands out a job only while its dialect's
@@ -21,15 +23,25 @@ Done:
   expected shortfalls); `gen.bb plan-more COUNTS OUT SEED [TYPES]`.
 - 1 220 jobs appended to `work/gen/v1/jobs.edn` (objfpc 120 unit/extend
   and 300 mixed, Oxygene 800 mixed; old list `jobs.edn.bak-20261127`).
+- `gen.bb`: Oxygene repair hints (`repair-hints`, `GEN_HINTS=0` turns
+  them off), the log's `hint` and the record's `generator.repair_hints`.
+  Test on 20 failed games/matrices jobs in `work/gen/oxyhint`: the hinted
+  error came back 2 of 18 times (31 % without hints), 5 of 20 accepted,
+  4 of them without a hint.
 
-**Running now:** run 1 restarted 2026-11-27 12:34 with the quotas
-(`work/gen/v1/run.sh`, the bb PID in `pid.txt`). Expected end around
+**Running now:** run 1 with the quotas since 2026-11-27 12:34 and the
+hints since 14:31 (`work/gen/v1/run.sh`, the bb PID in `pid.txt`). Expected end around
 2026-12-02/03; a 30-minute check runs from the local session.
 
 Next:
 1. Check progress: `bb gen/gen.bb quota work/gen/v1 900` (and `stats`).
    If the run ends with `open:` lines in `run.txt`, append jobs for those
    dialects with `plan-more` (another seed) and run `run.sh` again.
+   After a few hours compare Oxygene's yield before and after 14:31
+   (`hint` in `log.jsonl`); if games and matrices stay near zero, the
+   options are more hints (seen in the test: `block` in variable
+   declarations, `get`/`set`, C#-style parameters) or five repairs for
+   Oxygene.
 2. Then as below: `qlora_dataset --spec-version spec-v4` (fix cut to
    15 %), leak, privacy and near-duplicate checks (H48), the card (topic
    counts per dialect included), the baseline evaluation.

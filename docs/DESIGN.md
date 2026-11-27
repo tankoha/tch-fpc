@@ -4910,6 +4910,23 @@ the design's original choice. Basis, pilots on the same 100 jobs
   under the topic cap is 963 (Oxygene) to 1 080 (delphi). Oxygene's
   games and matrices are expected to stay under 20; the card reports the
   topic counts.
+- **Repair hints (decided by the user 2026-11-27).** Oxygene's games and
+  matrices failed mostly on a few mistakes that the generator repeated
+  through all repairs, though dialects.md describes most of them: an
+  `implementation` section without `interface` (72 of 259 Oxygene jobs,
+  131 attempts), a variable named `result`, `+=` on numbers, `base`,
+  property `set` blocks, arithmetic on a generic `T`. For these compile
+  errors the repair request now adds one sentence explaining the cause
+  (`repair-hints` in `gen.bb`, prose with single constructs, each checked
+  with the compiler; 38 % of Oxygene's compile errors in run 1 match one).
+  Test on 20 failed games/matrices jobs (`work/gen/oxyhint`): the same
+  error came back after 2 of 18 hinted repairs against 70 of 226 without
+  a hint, but acceptance did not clearly rise: 5 of 20 accepted, 4 of
+  them without a hint (a fresh draw alone passes about a fifth); the
+  programs carry several mistakes and the next one appears. Enabled in
+  run 1 from 2026-11-27 14:31; the log marks hinted repairs (`hint`) and
+  each record counts them (`generator.repair_hints`), so the card can
+  split the counts.
 
 **Publication (decided by the user 2026-11-17).** The accepted data set is
 published in this repository: `qlora_dataset` writes

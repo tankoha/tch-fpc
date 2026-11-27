@@ -5,11 +5,12 @@
 再開するときは最初にこれを読んでください。決定事項と理由は [DESIGN_jp.md](DESIGN_jp.md) にあります。
 知識パッケージとファインチューニングの作業の状況は [progress_jp.md](progress_jp.md) で一目で見られます。
 
-## ローカルセッション16 の続き（2026-11-27）：タスク種別と話題の枠を付けて本番 1 回目 — ここから再開
+## ローカルセッション16 の続き（2026-11-27）：タスク種別と話題の枠を付けて本番 1 回目、Oxygene の修正のヒント — ここから再開
 
 本番 1 回目を 2 回止めた（再起動を伴う Hermes の更新と、集計のため）。1,218 ジョブの時点で採用は 1,154 件
 （fix 以外 800 件、fix 354 件）で、偏っていた（fix 31 %、unit 6 %、convert 7 %。Oxygene の games は 13 ジョブで 0 件）。
-ユーザーは、偏りをなくした上で各方言 900 件にすることを求めた（DESIGN 8.16「Quotas」）。push はしていない。
+ユーザーは、偏りをなくした上で各方言 900 件にすることを求めた（DESIGN 8.16「Quotas」）。Oxygene の games と matrices には
+修正のヒントを入れた（DESIGN 8.16「Repair hints」）。枠は push 済み（`c1ab69a`）、ヒントはコミット済みで push はしていない。
 
 済んだこと:
 - `gen.bb`: TARGET を付けた `run` は、ジョブの方言のタスク種別の枠（write/extend/convert/unit で 532/158/105/105）と
@@ -17,13 +18,18 @@
   `gen.bb quota OUT TARGET`（枠、合格率、足りなくなる見込み）。`gen.bb plan-more COUNTS OUT SEED [TYPES]`。
 - `work/gen/v1/jobs.edn` に 1,220 ジョブを追加した（objfpc は unit と extend を 120 件と混合を 300 件、
   Oxygene は混合を 800 件。元のリストは `jobs.edn.bak-20261127`）。
+- `gen.bb`: Oxygene の修正のヒント（`repair-hints`。`GEN_HINTS=0` で無効）、ログの `hint`、レコードの `generator.repair_hints`。
+  失敗した games と matrices の 20 ジョブで試した（`work/gen/oxyhint`）。ヒントを付けた誤りが戻ったのは 18 回中 2 回
+  （ヒントなしは 31 %）、合格は 20 件中 5 件で、そのうち 4 件はヒントなしで通った。
 
-**実行中:** 本番 1 回目を 2026-11-27 12:34 に枠付きで再開した（`work/gen/v1/run.sh`、bb の PID は `pid.txt`）。
+**実行中:** 本番 1 回目は 2026-11-27 12:34 から枠付き、14:31 からヒント付きで動いている（`work/gen/v1/run.sh`、bb の PID は `pid.txt`）。
 終了の見込みは 2026-12-02〜03 ごろ。ローカルセッションから 30 分おきに確認している。
 
 次にやること:
 1. 進み具合を確認する: `bb gen/gen.bb quota work/gen/v1 900`（と `stats`）。
    `run.txt` に `open:` の行を残して終わったら、その方言に `plan-more`（別の seed）でジョブを足し、`run.sh` を再実行する。
+   数時間たったら、Oxygene の合格率を 14:31 の前後で比べる（`log.jsonl` の `hint`）。games と matrices が 0 件近くのままなら、
+   ヒントを増やす（試験で見えたもの：変数宣言の `block`、`get`/`set`、C# 風の引数）か、Oxygene の修正を 5 回にする。
 2. そのあとは下のとおり: `qlora_dataset --spec-version spec-v4`（fix は 15 % に削る）、漏れ・個人情報・近似重複の検査（H48）、
   データカード（方言ごとの話題の件数を含む）、基準の評価。
 

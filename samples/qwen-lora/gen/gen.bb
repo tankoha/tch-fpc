@@ -34,6 +34,10 @@
 ;; Few-shot: before each job the driver puts the example exchanges of the
 ;; job's dialect from data-spec/fewshot.jsonl (a job line and the accepted
 ;; reply), all of them generator output, never Claude's (GEN_FEWSHOT=0: none).
+;; Repair hints: for compile errors the generator repeated (repair-hints,
+;; Oxygene only) the repair request adds one explaining sentence; the log
+;; marks such repairs "hint", the record counts them in
+;; generator.repair_hints (GEN_HINTS=0: none).
 ;; The generator: Mistral Large 3 on Bedrock by default; with
 ;; GEN_MODEL=ollama:<name> a local Ollama model (http://127.0.0.1:11434,
 ;; the model's own renderer), thinking off unless GEN_THINK=1 (the
@@ -285,11 +289,45 @@
   (-> (str detail) (str/replace #"^[A-Za-z0-9_.]+\(\d+,\d+\)\s*" "")
       (str/replace #"\s*\[Program\.pas \(\d+\)\]$" "")))
 
-(defn repair-text [v prev]
+;; Repair hints (DESIGN 8.16, 2026-11-27): a sentence added to the repair
+;; request when the compiler's first error matches, for mistakes the
+;; generator repeated and did not fix from the message alone (the counts of
+;; run 1). Prose with single constructs, as in dialects.md's "Common
+;; mistakes"; checked against the compiler.
+(def repair-hints
+  {"oxygene"
+   [[#"expected, got \"implementation\""
+     (str "The file has an `implementation` section but no `interface` line. An Oxygene file uses one of two layouts: "
+          "`namespace X;` `interface` `uses ...;` `type ...` (declarations only) `implementation` (the bodies, named "
+          "`Type.Method`) `end.`, or no `interface`/`implementation` at all and every method body inside its type. "
+          "Add `interface` on its own line after the namespace line, or remove `implementation` and move each body into its type.")]
+    [#"\"implementation\" or interface section members"
+     (str "After `interface` the types hold declarations only. Move each method body below an `implementation` line "
+          "(as `method Type.Name(...)`), or remove the `interface` line and keep the bodies inside the types.")]
+    [#"identifier expected, got \"result\""
+     (str "`result` is the reserved name of a method's return value: do not declare a variable called `result`; "
+          "assign `result := ...` directly or give the variable another name.")]
+    [#"cannot find operator to evaluate \"T\" [-+*/<>]"
+     "A generic `T` has no arithmetic or comparison operators; use a concrete type such as `Double` or `Integer` for values you compute with."]
+    [#"cannot find operator to evaluate \"[^\"]+\" [-+]="
+     "In Oxygene `+=` and `-=` are only for events; for numbers and strings write `x := x + y` (`inc(x)` adds 1 to an integer)."]
+    [#"Unknown identifier \"base\""
+     "Oxygene has no `base`; call the parent with `inherited` (in a constructor: `inherited constructor(args)`)."]
+    [#"identifier expected, got \"set\""
+     "Oxygene properties have no `get`/`set` blocks: write `property X: Integer read fX write fX;`, or `write SetX` with a method `SetX(value: Integer)`."]]})
+
+(def hints-on (not= "0" (System/getenv "GEN_HINTS")))
+
+(defn repair-hint [dialect v]
+  (when (and hints-on (= "compile-error" (:outcome v)))
+    (some (fn [[re h]] (when (re-find re (str (:detail v))) h)) (get repair-hints dialect))))
+
+(defn repair-text [dialect v prev]
   (case (:outcome v)
     "compile-error" (str "The verifier could not compile the program. First error: " (:detail v)
                          (when (:context v)
                            (str "\n\nThe source around it (>> marks the line):\n\n```\n" (:context v) "\n```"))
+                         (when-let [h (repair-hint dialect v)] (str "\n\nHint: " h))
                          (when (and (= "compile-error" (:outcome prev))
                                     (= (error-key (:detail v)) (error-key (:detail prev))))
                            (str "\n\nThis is the same error as in your previous reply: that change did not fix it."
@@ -412,14 +450,16 @@
 
 (defn run-job [tmp verify-bin system job logw raww]
   (loop [messages (conj (fewshot-messages (:dialect job)) {:role "user" :content [{:text (job-text job)}]})
-         attempt 0 first-fail nil prev nil]
+         attempt 0 first-fail nil prev nil hints 0]
     (let [r (converse tmp system messages)
           rec (parse-record (:text r) job attempt)
+          rec (when rec (assoc-in rec [:generator :repair_hints] hints))
           v (if rec (verify verify-bin (:dialect job) rec) {:outcome "no-sections" :detail ""})
-          ok (= "accepted" (:outcome v))]
+          ok (= "accepted" (:outcome v))
+          hint? (and (not ok) (< attempt max-repairs) (some? (repair-hint (:dialect job) v)))]
       (write-line logw {:job (:id job) :attempt attempt :usage (:usage r)
                         :latency (:latency r) :outcome (:outcome v) :detail (:detail v)
-                        :actual (:actual v)})
+                        :actual (:actual v) :hint hint?})
       (let [first-fail (or first-fail (when (= "compile-error" (:outcome v)) {:v v :rec rec}))]
         (if (or ok (>= attempt max-repairs))
           (do (write-line raww (assoc (or rec {:id (:id job) :raw (:text r)})
@@ -434,8 +474,8 @@
                                           :verify "accepted" :job job))))
               (:outcome v))
           (recur (conj messages {:role "assistant" :content [{:text (:text r)}]}
-                       {:role "user" :content [{:text (repair-text v prev)}]})
-                 (inc attempt) first-fail v))))))
+                       {:role "user" :content [{:text (repair-text (:dialect job) v prev)}]})
+                 (inc attempt) first-fail v (if hint? (inc hints) hints)))))))
 
 (defn done-jobs [out]
   (let [f (io/file (str out "/raw.jsonl"))]
